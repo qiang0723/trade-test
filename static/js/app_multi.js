@@ -427,38 +427,88 @@ async function loadTicker() {
     }
 }
 
-// 加载订单深度
+// 加载订单深度（订单簿样式）
 async function loadOrderbook() {
     try {
-        const response = await fetch(`/api/orderbook/${currentMarketType}/${currentSymbol}?limit=10`);
-        const result = await response.json();
+        // 同时获取订单深度和最新价格
+        const [orderbookResponse, tickerResponse] = await Promise.all([
+            fetch(`/api/orderbook/${currentMarketType}/${currentSymbol}?limit=10`),
+            fetch(`/api/ticker/${currentMarketType}/${currentSymbol}`)
+        ]);
         
-        if (result.success) {
-            const data = result.data;
+        const orderbookResult = await orderbookResponse.json();
+        const tickerResult = await tickerResponse.json();
+        
+        if (orderbookResult.success && tickerResult.success) {
+            const data = orderbookResult.data;
+            const tickerData = tickerResult.data;
             
             // 更新标题
             document.getElementById('orderbookSymbol').textContent = currentSymbol + '/USDT';
             document.getElementById('orderbookMarketType').textContent = 
                 currentMarketType === 'spot' ? '现货' : '合约';
             
-            // 更新卖单
+            // 只取前10档
+            const asks = data.asks.slice(0, 10);
+            const bids = data.bids.slice(0, 10);
+            
+            // 计算最大数量（用于深度背景条）
+            const allQty = [...asks.map(a => parseFloat(a[1])), ...bids.map(b => parseFloat(b[1]))];
+            const maxQty = Math.max(...allQty);
+            
+            // 更新卖单（从低到高，最接近成交价的在底部）
             const askTableBody = document.querySelector('#askTable tbody');
             askTableBody.innerHTML = '';
-            data.asks.reverse().forEach(([price, qty]) => {
+            let askCumulative = 0;
+            
+            // 卖单反转，从低到高显示
+            asks.reverse().forEach(([price, qty]) => {
+                const qtyNum = parseFloat(qty);
+                askCumulative += qtyNum;
+                const depthPercent = (qtyNum / maxQty) * 100;
+                
                 const row = askTableBody.insertRow();
                 row.className = 'ask-row';
+                row.style.setProperty('--depth-width', `${depthPercent}%`);
+                
                 row.insertCell(0).textContent = formatNumber(price, 4);
-                row.insertCell(1).textContent = formatNumber(qty, 6);
+                row.insertCell(1).textContent = formatNumber(qty, 4);
+                row.insertCell(2).textContent = formatNumber(askCumulative, 2);
+                
+                // 设置深度背景
+                row.style.background = `linear-gradient(to left, rgba(239, 68, 68, 0.08) ${depthPercent}%, transparent ${depthPercent}%)`;
             });
             
-            // 更新买单
+            // 更新最新成交价
+            const spreadPrice = document.getElementById('spreadPrice');
+            const spreadChange = document.getElementById('spreadChange');
+            const currentPrice = parseFloat(tickerData.last_price);
+            const priceChange = parseFloat(tickerData.price_change_percent);
+            
+            spreadPrice.textContent = formatNumber(currentPrice, 4);
+            spreadChange.textContent = `${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%`;
+            spreadChange.className = priceChange >= 0 ? 'spread-change positive' : 'spread-change negative';
+            
+            // 更新买单（从高到低，最接近成交价的在顶部）
             const bidTableBody = document.querySelector('#bidTable tbody');
             bidTableBody.innerHTML = '';
-            data.bids.forEach(([price, qty]) => {
+            let bidCumulative = 0;
+            
+            bids.forEach(([price, qty]) => {
+                const qtyNum = parseFloat(qty);
+                bidCumulative += qtyNum;
+                const depthPercent = (qtyNum / maxQty) * 100;
+                
                 const row = bidTableBody.insertRow();
                 row.className = 'bid-row';
+                row.style.setProperty('--depth-width', `${depthPercent}%`);
+                
                 row.insertCell(0).textContent = formatNumber(price, 4);
-                row.insertCell(1).textContent = formatNumber(qty, 6);
+                row.insertCell(1).textContent = formatNumber(qty, 4);
+                row.insertCell(2).textContent = formatNumber(bidCumulative, 2);
+                
+                // 设置深度背景
+                row.style.background = `linear-gradient(to left, rgba(16, 185, 129, 0.08) ${depthPercent}%, transparent ${depthPercent}%)`;
             });
         }
     } catch (error) {

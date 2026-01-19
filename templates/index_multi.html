@@ -193,33 +193,45 @@
 
         <!-- 双列布局：订单深度 和 最近成交 -->
         <div class="two-column">
-            <!-- 订单深度 -->
+            <!-- 订单深度 - 订单簿样式 -->
             <div class="data-section">
                 <h2>
-                    📖 订单深度
+                    📖 订单深度（订单簿）
                     <span class="section-symbol" id="orderbookSymbol">--</span>
                     <span class="section-market-type" id="orderbookMarketType">--</span>
                 </h2>
-                <div class="orderbook-container">
-                    <div class="orderbook-column">
-                        <h3 class="sell-header">🔴 卖单 (Ask)</h3>
+                <div class="orderbook-wrapper">
+                    <!-- 卖单区域（上方） -->
+                    <div class="orderbook-asks">
                         <table id="askTable" class="orderbook-table">
                             <thead>
                                 <tr>
-                                    <th>价格</th>
+                                    <th>价格 (USDT)</th>
                                     <th>数量</th>
+                                    <th>累计</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
                         </table>
                     </div>
-                    <div class="orderbook-column">
-                        <h3 class="buy-header">🟢 买单 (Bid)</h3>
+                    
+                    <!-- 最新成交价（中间） -->
+                    <div class="orderbook-spread">
+                        <div class="spread-info">
+                            <span class="spread-label">最新成交</span>
+                            <span class="spread-price" id="spreadPrice">--</span>
+                            <span class="spread-change" id="spreadChange">--</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 买单区域（下方） -->
+                    <div class="orderbook-bids">
                         <table id="bidTable" class="orderbook-table">
                             <thead>
                                 <tr>
-                                    <th>价格</th>
+                                    <th>价格 (USDT)</th>
                                     <th>数量</th>
+                                    <th>累计</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
