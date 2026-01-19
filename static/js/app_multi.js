@@ -472,7 +472,7 @@ async function loadOrderbook() {
                 row.style.setProperty('--depth-width', `${depthPercent}%`);
                 
                 row.insertCell(0).textContent = formatNumber(price, 4);
-                row.insertCell(1).textContent = formatNumber(qty, 4);
+                row.insertCell(1).textContent = formatNumber(qtyNum, 2);  // 数量用2位小数
                 row.insertCell(2).textContent = formatNumber(askCumulative, 2);
                 
                 // 设置深度背景
@@ -504,15 +504,28 @@ async function loadOrderbook() {
                 row.style.setProperty('--depth-width', `${depthPercent}%`);
                 
                 row.insertCell(0).textContent = formatNumber(price, 4);
-                row.insertCell(1).textContent = formatNumber(qty, 4);
+                row.insertCell(1).textContent = formatNumber(qtyNum, 2);  // 数量用2位小数
                 row.insertCell(2).textContent = formatNumber(bidCumulative, 2);
                 
                 // 设置深度背景
                 row.style.background = `linear-gradient(to left, rgba(16, 185, 129, 0.08) ${depthPercent}%, transparent ${depthPercent}%)`;
             });
+        } else {
+            console.error('订单深度数据加载失败');
+            console.log('Orderbook result:', orderbookResult);
+            console.log('Ticker result:', tickerResult);
         }
     } catch (error) {
         console.error('加载订单深度失败:', error);
+        console.error('错误堆栈:', error.stack);
+        
+        // 显示错误信息给用户
+        const askTableBody = document.querySelector('#askTable tbody');
+        const bidTableBody = document.querySelector('#bidTable tbody');
+        if (askTableBody && bidTableBody) {
+            askTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#ef4444;">加载失败，请刷新重试</td></tr>';
+            bidTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#ef4444;">加载失败，请刷新重试</td></tr>';
+        }
     }
 }
 
