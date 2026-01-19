@@ -237,10 +237,25 @@ async function loadMarketAnalysis() {
                 actionDescription.textContent = '暂不交易 - 信号不明确或市场极端，建议观望';
             }
             
-            // 更新做多模型评分和交易信号（辅助参考）
-            const longScore = analysis.long_score || 0;
-            const tradingSignal = analysis.trading_signal || '观望';
-            const longModelCard = document.getElementById('longModelCard');
+            // 获取内部评分（v2.0新格式）
+            const internal = analysis._internal_scores || {};
+            const longScore = internal.long_score || 0;
+            const shortScore = internal.short_score || 0;
+            const longReasons = internal.long_reasons || [];
+            const shortReasons = internal.short_reasons || [];
+            
+            // 生成做多/做空信号文本
+            let tradingSignal = '观望';
+            if (longScore >= 8) tradingSignal = '强烈做多';
+            else if (longScore >= 6) tradingSignal = '偏多';
+            else if (longScore >= 4) tradingSignal = '观望';
+            else tradingSignal = '不建议做多';
+            
+            let shortSignal = '观望';
+            if (shortScore >= 8) shortSignal = '强烈做空';
+            else if (shortScore >= 6) shortSignal = '偏空';
+            else if (shortScore >= 4) shortSignal = '观望';
+            else shortSignal = '不建议做空';
             
             // 更新做多评分显示
             document.getElementById('longScoreValue').textContent = longScore.toFixed(1);
@@ -259,11 +274,6 @@ async function loadMarketAnalysis() {
                 longScoreCircle.style.background = 'rgba(255, 255, 255, 0.15)';
             }
             
-            // 更新做空模型评分和交易信号（辅助参考）
-            const shortScore = analysis.short_score || 0;
-            const shortSignal = analysis.short_signal || '观望';
-            const shortModelCard = document.getElementById('shortModelCard');
-            
             // 更新做空评分显示
             document.getElementById('shortScoreValue').textContent = shortScore.toFixed(1);
             document.getElementById('shortSignal').textContent = shortSignal;
@@ -281,45 +291,49 @@ async function loadMarketAnalysis() {
                 shortScoreCircle.style.background = 'rgba(255, 255, 255, 0.15)';
             }
             
-            // 更新市场情绪
-            const sentiment = analysis.market_sentiment;
+            // 更新市场情绪（根据trade_action推导）
             const sentimentElement = document.getElementById('marketSentiment');
-            sentimentElement.textContent = sentiment;
-            
-            // 根据情绪设置颜色
-            if (sentiment.includes('看涨') || sentiment.includes('转多')) {
+            let sentiment = '中性';
+            if (tradeAction === 'LONG') {
+                sentiment = '看涨';
                 sentimentElement.style.color = '#10b981';
-            } else if (sentiment.includes('看跌') || sentiment.includes('转空')) {
+            } else if (tradeAction === 'SHORT') {
+                sentiment = '看跌';
                 sentimentElement.style.color = '#ef4444';
             } else {
+                sentiment = '观望';
                 sentimentElement.style.color = '#6b7280';
             }
+            sentimentElement.textContent = sentiment;
             
-            // 更新风险等级
-            const riskLevel = analysis.risk_level;
+            // 更新风险等级（根据risk_warning推导）
             const riskElement = document.getElementById('riskLevel');
+            const riskWarnings = analysis.risk_warning || [];
+            let riskLevel = '中';
+            if (riskWarnings.length === 0 && (tradeAction === 'LONG' || tradeAction === 'SHORT')) {
+                riskLevel = '低';
+                riskElement.style.color = '#10b981';
+            } else if (riskWarnings.length > 0) {
+                riskLevel = '高';
+                riskElement.style.color = '#ef4444';
+            } else {
+                riskLevel = '中';
+                riskElement.style.color = '#f59e0b';
+            }
             riskElement.textContent = riskLevel;
             
-            // 根据风险等级设置颜色
-            if (riskLevel === '高') {
-                riskElement.style.color = '#ef4444';
-            } else if (riskLevel === '中') {
-                riskElement.style.color = '#f59e0b';
-            } else {
-                riskElement.style.color = '#10b981';
-            }
-            
             // 更新1小时买卖力量
-            const buyRatio = analysis.data.buy_ratio_1h || 50;
-            const sellRatio = analysis.data.sell_ratio_1h || 50;
+            const dataSummary = analysis.data_summary || analysis.data || {};
+            const buyRatio = dataSummary.buy_ratio_1h || 50;
+            const sellRatio = dataSummary.sell_ratio_1h || 50;
             
             document.getElementById('miniPowerBuy').style.width = buyRatio + '%';
             document.getElementById('miniPowerSell').style.width = sellRatio + '%';
             document.getElementById('miniPowerBuyText').textContent = '🟢' + buyRatio.toFixed(1) + '%';
             document.getElementById('miniPowerSellText').textContent = '🔴' + sellRatio.toFixed(1) + '%';
             
-            // 更新主要操作
-            document.getElementById('mainOperation').textContent = analysis.main_operation;
+            // 更新主要操作（state_reason）
+            document.getElementById('mainOperation').textContent = analysis.state_reason || '正在分析...';
             
             // 更新详细结论列表
             const conclusionsList = document.getElementById('conclusionsList');
@@ -360,23 +374,13 @@ async function loadMarketAnalysis() {
             separator.innerHTML = '&nbsp;';
             conclusionsList.appendChild(separator);
             
-            // 原有的详细结论
-            analysis.conclusions.forEach(conclusion => {
+            // 原有的详细结论（v2.0使用detailed_analysis）
+            const detailedAnalysis = analysis.detailed_analysis || analysis.conclusions || [];
+            detailedAnalysis.forEach(conclusion => {
                 const li = document.createElement('li');
                 li.textContent = conclusion;
                 conclusionsList.appendChild(li);
             });
-            
-            // 添加数据详情（可选显示原始数据）
-            const dataInfo = document.createElement('li');
-            dataInfo.style.color = '#64748b';
-            dataInfo.style.fontSize = '0.85em';
-            dataInfo.style.marginTop = '8px';
-            dataInfo.textContent = `📈 价格24h: ${analysis.data.price_change_24h.toFixed(2)}% | ` +
-                                    `持仓量: ${analysis.data.oi_change.toFixed(2)}% | ` +
-                                    `成交量: ${analysis.data.volume_change.toFixed(2)}% | ` +
-                                    `资金费率: ${analysis.data.funding_rate.toFixed(4)}%`;
-            conclusionsList.appendChild(dataInfo);
         } else {
             // 如果分析失败，隐藏区域
             analysisSection.style.display = 'none';

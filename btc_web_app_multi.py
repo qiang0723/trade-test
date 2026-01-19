@@ -525,626 +525,488 @@ class MultiMarketAPI:
         }
     
     def analyze_futures_market(self, symbol):
-        """分析合约市场情况并给出结论
+        """分析合约市场情况并给出状态判断（v2.0）
         
-        分析维度：
-        1. 持仓量变化 + 价格变化 = 判断多空操作
-        2. 资金费率 = 判断市场情绪
-        3. 成交量变化 = 判断市场活跃度
+        设计哲学：
+        1. 只做状态判断，不做价格预测
+        2. 输出仅限：LONG / SHORT / NO_TRADE
+        3. 决策优先级：NO_TRADE > SHORT > LONG
+        4. 适用范围：永续合约市场
+        5. 数据来源：成交量 / OI / 资金费率 / 短时买卖行为
+        
+        参数:
+            symbol: 交易对符号（如'BTC'）
+        
+        返回:
+            dict: {
+                'success': bool,
+                'symbol': str,
+                'analysis': {
+                    'trade_action': str,  # LONG / SHORT / NO_TRADE
+                    'state_reason': str,  # 状态判断原因
+                    'risk_warning': list, # 风险提示列表
+                    'data_summary': dict, # 数据摘要
+                    'detailed_analysis': list  # 详细分析结论
+                }
+            }
         """
         try:
-            futures_symbol = f"{symbol}{self.quote_currency}"
-            
-            # 获取当前行情数据
+            # ========== 步骤0：数据获取与预处理 ==========
+            # 获取合约行情数据
             ticker = self.get_futures_ticker(symbol)
             if not ticker['success']:
-                return {'success': False, 'error': '获取行情数据失败'}
+                return {
+                    'success': False,
+                    'error': '无法获取市场数据',
+                    'symbol': symbol
+                }
             
             ticker_data = ticker['data']
+            current_price = float(ticker_data['last_price'])
+            price_change_24h = float(ticker_data['price_change_percent'])
+            volume_24h = float(ticker_data['volume'])
+            quote_volume_24h = float(ticker_data['quote_volume'])
+            open_interest = float(ticker_data.get('open_interest', 0))
+            funding_rate = float(ticker_data.get('funding_rate', 0))
+            volume_change = float(ticker_data.get('volume_change_percent', 0))
+            quote_volume_change = float(ticker_data.get('quote_volume_change_percent', 0))
+            oi_change = float(ticker_data.get('open_interest_change_percent', 0))
             
-            # 获取K线数据（最近24小时）
-            klines = self.client.futures_klines(symbol=futures_symbol, interval='1h', limit=25)
-            if len(klines) < 24:
-                return {'success': False, 'error': 'K线数据不足'}
-            
-            # 分析数据
-            current_price = ticker_data['last_price']
-            price_change_24h = ticker_data['price_change_percent']
-            funding_rate = ticker_data['funding_rate']
-            oi_change = ticker_data['open_interest_change_percent']
-            volume_change = ticker_data['volume_change_percent']
-            
-            # 计算最近几小时的价格趋势
-            recent_prices = [float(k[4]) for k in klines[-6:]]  # 最近6小时
-            price_trend_6h = ((recent_prices[-1] - recent_prices[0]) / recent_prices[0]) * 100
+            # 获取6小时价格趋势
+            klines_result = self.get_futures_klines(symbol, interval='1h', limit=7)
+            price_trend_6h = 0
+            if klines_result['success'] and len(klines_result['data']) >= 7:
+                klines = klines_result['data']
+                price_6h_ago = float(klines[0]['close'])
+                price_now = float(klines[-1]['close'])
+                price_trend_6h = ((price_now - price_6h_ago) / price_6h_ago) * 100
             
             # 获取1小时内的买卖量数据
-            buy_volume_1h = 0
-            sell_volume_1h = 0
             buy_amount_1h = 0
             sell_amount_1h = 0
             buy_trades_1h = 0
             sell_trades_1h = 0
             
             try:
-                # 获取最近1小时的成交数据（估算500笔）
                 trades_data = self.get_futures_trades(symbol, limit=500, time_range_minutes=60)
                 if trades_data['success'] and trades_data['data']:
                     for trade in trades_data['data']:
-                        is_buy = not trade['is_buyer_maker']  # True表示主动买入
+                        is_buy = not trade['is_buyer_maker']
                         if is_buy:
-                            buy_volume_1h += trade['qty']
                             buy_amount_1h += trade['quote_qty']
                             buy_trades_1h += 1
                         else:
-                            sell_volume_1h += trade['qty']
                             sell_amount_1h += trade['quote_qty']
                             sell_trades_1h += 1
             except Exception as e:
                 print(f"获取{symbol}1小时成交数据失败: {str(e)}")
             
-            # 计算买卖比例
             total_amount_1h = buy_amount_1h + sell_amount_1h
             buy_ratio_1h = (buy_amount_1h / total_amount_1h * 100) if total_amount_1h > 0 else 50
             sell_ratio_1h = 100 - buy_ratio_1h
             
-            # 转换资金费率为百分比（提前计算，供后面使用）
             funding_rate_percent = funding_rate * 100
             
-            # 生成分析结论
-            conclusions = []
-            market_sentiment = "中性"
-            main_operation = ""
-            risk_level = "中"
-            trading_signal = "观望"  # 交易信号：做多、做空、观望
+            # 数据摘要
+            data_summary = {
+                'price': current_price,
+                'price_change_24h': price_change_24h,
+                'price_trend_6h': price_trend_6h,
+                'volume_change_6h': volume_change,
+                'oi_change_6h': oi_change,
+                'funding_rate': funding_rate_percent,
+                'buy_ratio_1h': buy_ratio_1h,
+                'sell_ratio_1h': sell_ratio_1h,
+                'total_amount_1h': total_amount_1h
+            }
             
-            # ========== 标准做多模型评分 ==========
-            long_score = 0
-            long_conditions = []
+            # ========== 步骤1：系统保护与数据异常检查 ==========
+            data_anomaly_reasons = []
             
-            # 条件1: 结构向上（或刚突破）
-            structure_up = False
-            if price_change_24h > 3 and price_trend_6h > 1:
-                long_score += 2
-                structure_up = True
-                long_conditions.append("✓ 结构向上：24h涨幅>3%且6h延续上涨")
-            elif price_change_24h > 0 and price_trend_6h > 2:
-                long_score += 1.5
-                structure_up = True
-                long_conditions.append("✓ 刚突破：6h涨幅>2%，突破初期")
-            elif 0 < price_change_24h <= 3 and price_trend_6h > 0:
-                long_score += 1
-                long_conditions.append("○ 结构偏多：价格缓慢向上")
+            # 检查数据有效性
+            if total_amount_1h < 1000:  # 1小时成交额小于1000 USDT
+                data_anomaly_reasons.append("⚠️ 数据异常：1小时成交额过低，数据可能不完整")
             
-            # 条件2: 突破放量 / 回调缩量
-            volume_quality = False
-            if structure_up:
-                # 如果是上涨，应该放量
-                if volume_change > 15:
-                    long_score += 2
-                    volume_quality = True
-                    long_conditions.append("✓ 突破放量：成交量放大>15%")
-                elif volume_change > 0:
-                    long_score += 1
-                    long_conditions.append("○ 量能一般：成交量小幅增加")
-            else:
-                # 如果是回调，应该缩量
-                if volume_change < -10:
-                    long_score += 1.5
-                    volume_quality = True
-                    long_conditions.append("✓ 回调缩量：成交量萎缩>10%")
-                elif volume_change < 0:
-                    long_score += 0.5
-                    long_conditions.append("○ 量能缩减：成交量小幅下降")
+            if abs(price_change_24h) > 50:  # 24小时涨跌幅超过50%
+                data_anomaly_reasons.append("⚠️ 数据异常：价格变动超过50%，可能是数据错误或极端事件")
             
-            # 条件3: OI 小幅持续上升（不是暴涨）
-            oi_quality = False
-            if 2 <= oi_change <= 8:
-                long_score += 2
-                oi_quality = True
-                long_conditions.append(f"✓ OI小幅增长：持仓量+{oi_change:.1f}%（健康区间2-8%）")
-            elif 0 < oi_change < 2:
-                long_score += 1
-                long_conditions.append(f"○ OI温和增长：持仓量+{oi_change:.1f}%")
-            elif oi_change > 8:
-                long_score -= 0.5
-                long_conditions.append(f"⚠ OI暴涨：持仓量+{oi_change:.1f}%（过热风险）")
+            if open_interest == 0:  # 持仓量为0
+                data_anomaly_reasons.append("⚠️ 数据异常：持仓量为0，市场可能不活跃或数据缺失")
             
-            # 条件4: 资金费率温和
-            funding_quality = False
-            if -0.03 <= funding_rate_percent <= 0.08:
-                long_score += 1.5
-                funding_quality = True
-                long_conditions.append(f"✓ 资金费率温和：{funding_rate_percent:+.4f}%（正常范围）")
-            elif 0.08 < funding_rate_percent <= 0.15:
-                long_score += 0.5
-                long_conditions.append(f"○ 资金费率偏高：{funding_rate_percent:+.4f}%（多头偏热）")
-            elif funding_rate_percent > 0.15:
-                long_score -= 1
-                long_conditions.append(f"⚠ 资金费率过高：{funding_rate_percent:+.4f}%（极度过热）")
+            # 如果有数据异常，直接返回NO_TRADE
+            if data_anomaly_reasons:
+                return {
+                    'success': True,
+                    'symbol': symbol,
+                    'analysis': {
+                        'trade_action': 'NO_TRADE',
+                        'state_reason': '数据异常保护',
+                        'risk_warning': data_anomaly_reasons,
+                        'data_summary': data_summary,
+                        'detailed_analysis': ['系统检测到数据异常，为保护账户安全，暂停交易信号输出'] + data_anomaly_reasons
+                    }
+                }
             
-            # 条件5: 主动买单略占优
-            buy_quality = False
-            if 53 <= buy_ratio_1h <= 65:
-                long_score += 2
-                buy_quality = True
-                long_conditions.append(f"✓ 买单略占优：买入{buy_ratio_1h:.1f}%（理想范围53-65%）")
-            elif 65 < buy_ratio_1h <= 70:
-                long_score += 1
-                long_conditions.append(f"○ 买单占优：买入{buy_ratio_1h:.1f}%（偏强）")
-            elif buy_ratio_1h > 70:
-                long_score += 0.5
-                long_conditions.append(f"⚠ 买单过强：买入{buy_ratio_1h:.1f}%（追涨风险）")
-            elif 45 <= buy_ratio_1h < 53:
-                long_score += 0.5
-                long_conditions.append(f"○ 买卖均衡：买入{buy_ratio_1h:.1f}%")
+            # ========== 步骤2：NO_TRADE条件检查（最高优先级） ==========
+            no_trade_reasons = []
             
-            # ========== 标准做多模型判断 ==========
-            perfect_long = (structure_up and volume_quality and oi_quality and 
-                          funding_quality and buy_quality)
+            # 2.1 极端行情规则
+            # 极端资金费率
+            if abs(funding_rate_percent) > 0.2:
+                no_trade_reasons.append(f"❌ 极端资金费率：{funding_rate_percent:+.4f}%（阈值±0.2%）- 市场情绪极端失衡")
             
-            if long_score >= 8 or perfect_long:
-                trading_signal = "强烈做多"
-                market_sentiment = "极度看涨"
-                risk_level = "低"
-                main_operation = "🚀 标准做多模型：高胜率做多机会！"
-                conclusions.insert(0, "=" * 50)
-                conclusions.insert(1, "🎯 【标准做多模型】满足条件！")
-                conclusions.insert(2, f"📊 做多评分：{long_score:.1f}/10.0 分")
-                conclusions.insert(3, "=" * 50)
-                for cond in long_conditions:
-                    conclusions.insert(4, cond)
-                conclusions.insert(4 + len(long_conditions), "=" * 50)
-                conclusions.insert(5 + len(long_conditions), "💡 操作建议：顺势做多，设置合理止损")
-                conclusions.insert(6 + len(long_conditions), "=" * 50)
-            elif long_score >= 6:
-                trading_signal = "偏多"
-                market_sentiment = "看涨"
-                risk_level = "中"
-                main_operation = f"✅ 做多信号较强（评分{long_score:.1f}/10），可考虑做多"
-                conclusions.insert(0, "─" * 50)
-                conclusions.insert(1, f"📈 做多模型评分：{long_score:.1f}/10.0 分（偏多）")
-                for cond in long_conditions:
-                    conclusions.insert(2, cond)
-                conclusions.insert(2 + len(long_conditions), "─" * 50)
-            elif long_score >= 4:
-                trading_signal = "观望"
-                main_operation = f"⚖️ 做多信号一般（评分{long_score:.1f}/10），建议观望"
-                if long_conditions:
-                    conclusions.append("─" * 50)
-                    conclusions.append(f"📊 做多模型评分：{long_score:.1f}/10.0 分（中性）")
-                    for cond in long_conditions:
-                        conclusions.append(cond)
-            else:
-                trading_signal = "不建议做多"
-                if price_change_24h < -3:
-                    market_sentiment = "看跌"
-                if long_conditions:
-                    conclusions.append(f"❌ 不符合做多模型（评分{long_score:.1f}/10）")
+            # OI极端波动
+            if abs(oi_change) > 15:
+                no_trade_reasons.append(f"❌ OI极端波动：{oi_change:+.2f}%（阈值±15%）- 持仓剧烈变化，市场不稳定")
             
-            # ========== 标准做空模型评分 ==========
-            short_score = 0
-            short_conditions = []
-            short_signal = "观望"  # 默认值
+            # 成交量异常放大
+            if volume_change > 200:
+                no_trade_reasons.append(f"❌ 成交量异常暴增：{volume_change:+.2f}%（阈值200%）- 可能是异常交易或极端事件")
             
-            # 条件1: 结构向下（或刚破位）
-            structure_down = False
-            if price_change_24h < -3 and price_trend_6h < -1:
-                short_score += 2
-                structure_down = True
-                short_conditions.append("✓ 结构向下：24h跌幅>3%且6h延续下跌")
-            elif price_change_24h < 0 and price_trend_6h < -2:
-                short_score += 1.5
-                structure_down = True
-                short_conditions.append("✓ 刚破位：6h跌幅>2%，破位初期")
-            elif -3 < price_change_24h <= 0 and price_trend_6h < 0:
-                short_score += 1
-                short_conditions.append("○ 结构偏空：价格缓慢向下")
-            
-            # 条件2: 下跌放量 / 反弹缩量
-            volume_quality_short = False
-            if structure_down:
-                # 如果是下跌，应该放量
-                if volume_change > 15:
-                    short_score += 2
-                    volume_quality_short = True
-                    short_conditions.append("✓ 下跌放量：成交量放大>15%")
-                elif volume_change > 0:
-                    short_score += 1
-                    short_conditions.append("○ 量能一般：成交量小幅增加")
-            else:
-                # 如果是反弹，应该缩量
-                if volume_change < -10:
-                    short_score += 1.5
-                    volume_quality_short = True
-                    short_conditions.append("✓ 反弹缩量：成交量萎缩>10%")
-                elif volume_change < 0:
-                    short_score += 0.5
-                    short_conditions.append("○ 量能缩减：成交量小幅下降")
-            
-            # 条件3: OI堆积或上涨配合下跌
-            oi_quality_short = False
-            if 8 <= oi_change <= 15:
-                short_score += 2
-                oi_quality_short = True
-                short_conditions.append(f"✓ OI堆积：持仓量+{oi_change:.1f}%（风险堆积区间8-15%）")
-            elif price_change_24h < -1 and oi_change > 2:
-                short_score += 2
-                oi_quality_short = True
-                short_conditions.append(f"✓ 价格下跌+OI上升：空头增仓，OI+{oi_change:.1f}%")
-            elif 2 < oi_change < 8:
-                short_score += 1
-                short_conditions.append(f"○ OI温和增长：持仓量+{oi_change:.1f}%")
-            
-            # 条件4: 资金费率过热或极度过热
-            funding_quality_short = False
-            if funding_rate_percent > 0.15:
-                short_score += 1.5
-                funding_quality_short = True
-                short_conditions.append(f"✓ 资金费率极度过热：{funding_rate_percent:+.4f}%（>0.15%）")
-            elif 0.1 < funding_rate_percent <= 0.15:
-                short_score += 1
-                funding_quality_short = True
-                short_conditions.append(f"✓ 资金费率过热：{funding_rate_percent:+.4f}%（>0.1%）")
-            elif 0.08 < funding_rate_percent <= 0.1:
-                short_score += 0.5
-                short_conditions.append(f"○ 资金费率偏高：{funding_rate_percent:+.4f}%")
-            
-            # 条件5: 主动卖单占优
-            sell_quality = False
-            if 53 <= sell_ratio_1h <= 65:
-                short_score += 2
-                sell_quality = True
-                short_conditions.append(f"✓ 卖单略占优：卖出{sell_ratio_1h:.1f}%（理想范围53-65%）")
-            elif 65 < sell_ratio_1h <= 70:
-                short_score += 1
-                short_conditions.append(f"○ 卖单占优：卖出{sell_ratio_1h:.1f}%（偏强）")
-            elif sell_ratio_1h > 70:
-                short_score += 0.5
-                short_conditions.append(f"⚠ 卖单过强：卖出{sell_ratio_1h:.1f}%（杀跌风险）")
-            elif 45 <= sell_ratio_1h < 53:
-                short_score += 0.5
-                short_conditions.append(f"○ 买卖均衡：卖出{sell_ratio_1h:.1f}%")
-            
-            # ========== 标准做空模型判断 ==========
-            perfect_short = (structure_down and volume_quality_short and oi_quality_short and 
-                           funding_quality_short and sell_quality)
-            
-            # 添加做空模型结论到详细分析中
-            if short_score >= 8 or perfect_short:
-                short_signal = "强烈做空"
-                if not main_operation or "做空" not in main_operation:
-                    if not extreme_condition and market_sentiment != "看涨":
-                        market_sentiment = "极度看跌"
-                        risk_level = "低"
-                conclusions.append("")
-                conclusions.append("=" * 50)
-                conclusions.append("🎯 【标准做空模型】满足条件！")
-                conclusions.append(f"📊 做空评分：{short_score:.1f}/10.0 分")
-                conclusions.append("=" * 50)
-                for cond in short_conditions:
-                    conclusions.append(cond)
-                conclusions.append("=" * 50)
-                conclusions.append("💡 操作建议：顺势做空，设置合理止损")
-                conclusions.append("=" * 50)
-            elif short_score >= 6:
-                short_signal = "偏空"
-                conclusions.append("")
-                conclusions.append("─" * 50)
-                conclusions.append(f"📉 做空模型评分：{short_score:.1f}/10.0 分（偏空）")
-                for cond in short_conditions:
-                    conclusions.append(cond)
-                conclusions.append("─" * 50)
-            elif short_score >= 4:
-                short_signal = "观望"
-                if short_conditions:
-                    conclusions.append("")
-                    conclusions.append("─" * 50)
-                    conclusions.append(f"📊 做空模型评分：{short_score:.1f}/10.0 分（中性）")
-                    for cond in short_conditions:
-                        conclusions.append(cond)
-            else:
-                short_signal = "不建议做空"
-                if short_conditions:
-                    conclusions.append(f"❌ 不符合做空模型（评分{short_score:.1f}/10）")
-            
-            # ========== 三态交易信号判断 ==========
-            # 根据成交量、OI、资金费率、买卖行为，判断 LONG / SHORT / NO_TRADE
-            trade_action = "NO_TRADE"
-            action_reasons = []
-            
-            # 极端情况判断 - 优先判断 NO_TRADE
-            extreme_condition = False
-            
-            # 1. 资金费率极端
-            if funding_rate_percent > 0.2 or funding_rate_percent < -0.2:
-                extreme_condition = True
-                action_reasons.append(f"❌ 资金费率极端 {funding_rate_percent:+.4f}%（超过±0.2%）")
-            
-            # 2. OI极端变化（暴涨暴跌）
-            if oi_change > 15 or oi_change < -15:
-                extreme_condition = True
-                action_reasons.append(f"❌ 持仓量极端变化 {oi_change:+.2f}%（超过±15%）")
-            
-            # 3. 集中平仓情绪（OI大降+价格大幅波动）
+            # 2.2 情绪释放规则
+            # 集中平仓：OI大降 + 价格大幅波动
             if oi_change < -8 and abs(price_change_24h) > 5:
-                extreme_condition = True
-                action_reasons.append(f"❌ 集中平仓情绪：OI降{oi_change:.2f}%，价格波动{price_change_24h:+.2f}%")
+                no_trade_reasons.append(f"❌ 集中平仓：OI{oi_change:.2f}% + 价格{price_change_24h:+.2f}% - 大量止损/清算，市场混乱")
             
-            if not extreme_condition:
-                # 非极端情况，判断 LONG 或 SHORT
-                
-                # ========== LONG 条件判断 ==========
-                long_signals = 0
-                long_reasons = []
-                
-                # 1. 上涨放量 or 回调缩量
-                if price_change_24h > 2 and volume_change > 15:
-                    long_signals += 2
-                    long_reasons.append(f"✓ 上涨放量：价格+{price_change_24h:.2f}%，成交量+{volume_change:.2f}%")
-                elif price_change_24h < 0 and volume_change < -10:
-                    long_signals += 1.5
-                    long_reasons.append(f"✓ 回调缩量：价格{price_change_24h:.2f}%，成交量{volume_change:.2f}%")
-                
-                # 2. 价格上涨且 OI 上升
-                if price_change_24h > 1 and oi_change > 2 and oi_change <= 10:
-                    long_signals += 2
-                    long_reasons.append(f"✓ 价格上涨+OI上升：价格+{price_change_24h:.2f}%，OI+{oi_change:.2f}%")
-                
-                # 3. 资金费率温和
-                if -0.05 <= funding_rate_percent <= 0.1:
-                    long_signals += 1.5
-                    long_reasons.append(f"✓ 资金费率温和：{funding_rate_percent:+.4f}%")
-                
-                # 4. 买单推动价格
-                if buy_ratio_1h > 55 and price_change_24h > 0:
-                    long_signals += 1.5
-                    long_reasons.append(f"✓ 买单推动价格：买入{buy_ratio_1h:.1f}%，价格+{price_change_24h:.2f}%")
-                
-                # ========== SHORT 条件判断 ==========
-                short_signals = 0
-                short_reasons = []
-                
-                # 1. 上涨无量或滞涨
-                if price_change_24h > 1 and volume_change < 0:
-                    short_signals += 2
-                    short_reasons.append(f"✓ 上涨无量：价格+{price_change_24h:.2f}%，成交量{volume_change:.2f}%")
-                elif -1 <= price_change_24h <= 1 and oi_change > 8:
-                    short_signals += 1.5
-                    short_reasons.append(f"✓ 滞涨：价格{price_change_24h:.2f}%，OI+{oi_change:.2f}%")
-                
-                # 2. OI堆积（暴涨但未极端）
-                if 10 < oi_change <= 15:
-                    short_signals += 2
-                    short_reasons.append(f"✓ OI堆积：持仓量+{oi_change:.2f}%（风险堆积）")
-                
-                # 3. 资金费率过热
-                if funding_rate_percent > 0.1:
-                    short_signals += 1.5
-                    short_reasons.append(f"✓ 资金费率过热：{funding_rate_percent:+.4f}%（多头过热）")
-                
-                # 4. 反弹买弱、卖压增强
-                if price_change_24h > 0 and sell_ratio_1h > 55:
-                    short_signals += 1.5
-                    short_reasons.append(f"✓ 反弹卖压增强：卖出{sell_ratio_1h:.1f}%，价格勉强+{price_change_24h:.2f}%")
-                elif price_change_24h < -2 and sell_ratio_1h > 60:
-                    short_signals += 2
-                    short_reasons.append(f"✓ 卖压持续增强：卖出{sell_ratio_1h:.1f}%，价格{price_change_24h:.2f}%")
-                
-                # ========== 最终判断 ==========
-                if long_signals >= 4 and long_signals > short_signals:
-                    trade_action = "LONG"
-                    action_reasons = long_reasons
-                elif short_signals >= 4 and short_signals > long_signals:
-                    trade_action = "SHORT"
-                    action_reasons = short_reasons
-                else:
-                    trade_action = "NO_TRADE"
-                    action_reasons.append(f"⚠️ 信号不明确：多头信号{long_signals:.1f}分，空头信号{short_signals:.1f}分")
-                    if long_signals > 0:
-                        action_reasons.append(f"📊 多头因素：{', '.join([r.split('：')[0] for r in long_reasons])}")
-                    if short_signals > 0:
-                        action_reasons.append(f"📊 空头因素：{', '.join([r.split('：')[0] for r in short_reasons])}")
+            # 连续大K线（价格剧烈波动）
+            if abs(price_change_24h) > 15:
+                no_trade_reasons.append(f"❌ 价格剧烈波动：24h{price_change_24h:+.2f}% - 情绪释放期，不宜入场")
+            
+            # 2.3 冲突态规则（后续会填充）
+            conflict_reasons = []
+            
+            # 如果已经有NO_TRADE原因，直接返回
+            if no_trade_reasons:
+                return {
+                    'success': True,
+                    'symbol': symbol,
+                    'analysis': {
+                        'trade_action': 'NO_TRADE',
+                        'state_reason': '极端市场保护',
+                        'risk_warning': no_trade_reasons,
+                        'data_summary': data_summary,
+                        'detailed_analysis': [
+                            '=' * 50,
+                            '⚪ 【状态判断】NO_TRADE',
+                            '=' * 50,
+                            '系统检测到极端市场条件，为保护账户安全，不建议参与交易：',
+                            ''
+                        ] + no_trade_reasons + [
+                            '',
+                            '=' * 50,
+                            '💡 建议：等待市场稳定后再考虑交易',
+                            '=' * 50
+                        ]
+                    }
+                }
+            
+            # ========== 步骤3：SHORT条件判断（优先于LONG） ==========
+            short_signals = 0
+            short_reasons = []
+            short_disqualifiers = []  # 做空否决条件
+            
+            # 3.1 上涨动能衰竭
+            # 上涨无量：价格上涨但成交量萎缩
+            if price_change_24h > 1 and volume_change < -5:
+                short_signals += 2
+                short_reasons.append(f"✓ 上涨无量：价格+{price_change_24h:.2f}% 但成交量{volume_change:.2f}% - 上涨乏力")
+            
+            # 滞涨：价格不动但OI堆积
+            if -1 <= price_change_24h <= 1 and oi_change > 8:
+                short_signals += 1.5
+                short_reasons.append(f"✓ 滞涨堆积：价格{price_change_24h:+.2f}% 但OI+{oi_change:.2f}% - 多头吸引力下降")
+            
+            # 3.2 OI堆积规则
+            # OI在8-15%区间，风险堆积
+            if 8 <= oi_change <= 15:
+                short_signals += 2
+                short_reasons.append(f"✓ OI堆积：{oi_change:+.2f}%（8-15%风险区间）- 持仓拥挤，回调风险高")
+            
+            # 3.3 资金费率过热
+            # 资金费率>0.1%，多头成本高
+            if funding_rate_percent > 0.1:
+                short_signals += 1.5
+                short_reasons.append(f"✓ 资金费率过热：{funding_rate_percent:+.4f}% - 多头持仓成本高，不可持续")
+            
+            # 3.4 反弹失败行为
+            # 反弹遇阻：反弹但卖压明显
+            if price_change_24h > 0 and sell_ratio_1h > 55:
+                short_signals += 1.5
+                short_reasons.append(f"✓ 反弹卖压：价格+{price_change_24h:.2f}% 但卖出{sell_ratio_1h:.1f}% - 反弹遇阻")
+            
+            # 下跌加速：价格下跌且卖压持续
+            if price_change_24h < -2 and sell_ratio_1h > 60:
+                short_signals += 2
+                short_reasons.append(f"✓ 下跌加速：价格{price_change_24h:.2f}% + 卖出{sell_ratio_1h:.1f}% - 抛压持续")
+            
+            # 3.5 做空否决条件检查
+            # 多头止损释放：OI大降+价格下跌
+            if oi_change < -5 and price_change_24h < -3:
+                short_disqualifiers.append(f"⚠️ 多头止损已释放：OI{oi_change:.2f}% + 价格{price_change_24h:.2f}% - 做空风险收益比差")
+            
+            # 空头拥挤：资金费率已经很负
+            if funding_rate_percent < -0.08:
+                short_disqualifiers.append(f"⚠️ 空头已拥挤：资金费率{funding_rate_percent:+.4f}% - 不宜追空")
+            
+            # 情绪尾声：极端下跌
+            if price_change_24h < -10:
+                short_disqualifiers.append(f"⚠️ 下跌过度：24h{price_change_24h:.2f}% - 可能进入情绪尾声")
+            
+            # ========== 步骤4：LONG条件判断（最后检查） ==========
+            long_signals = 0
+            long_reasons = []
+            long_disqualifiers = []  # 做多否决条件
+            
+            # 4.1 新多头持续进场检查
+            # 上涨放量：价格上涨 + 成交量放大
+            if price_change_24h > 2 and volume_change > 15:
+                long_signals += 2
+                long_reasons.append(f"✓ 上涨放量：价格+{price_change_24h:.2f}% + 成交量+{volume_change:.2f}% - 突破有效")
+            
+            # 回调缩量：价格回调但成交量萎缩
+            if price_change_24h < 0 and volume_change < -10:
+                long_signals += 1.5
+                long_reasons.append(f"✓ 回调缩量：价格{price_change_24h:.2f}% + 成交量{volume_change:.2f}% - 回调健康")
+            
+            # 4.2 OI增长规则
+            # OI温和增长：2-8%区间 + 价格上涨
+            if 2 <= oi_change <= 8 and price_change_24h > 1:
+                long_signals += 2
+                long_reasons.append(f"✓ 多头增仓：OI+{oi_change:.2f}%（温和区间）+ 价格+{price_change_24h:.2f}% - 新多头进场")
+            
+            # 4.3 资金费率健康规则
+            # 资金费率温和：-0.05% ~ 0.1%
+            if -0.05 <= funding_rate_percent <= 0.1:
+                long_signals += 1.5
+                long_reasons.append(f"✓ 资金费率健康：{funding_rate_percent:+.4f}% - 多头持仓成本可接受")
+            
+            # 4.4 短时买卖推动规则
+            # 买单推动：买单占优 + 价格上涨
+            if buy_ratio_1h > 55 and price_change_24h > 0:
+                long_signals += 1.5
+                long_reasons.append(f"✓ 买单推动：买入{buy_ratio_1h:.1f}% + 价格+{price_change_24h:.2f}% - 主动买盘强")
+            
+            # 4.5 做多否决条件检查
+            # 空头回补：OI下降 + 价格上涨
+            if oi_change < -3 and price_change_24h > 3:
+                long_disqualifiers.append(f"⚠️ 可能是空头回补：OI{oi_change:.2f}% + 价格+{price_change_24h:.2f}% - 非新增多头")
+            
+            # 多头拥挤：OI暴涨
+            if oi_change > 15:
+                long_disqualifiers.append(f"⚠️ 多头拥挤：OI+{oi_change:.2f}% - 持仓过度拥挤")
+            
+            # 上方吸收：资金费率过高
+            if funding_rate_percent > 0.15:
+                long_disqualifiers.append(f"⚠️ 资金费率过高：{funding_rate_percent:+.4f}% - 多头成本不可持续")
+            
+            # ========== 步骤5：冲突态检测 ==========
+            # 如果LONG和SHORT信号都较强（都>=3分），视为冲突态
+            if long_signals >= 3 and short_signals >= 3:
+                conflict_reasons.append(f"⚠️ 信号冲突：做多信号{long_signals:.1f}分 vs 做空信号{short_signals:.1f}分")
+                conflict_reasons.append("⚠️ 多空指标方向矛盾，市场处于过渡态或转折期")
+            
+            # 核心指标方向不一致
+            price_up = price_change_24h > 1
+            oi_up = oi_change > 2
+            volume_up = volume_change > 10
+            
+            # 价格与OI、成交量背离
+            if price_up and (not oi_up) and (not volume_up):
+                conflict_reasons.append("⚠️ 价格上涨但OI和成交量未跟进 - 上涨质量存疑")
+            elif (not price_up) and oi_up and volume_up:
+                conflict_reasons.append("⚠️ OI和成交量增加但价格未涨 - 多空分歧明显")
+            
+            # 如果检测到冲突态，返回NO_TRADE
+            if conflict_reasons:
+                return {
+                    'success': True,
+                    'symbol': symbol,
+                    'analysis': {
+                        'trade_action': 'NO_TRADE',
+                        'state_reason': '市场冲突态',
+                        'risk_warning': conflict_reasons,
+                        'data_summary': data_summary,
+                        'detailed_analysis': [
+                            '=' * 50,
+                            '⚪ 【状态判断】NO_TRADE',
+                            '=' * 50,
+                            '系统检测到市场信号冲突，多空方向不明确：',
+                            ''
+                        ] + conflict_reasons + [
+                            '',
+                            f'📊 做多信号：{long_signals:.1f}分',
+                            *long_reasons,
+                            '',
+                            f'📊 做空信号：{short_signals:.1f}分',
+                            *short_reasons,
+                            '',
+                            '=' * 50,
+                            '💡 建议：等待市场方向明确后再行动',
+                            '=' * 50
+                        ]
+                    }
+                }
+            
+            # ========== 步骤6：最终决策（按优先级：SHORT > LONG） ==========
+            final_action = 'NO_TRADE'
+            state_reason = '信号不足'
+            risk_warning = []
+            detailed_analysis = []
+            
+            # 优先检查SHORT（需要信号≥4分 且 无否决条件）
+            if short_signals >= 4 and len(short_disqualifiers) == 0:
+                final_action = 'SHORT'
+                state_reason = '空头状态成立'
+                risk_warning = ['⚠️ 做空不等于追空，注意止损设置', '⚠️ 建议等待反弹后入场']
+                detailed_analysis = [
+                    '=' * 50,
+                    '🔴 【状态判断】SHORT',
+                    '=' * 50,
+                    f'空头信号评分：{short_signals:.1f}/10.0 分',
+                    '系统判定当前市场处于空头优势状态：',
+                    ''
+                ] + short_reasons + [
+                    '',
+                    '=' * 50,
+                    '💡 状态解读：多头难以继续吸引新资金，市场偏向下行',
+                    '💡 操作建议：可考虑做空，但需注意止损和仓位管理',
+                    '⚠️ 风险提示：SHORT状态不等于立即追空，建议等待反弹后入场',
+                    '=' * 50
+                ]
+            
+            # 其次检查LONG（需要信号≥4分 且 无否决条件 且 SHORT不成立）
+            elif long_signals >= 4 and len(long_disqualifiers) == 0:
+                final_action = 'LONG'
+                state_reason = '多头状态成立'
+                risk_warning = ['⚠️ 做多不等于追涨，注意止损设置', '⚠️ 建议等待回调后入场']
+                detailed_analysis = [
+                    '=' * 50,
+                    '🟢 【状态判断】LONG',
+                    '=' * 50,
+                    f'多头信号评分：{long_signals:.1f}/10.0 分',
+                    '系统判定当前市场处于多头优势状态：',
+                    ''
+                ] + long_reasons + [
+                    '',
+                    '=' * 50,
+                    '💡 状态解读：新多头在更高价位持续进场，市场偏向上行',
+                    '💡 操作建议：可考虑做多，但需注意止损和仓位管理',
+                    '⚠️ 风险提示：LONG状态不等于立即追涨，建议等待回调后入场',
+                    '=' * 50
+                ]
+            
+            # 如果有否决条件，输出NO_TRADE并说明原因
+            elif short_signals >= 4 and short_disqualifiers:
+                final_action = 'NO_TRADE'
+                state_reason = '做空信号存在但有否决条件'
+                risk_warning = short_disqualifiers
+                detailed_analysis = [
+                    '=' * 50,
+                    '⚪ 【状态判断】NO_TRADE',
+                    '=' * 50,
+                    f'空头信号评分：{short_signals:.1f}分（达标）',
+                    '但检测到以下否决条件：',
+                    ''
+                ] + short_disqualifiers + [
+                    '',
+                    '=' * 50,
+                    '💡 建议：虽有做空信号，但风险收益比不佳，暂不参与',
+                    '=' * 50
+                ]
+            
+            elif long_signals >= 4 and long_disqualifiers:
+                final_action = 'NO_TRADE'
+                state_reason = '做多信号存在但有否决条件'
+                risk_warning = long_disqualifiers
+                detailed_analysis = [
+                    '=' * 50,
+                    '⚪ 【状态判断】NO_TRADE',
+                    '=' * 50,
+                    f'多头信号评分：{long_signals:.1f}分（达标）',
+                    '但检测到以下否决条件：',
+                    ''
+                ] + long_disqualifiers + [
+                    '',
+                    '=' * 50,
+                    '💡 建议：虽有做多信号，但风险收益比不佳，暂不参与',
+                    '=' * 50
+                ]
+            
+            # 信号不足，输出NO_TRADE
             else:
-                # 极端情况，输出 NO_TRADE
-                trade_action = "NO_TRADE"
-            
-            # 插入三态信号分析到结论开头
-            conclusions.insert(0, "")
-            conclusions.insert(0, "=" * 50)
-            for reason in reversed(action_reasons):
-                conclusions.insert(0, reason)
-            
-            if trade_action == "LONG":
-                conclusions.insert(0, "🟢 【交易信号】LONG - 建议做多")
-                conclusions.insert(0, "=" * 50)
-                main_operation = "🟢 LONG：建议做多" if not main_operation or "做多" not in main_operation else main_operation
-                market_sentiment = "看涨"
-                risk_level = "低" if long_signals >= 6 else "中"
-            elif trade_action == "SHORT":
-                conclusions.insert(0, "🔴 【交易信号】SHORT - 建议做空")
-                conclusions.insert(0, "=" * 50)
-                main_operation = "🔴 SHORT：建议做空"
-                market_sentiment = "看跌"
-                risk_level = "中" if short_signals >= 6 else "高"
-            else:
-                conclusions.insert(0, "⚪ 【交易信号】NO_TRADE - 不建议交易")
-                conclusions.insert(0, "=" * 50)
-                main_operation = "⚪ NO_TRADE：暂时观望，等待更明确信号"
-                risk_level = "高" if extreme_condition else "中"
-            
-            # ========== 补充详细分析 ==========
-            conclusions.append("")
-            conclusions.append("📋 详细数据分析：")
-            conclusions.append("─" * 50)
-            
-            # 1. 1小时买卖量分析（短期多空力量对比）
-            if total_amount_1h > 0:
-                conclusions.append(f"💹 1h成交统计: {buy_trades_1h}笔买入 vs {sell_trades_1h}笔卖出")
+                final_action = 'NO_TRADE'
+                state_reason = '多空信号均不足'
+                risk_warning = ['市场信号不明确，建议观望']
+                detailed_analysis = [
+                    '=' * 50,
+                    '⚪ 【状态判断】NO_TRADE',
+                    '=' * 50,
+                    '多空信号均未达到入场标准（需≥4分）：',
+                    '',
+                    f'📊 多头信号：{long_signals:.1f}/10.0 分'
+                ]
+                if long_reasons:
+                    detailed_analysis.extend([''] + long_reasons)
                 
-                if buy_ratio_1h > 60:
-                    conclusions.append(f"🟢 1h买入力量占优 {buy_ratio_1h:.1f}%，短期买盘强劲")
-                    if price_change_24h > 1:
-                        conclusions.append("📈 买盘配合价格上涨，短期看涨信号明确")
-                        if market_sentiment == "中性":
-                            market_sentiment = "看涨"
-                    elif price_change_24h < -1:
-                        conclusions.append("⚠️ 买盘增加但价格下跌，可能是抄底或承接盘")
-                elif sell_ratio_1h > 60:
-                    conclusions.append(f"🔴 1h卖出力量占优 {sell_ratio_1h:.1f}%，短期卖盘强劲")
-                    if price_change_24h < -1:
-                        conclusions.append("📉 卖盘配合价格下跌，短期看跌信号明确")
-                        if market_sentiment == "中性":
-                            market_sentiment = "看跌"
-                    elif price_change_24h > 1:
-                        conclusions.append("⚠️ 卖盘增加但价格上涨，可能是获利了结或派发")
-                else:
-                    conclusions.append(f"⚖️ 1h买卖力量均衡（买{buy_ratio_1h:.1f}% vs 卖{sell_ratio_1h:.1f}%），多空胶着")
+                detailed_analysis.extend([
+                    '',
+                    f'📊 空头信号：{short_signals:.1f}/10.0 分'
+                ])
+                if short_reasons:
+                    detailed_analysis.extend([''] + short_reasons)
                 
-                # 买卖金额分析
-                buy_amount_m = buy_amount_1h / 1000000
-                sell_amount_m = sell_amount_1h / 1000000
-                conclusions.append(f"💵 1h买入${buy_amount_m:.2f}M vs 卖出${sell_amount_m:.2f}M")
+                detailed_analysis.extend([
+                    '',
+                    '=' * 50,
+                    '💡 建议：信号不足，继续观望，等待更明确的市场状态',
+                    '=' * 50
+                ])
             
-            # 2. 持仓量分析（6小时变化）
-            if abs(oi_change) > 5:
-                if oi_change > 5:
-                    conclusions.append(f"📈 6h持仓量大幅增加 {oi_change:+.2f}%")
-                    if price_change_24h > 2:
-                        main_operation = "主力正在增加多头仓位"
-                        market_sentiment = "看涨"
-                        conclusions.append("🟢 持仓量与价格同步上涨，多头增仓明显")
-                    elif price_change_24h < -2:
-                        main_operation = "主力正在增加空头仓位"
-                        market_sentiment = "看跌"
-                        conclusions.append("🔴 持仓量上涨但价格下跌，空头增仓明显")
-                    else:
-                        conclusions.append("⚠️ 持仓量增加但价格震荡，多空分歧加大")
-                elif oi_change < -5:
-                    conclusions.append(f"📉 6h持仓量大幅减少 {oi_change:+.2f}%")
-                    if price_change_24h > 2:
-                        main_operation = "主力正在平空单（空头止损）"
-                        market_sentiment = "转多"
-                        conclusions.append("🟢 持仓量下降但价格上涨，空头平仓/止损")
-                    elif price_change_24h < -2:
-                        main_operation = "主力正在平多单（多头止损）"
-                        market_sentiment = "转空"
-                        conclusions.append("🔴 持仓量下降且价格下跌，多头平仓/止损")
-                    else:
-                        conclusions.append("📊 持仓量下降，获利了结为主")
-            elif abs(oi_change) > 2:
-                if oi_change > 0:
-                    conclusions.append(f"📊 6h持仓量小幅增加 {oi_change:+.2f}%，市场关注度提升")
-                else:
-                    conclusions.append(f"📊 6h持仓量小幅减少 {oi_change:+.2f}%，部分获利了结")
-            else:
-                conclusions.append(f"📊 6h持仓量基本持平 {oi_change:+.2f}%，市场观望情绪浓厚")
+            # 添加数据摘要到详细分析
+            detailed_analysis.extend([
+                '',
+                '📋 数据摘要：',
+                '─' * 50,
+                f'💹 价格：${current_price:.4f} (24h: {price_change_24h:+.2f}%, 6h: {price_trend_6h:+.2f}%)',
+                f'📊 成交量6h变化：{volume_change:+.2f}%',
+                f'📈 持仓量6h变化：{oi_change:+.2f}%',
+                f'💰 资金费率：{funding_rate_percent:+.4f}%',
+                f'🔄 1h买卖比：买{buy_ratio_1h:.1f}% vs 卖{sell_ratio_1h:.1f}%',
+                f'💵 1h成交额：${total_amount_1h/1000000:.2f}M',
+                '─' * 50
+            ])
             
-            # 2. 资金费率分析（反映多空情绪）
-            if abs(funding_rate_percent) > 0.05:
-                if funding_rate_percent > 0.05:
-                    conclusions.append(f"💰 资金费率偏高 {funding_rate_percent:+.4f}%，多头支付空头")
-                    conclusions.append("⚠️ 市场多头情绪过热，警惕回调风险")
-                    if market_sentiment == "看涨":
-                        risk_level = "高"
-                elif funding_rate_percent < -0.05:
-                    conclusions.append(f"💰 资金费率偏低 {funding_rate_percent:+.4f}%，空头支付多头")
-                    conclusions.append("⚠️ 市场空头情绪过热，警惕反弹风险")
-                    if market_sentiment == "看跌":
-                        risk_level = "高"
-            else:
-                conclusions.append(f"💰 资金费率正常 {funding_rate_percent:+.4f}%，多空平衡")
-            
-            # 3. 成交量分析（6小时变化）
-            if abs(volume_change) > 20:
-                if volume_change > 20:
-                    conclusions.append(f"📊 6h成交量激增 {volume_change:+.2f}%，市场活跃度大增")
-                    if abs(price_change_24h) > 3:
-                        conclusions.append("🔥 成交量放大配合价格变动，趋势可能延续")
-                    else:
-                        conclusions.append("⚠️ 成交量放大但价格未动，可能是洗盘行为")
-                else:
-                    conclusions.append(f"📊 6h成交量萎缩 {volume_change:+.2f}%，市场观望情绪浓厚")
-            elif abs(volume_change) > 10:
-                if volume_change > 0:
-                    conclusions.append(f"📊 6h成交量小幅增加 {volume_change:+.2f}%")
-                else:
-                    conclusions.append(f"📊 6h成交量小幅减少 {volume_change:+.2f}%")
-            
-            # 4. 价格趋势分析
-            if abs(price_change_24h) > 5:
-                if price_change_24h > 5:
-                    conclusions.append(f"🚀 24h大幅上涨 {price_change_24h:+.2f}%")
-                    if price_trend_6h > 2:
-                        conclusions.append("📈 近6小时继续上涨，上涨动能充足")
-                    elif price_trend_6h < -2:
-                        conclusions.append("⚠️ 近6小时出现回调，上涨动能减弱")
-                else:
-                    conclusions.append(f"📉 24h大幅下跌 {price_change_24h:+.2f}%")
-                    if price_trend_6h < -2:
-                        conclusions.append("📉 近6小时继续下跌，下跌动能充足")
-                    elif price_trend_6h > 2:
-                        conclusions.append("⚠️ 近6小时出现反弹，下跌动能减弱")
-            
-            # 5. 综合判断（结合1小时买卖力量）
-            if not main_operation:
-                # 优先考虑1小时买卖力量作为短期信号
-                if buy_ratio_1h > 65:
-                    if price_change_24h > 3 and oi_change > 2:
-                        main_operation = "多头强势增仓，短期看涨，建议顺势做多"
-                    elif price_change_24h > 0:
-                        main_operation = "短期买盘积极，关注能否突破"
-                    else:
-                        main_operation = "买盘强劲但价格承压，观察能否企稳反弹"
-                elif sell_ratio_1h > 65:
-                    if price_change_24h < -3 and oi_change < -2:
-                        main_operation = "空头强势打压，短期看跌，建议顺势做空"
-                    elif price_change_24h < 0:
-                        main_operation = "短期卖盘积极，关注是否继续下探"
-                    else:
-                        main_operation = "卖盘强劲但价格抗跌，观察能否止跌企稳"
-                else:
-                    # 买卖力量均衡，参考中长期指标
-                    if price_change_24h > 3 and oi_change > 2:
-                        main_operation = "多头主导市场，建议关注回调机会"
-                    elif price_change_24h < -3 and oi_change < -2:
-                        main_operation = "空头主导市场，建议关注反弹机会"
-                    elif abs(price_change_24h) < 2 and abs(oi_change) < 2:
-                        main_operation = "市场观望为主，等待方向明确"
-                    else:
-                        main_operation = "市场处于整理阶段"
-            
+            # 返回最终结果
             return {
                 'success': True,
                 'symbol': symbol,
                 'analysis': {
-                    'trade_action': trade_action,  # 三态交易信号 LONG/SHORT/NO_TRADE
-                    'market_sentiment': market_sentiment,
-                    'main_operation': main_operation,
-                    'risk_level': risk_level,
-                    'trading_signal': trading_signal,  # 做多模型信号
-                    'long_score': long_score,  # 做多模型评分
-                    'short_signal': short_signal,  # 做空模型信号
-                    'short_score': short_score,  # 做空模型评分
-                    'conclusions': conclusions,
-                    'data': {
-                        'current_price': current_price,
-                        'price_change_24h': price_change_24h,
-                        'price_trend_6h': price_trend_6h,
-                        'oi_change': oi_change,
-                        'funding_rate': funding_rate_percent,
-                        'volume_change': volume_change,
-                        'buy_ratio_1h': buy_ratio_1h,
-                        'sell_ratio_1h': sell_ratio_1h,
-                        'buy_amount_1h': buy_amount_1h,
-                        'sell_amount_1h': sell_amount_1h,
-                        'buy_trades_1h': buy_trades_1h,
-                        'sell_trades_1h': sell_trades_1h
+                    'trade_action': final_action,
+                    'state_reason': state_reason,
+                    'risk_warning': risk_warning,
+                    'data_summary': data_summary,
+                    'detailed_analysis': detailed_analysis,
+                    # 保留内部评分供参考
+                    '_internal_scores': {
+                        'long_score': long_signals,
+                        'short_score': short_signals,
+                        'long_reasons': long_reasons,
+                        'short_reasons': short_reasons,
+                        'long_disqualifiers': long_disqualifiers,
+                        'short_disqualifiers': short_disqualifiers
                     }
                 }
             }
+            
         except Exception as e:
-            return {'success': False, 'error': str(e)}
+            import traceback
+            print(f"分析{symbol}合约市场失败: {str(e)}")
+            print(traceback.format_exc())
+            return {
+                'success': False,
+                'error': f'分析失败: {str(e)}',
+                'symbol': symbol
+            }
     
     def get_available_markets_info(self):
         """获取可用市场信息"""
