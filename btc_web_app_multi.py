@@ -28,6 +28,15 @@ except ImportError:
     DB_ENABLED = False
     print("⚠️ 数据库模块未找到，历史信号记录功能将被禁用")
 
+# 导入状态机模块
+try:
+    from market_state_machine import get_state_machine
+    STATE_MACHINE_ENABLED = True
+    print("✅ 状态机模块已加载，市场分析v3.0（状态机）已启用")
+except ImportError:
+    STATE_MACHINE_ENABLED = False
+    print("⚠️ 状态机模块未找到，将使用v2.0分析逻辑")
+
 app = Flask(__name__)
 
 class MultiMarketAPI:
@@ -534,7 +543,10 @@ class MultiMarketAPI:
         }
     
     def analyze_futures_market(self, symbol):
-        """分析合约市场情况并给出状态判断（v2.0）
+        """分析合约市场情况并给出状态判断
+        
+        v3.0 (状态机版本) - 如果启用状态机模块
+        v2.0 (规则版本) - 如果未启用状态机模块
         
         设计哲学：
         1. 只做状态判断，不做价格预测
@@ -553,12 +565,19 @@ class MultiMarketAPI:
                 'analysis': {
                     'trade_action': str,  # LONG / SHORT / NO_TRADE
                     'state_reason': str,  # 状态判断原因
-                    'risk_warning': list, # 风险提示列表
+                    'system_state': str,  # v3.0: 系统状态（INIT/WAIT/LONG_ACTIVE/SHORT_ACTIVE/COOL_DOWN）
+                    'market_regime': str, # v3.0: 市场环境（TREND/RANGE/EXTREME）
+                    'risk_warning': list, # v2.0: 风险提示列表
                     'data_summary': dict, # 数据摘要
                     'detailed_analysis': list  # 详细分析结论
                 }
             }
         """
+        # 如果启用状态机，使用v3.0逻辑
+        if STATE_MACHINE_ENABLED:
+            return self._analyze_with_state_machine(symbol)
+        
+        # 否则使用v2.0逻辑
         try:
             # ========== 步骤0：数据获取与预处理 ==========
             # 获取合约行情数据
@@ -1022,6 +1041,124 @@ class MultiMarketAPI:
         except Exception as e:
             import traceback
             print(f"分析{symbol}合约市场失败: {str(e)}")
+            print(traceback.format_exc())
+            return {
+                'success': False,
+                'error': f'分析失败: {str(e)}',
+                'symbol': symbol
+            }
+    
+    def _analyze_with_state_machine(self, symbol):
+        """使用状态机分析合约市场（v3.0）
+        
+        Args:
+            symbol: 交易对符号
+            
+        Returns:
+            dict: 分析结果
+        """
+        try:
+            # ========== 数据获取 ==========
+            # 获取合约行情数据
+            ticker = self.get_futures_ticker(symbol)
+            if not ticker['success']:
+                return {
+                    'success': False,
+                    'error': '无法获取市场数据',
+                    'symbol': symbol
+                }
+            
+            ticker_data = ticker['data']
+            current_price = float(ticker_data['last_price'])
+            price_change_24h = float(ticker_data['price_change_percent'])
+            volume_24h = float(ticker_data['volume'])
+            quote_volume_24h = float(ticker_data['quote_volume'])
+            open_interest = float(ticker_data.get('open_interest', 0))
+            funding_rate = float(ticker_data.get('funding_rate', 0))
+            volume_change = float(ticker_data.get('volume_change_percent', 0))
+            oi_change = float(ticker_data.get('open_interest_change_percent', 0))
+            
+            # 获取6小时价格趋势
+            klines_result = self.get_futures_klines(symbol, interval='1h', limit=7)
+            price_trend_6h = 0
+            if klines_result['success'] and len(klines_result['data']) >= 7:
+                klines = klines_result['data']
+                price_6h_ago = float(klines[0]['close'])
+                price_now = float(klines[-1]['close'])
+                price_trend_6h = ((price_now - price_6h_ago) / price_6h_ago)
+            
+            # 计算平均成交量（用于判断放量/缩量）
+            volume_avg = volume_24h / 24  # 简单平均
+            
+            # 计算波动率（使用24h高低价差）
+            high_24h = float(ticker_data['high_price'])
+            low_24h = float(ticker_data['low_price'])
+            volatility = (high_24h - low_24h) / current_price if current_price > 0 else 0
+            
+            # 判断价格结构是否连续（简化版：6h趋势明确视为连续）
+            price_structure_continuous = abs(price_trend_6h) > 0.01  # 6h涨跌超过1%视为有方向
+            
+            # 获取1小时内的买卖量数据
+            buy_amount_1h = 0
+            sell_amount_1h = 0
+            
+            try:
+                trades_data = self.get_futures_trades(symbol, limit=500, time_range_minutes=60)
+                if trades_data['success'] and trades_data['data']:
+                    for trade in trades_data['data']:
+                        is_buy = not trade['is_buyer_maker']
+                        if is_buy:
+                            buy_amount_1h += trade['quote_qty']
+                        else:
+                            sell_amount_1h += trade['quote_qty']
+            except Exception as e:
+                print(f"获取{symbol}1小时成交数据失败: {str(e)}")
+            
+            total_amount_1h = buy_amount_1h + sell_amount_1h
+            aggressive_buy_ratio = (buy_amount_1h / total_amount_1h) if total_amount_1h > 0 else 0.5
+            aggressive_sell_ratio = 1 - aggressive_buy_ratio
+            
+            # 计算 OI 变化速率和 delta
+            oi_delta = oi_change / 100  # 转换为小数
+            oi_delta_rate = abs(oi_delta)
+            
+            # ========== 准备状态机输入数据 ==========
+            market_data = {
+                'price': current_price,
+                'price_change_24h': price_change_24h / 100,  # 转换为小数
+                'price_trend_6h': price_trend_6h,
+                'volume': volume_24h,
+                'volume_avg': volume_avg,
+                'volume_change_6h': volume_change / 100,  # 转换为小数
+                'oi': open_interest,
+                'oi_delta': oi_delta,
+                'oi_delta_rate': oi_delta_rate,
+                'oi_change_6h': oi_change / 100,  # 转换为小数
+                'funding_rate': funding_rate,
+                'aggressive_buy_ratio': aggressive_buy_ratio,
+                'aggressive_sell_ratio': aggressive_sell_ratio,
+                'volatility': volatility,
+                'price_structure_continuous': price_structure_continuous,
+                'total_amount_1h': total_amount_1h
+            }
+            
+            # ========== 调用状态机 ==========
+            state_machine = get_state_machine()
+            result = state_machine.on_new_tick(symbol, market_data)
+            
+            # ========== 保存到数据库 ==========
+            if DB_ENABLED:
+                try:
+                    db = get_signal_db()
+                    db.save_signal(result)
+                except Exception as db_error:
+                    print(f"⚠️ 数据库保存失败: {str(db_error)}")
+            
+            return result
+            
+        except Exception as e:
+            import traceback
+            print(f"状态机分析{symbol}失败: {str(e)}")
             print(traceback.format_exc())
             return {
                 'success': False,
