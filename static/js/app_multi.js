@@ -325,6 +325,42 @@ async function loadMarketAnalysis() {
             const conclusionsList = document.getElementById('conclusionsList');
             conclusionsList.innerHTML = '';
             
+            // 在详细分析开头添加做多做空模型评分概览
+            const modelScoresHeader = document.createElement('li');
+            modelScoresHeader.style.fontWeight = '700';
+            modelScoresHeader.style.fontSize = '1.05em';
+            modelScoresHeader.style.color = '#1e293b';
+            modelScoresHeader.style.marginBottom = '8px';
+            modelScoresHeader.style.borderBottom = '2px solid #cbd5e1';
+            modelScoresHeader.style.paddingBottom = '8px';
+            modelScoresHeader.textContent = '📊 模型评分概览';
+            conclusionsList.appendChild(modelScoresHeader);
+            
+            // 做多模型评分
+            const longScoreInfo = document.createElement('li');
+            longScoreInfo.style.color = '#10b981';
+            longScoreInfo.style.fontWeight = '600';
+            longScoreInfo.style.fontSize = '0.95em';
+            longScoreInfo.innerHTML = `📈 做多模型：<span style="font-size: 1.1em; font-weight: 700;">${longScore.toFixed(1)}</span>/10.0 分 - ${tradingSignal}`;
+            conclusionsList.appendChild(longScoreInfo);
+            
+            // 做空模型评分
+            const shortScoreInfo = document.createElement('li');
+            shortScoreInfo.style.color = '#ef4444';
+            shortScoreInfo.style.fontWeight = '600';
+            shortScoreInfo.style.fontSize = '0.95em';
+            shortScoreInfo.innerHTML = `📉 做空模型：<span style="font-size: 1.1em; font-weight: 700;">${shortScore.toFixed(1)}</span>/10.0 分 - ${shortSignal}`;
+            conclusionsList.appendChild(shortScoreInfo);
+            
+            // 添加分隔线
+            const separator = document.createElement('li');
+            separator.style.borderTop = '1px solid #e2e8f0';
+            separator.style.marginTop = '10px';
+            separator.style.marginBottom = '10px';
+            separator.innerHTML = '&nbsp;';
+            conclusionsList.appendChild(separator);
+            
+            // 原有的详细结论
             analysis.conclusions.forEach(conclusion => {
                 const li = document.createElement('li');
                 li.textContent = conclusion;
