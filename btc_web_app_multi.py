@@ -722,6 +722,131 @@ class MultiMarketAPI:
                 if long_conditions:
                     conclusions.append(f"❌ 不符合做多模型（评分{long_score:.1f}/10）")
             
+            # ========== 三态交易信号判断 ==========
+            # 根据成交量、OI、资金费率、买卖行为，判断 LONG / SHORT / NO_TRADE
+            trade_action = "NO_TRADE"
+            action_reasons = []
+            
+            # 极端情况判断 - 优先判断 NO_TRADE
+            extreme_condition = False
+            
+            # 1. 资金费率极端
+            if funding_rate_percent > 0.2 or funding_rate_percent < -0.2:
+                extreme_condition = True
+                action_reasons.append(f"❌ 资金费率极端 {funding_rate_percent:+.4f}%（超过±0.2%）")
+            
+            # 2. OI极端变化（暴涨暴跌）
+            if oi_change > 15 or oi_change < -15:
+                extreme_condition = True
+                action_reasons.append(f"❌ 持仓量极端变化 {oi_change:+.2f}%（超过±15%）")
+            
+            # 3. 集中平仓情绪（OI大降+价格大幅波动）
+            if oi_change < -8 and abs(price_change_24h) > 5:
+                extreme_condition = True
+                action_reasons.append(f"❌ 集中平仓情绪：OI降{oi_change:.2f}%，价格波动{price_change_24h:+.2f}%")
+            
+            if not extreme_condition:
+                # 非极端情况，判断 LONG 或 SHORT
+                
+                # ========== LONG 条件判断 ==========
+                long_signals = 0
+                long_reasons = []
+                
+                # 1. 上涨放量 or 回调缩量
+                if price_change_24h > 2 and volume_change > 15:
+                    long_signals += 2
+                    long_reasons.append(f"✓ 上涨放量：价格+{price_change_24h:.2f}%，成交量+{volume_change:.2f}%")
+                elif price_change_24h < 0 and volume_change < -10:
+                    long_signals += 1.5
+                    long_reasons.append(f"✓ 回调缩量：价格{price_change_24h:.2f}%，成交量{volume_change:.2f}%")
+                
+                # 2. 价格上涨且 OI 上升
+                if price_change_24h > 1 and oi_change > 2 and oi_change <= 10:
+                    long_signals += 2
+                    long_reasons.append(f"✓ 价格上涨+OI上升：价格+{price_change_24h:.2f}%，OI+{oi_change:.2f}%")
+                
+                # 3. 资金费率温和
+                if -0.05 <= funding_rate_percent <= 0.1:
+                    long_signals += 1.5
+                    long_reasons.append(f"✓ 资金费率温和：{funding_rate_percent:+.4f}%")
+                
+                # 4. 买单推动价格
+                if buy_ratio_1h > 55 and price_change_24h > 0:
+                    long_signals += 1.5
+                    long_reasons.append(f"✓ 买单推动价格：买入{buy_ratio_1h:.1f}%，价格+{price_change_24h:.2f}%")
+                
+                # ========== SHORT 条件判断 ==========
+                short_signals = 0
+                short_reasons = []
+                
+                # 1. 上涨无量或滞涨
+                if price_change_24h > 1 and volume_change < 0:
+                    short_signals += 2
+                    short_reasons.append(f"✓ 上涨无量：价格+{price_change_24h:.2f}%，成交量{volume_change:.2f}%")
+                elif -1 <= price_change_24h <= 1 and oi_change > 8:
+                    short_signals += 1.5
+                    short_reasons.append(f"✓ 滞涨：价格{price_change_24h:.2f}%，OI+{oi_change:.2f}%")
+                
+                # 2. OI堆积（暴涨但未极端）
+                if 10 < oi_change <= 15:
+                    short_signals += 2
+                    short_reasons.append(f"✓ OI堆积：持仓量+{oi_change:.2f}%（风险堆积）")
+                
+                # 3. 资金费率过热
+                if funding_rate_percent > 0.1:
+                    short_signals += 1.5
+                    short_reasons.append(f"✓ 资金费率过热：{funding_rate_percent:+.4f}%（多头过热）")
+                
+                # 4. 反弹买弱、卖压增强
+                if price_change_24h > 0 and sell_ratio_1h > 55:
+                    short_signals += 1.5
+                    short_reasons.append(f"✓ 反弹卖压增强：卖出{sell_ratio_1h:.1f}%，价格勉强+{price_change_24h:.2f}%")
+                elif price_change_24h < -2 and sell_ratio_1h > 60:
+                    short_signals += 2
+                    short_reasons.append(f"✓ 卖压持续增强：卖出{sell_ratio_1h:.1f}%，价格{price_change_24h:.2f}%")
+                
+                # ========== 最终判断 ==========
+                if long_signals >= 4 and long_signals > short_signals:
+                    trade_action = "LONG"
+                    action_reasons = long_reasons
+                elif short_signals >= 4 and short_signals > long_signals:
+                    trade_action = "SHORT"
+                    action_reasons = short_reasons
+                else:
+                    trade_action = "NO_TRADE"
+                    action_reasons.append(f"⚠️ 信号不明确：多头信号{long_signals:.1f}分，空头信号{short_signals:.1f}分")
+                    if long_signals > 0:
+                        action_reasons.append(f"📊 多头因素：{', '.join([r.split('：')[0] for r in long_reasons])}")
+                    if short_signals > 0:
+                        action_reasons.append(f"📊 空头因素：{', '.join([r.split('：')[0] for r in short_reasons])}")
+            else:
+                # 极端情况，输出 NO_TRADE
+                trade_action = "NO_TRADE"
+            
+            # 插入三态信号分析到结论开头
+            conclusions.insert(0, "")
+            conclusions.insert(0, "=" * 50)
+            for reason in reversed(action_reasons):
+                conclusions.insert(0, reason)
+            
+            if trade_action == "LONG":
+                conclusions.insert(0, "🟢 【交易信号】LONG - 建议做多")
+                conclusions.insert(0, "=" * 50)
+                main_operation = "🟢 LONG：建议做多" if not main_operation or "做多" not in main_operation else main_operation
+                market_sentiment = "看涨"
+                risk_level = "低" if long_signals >= 6 else "中"
+            elif trade_action == "SHORT":
+                conclusions.insert(0, "🔴 【交易信号】SHORT - 建议做空")
+                conclusions.insert(0, "=" * 50)
+                main_operation = "🔴 SHORT：建议做空"
+                market_sentiment = "看跌"
+                risk_level = "中" if short_signals >= 6 else "高"
+            else:
+                conclusions.insert(0, "⚪ 【交易信号】NO_TRADE - 不建议交易")
+                conclusions.insert(0, "=" * 50)
+                main_operation = "⚪ NO_TRADE：暂时观望，等待更明确信号"
+                risk_level = "高" if extreme_condition else "中"
+            
             # ========== 补充详细分析 ==========
             conclusions.append("")
             conclusions.append("📋 详细数据分析：")
@@ -867,11 +992,12 @@ class MultiMarketAPI:
                 'success': True,
                 'symbol': symbol,
                 'analysis': {
+                    'trade_action': trade_action,  # 新增：三态交易信号 LONG/SHORT/NO_TRADE
                     'market_sentiment': market_sentiment,
                     'main_operation': main_operation,
                     'risk_level': risk_level,
-                    'trading_signal': trading_signal,  # 新增：交易信号
-                    'long_score': long_score,  # 新增：做多模型评分
+                    'trading_signal': trading_signal,  # 做多模型信号
+                    'long_score': long_score,  # 做多模型评分
                     'conclusions': conclusions,
                     'data': {
                         'current_price': current_price,

@@ -871,13 +871,86 @@ footer p {
     display: inline-block;
 }
 
-/* 做多模型评分卡片 */
-.long-model-card {
+/* 三态交易信号卡片（主信号） */
+.trade-action-card {
+    background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+    border-radius: 16px;
+    padding: 30px;
+    margin-bottom: 20px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+    color: white;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.trade-action-card.action-long {
     background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-    border-radius: 12px;
-    padding: 20px;
+    box-shadow: 0 12px 30px rgba(16, 185, 129, 0.4);
+}
+
+.trade-action-card.action-short {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    box-shadow: 0 12px 30px rgba(239, 68, 68, 0.4);
+}
+
+.trade-action-card.action-notrade {
+    background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+    box-shadow: 0 12px 30px rgba(107, 114, 128, 0.3);
+}
+
+.action-header {
+    font-size: 1.1em;
+    opacity: 0.9;
     margin-bottom: 15px;
-    box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.action-main {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    margin-bottom: 15px;
+}
+
+.action-icon {
+    font-size: 4em;
+    line-height: 1;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.1);
+    }
+}
+
+.action-text {
+    font-size: 3em;
+    font-weight: 900;
+    letter-spacing: 3px;
+    text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    font-family: 'Arial Black', sans-serif;
+}
+
+.action-description {
+    font-size: 1.1em;
+    opacity: 0.95;
+    line-height: 1.6;
+    margin-top: 10px;
+}
+
+/* 做多模型评分卡片（调整为辅助参考） */
+.long-model-card {
+    background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+    border-radius: 12px;
+    padding: 15px 20px;
+    margin-bottom: 15px;
+    box-shadow: 0 6px 15px rgba(14, 165, 233, 0.3);
     color: white;
 }
 

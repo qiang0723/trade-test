@@ -209,7 +209,35 @@ async function loadMarketAnalysis() {
             document.getElementById('analysisUpdateTime').textContent = 
                 `数据更新时间: ${timeStr} | 📊 数据来源: 币安实时行情`;
             
-            // 更新做多模型评分和交易信号
+            // 更新三态交易信号（主信号）
+            const tradeAction = analysis.trade_action || 'NO_TRADE';
+            const tradeActionCard = document.getElementById('tradeActionCard');
+            const actionIcon = document.getElementById('actionIcon');
+            const actionText = document.getElementById('actionText');
+            const actionDescription = document.getElementById('actionDescription');
+            
+            // 移除所有状态类
+            tradeActionCard.classList.remove('action-long', 'action-short', 'action-notrade');
+            
+            // 根据交易信号设置样式和内容
+            if (tradeAction === 'LONG') {
+                tradeActionCard.classList.add('action-long');
+                actionIcon.textContent = '🟢';
+                actionText.textContent = 'LONG';
+                actionDescription.textContent = '建议做多 - 符合做多条件，可考虑开多头仓位';
+            } else if (tradeAction === 'SHORT') {
+                tradeActionCard.classList.add('action-short');
+                actionIcon.textContent = '🔴';
+                actionText.textContent = 'SHORT';
+                actionDescription.textContent = '建议做空 - 符合做空条件，可考虑开空头仓位';
+            } else {
+                tradeActionCard.classList.add('action-notrade');
+                actionIcon.textContent = '⚪';
+                actionText.textContent = 'NO_TRADE';
+                actionDescription.textContent = '暂不交易 - 信号不明确或市场极端，建议观望';
+            }
+            
+            // 更新做多模型评分和交易信号（辅助参考）
             const longScore = analysis.long_score || 0;
             const tradingSignal = analysis.trading_signal || '观望';
             const longModelCard = document.getElementById('longModelCard');

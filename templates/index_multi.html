@@ -137,11 +137,25 @@
                 数据更新时间: --
             </div>
             <div class="market-analysis-container">
-                <!-- 做多模型评分卡片 -->
+                <!-- 三态交易信号（主信号） -->
+                <div class="trade-action-card" id="tradeActionCard">
+                    <div class="action-header">
+                        <span class="action-label">交易信号</span>
+                    </div>
+                    <div class="action-main" id="tradeActionMain">
+                        <div class="action-icon" id="actionIcon">⚪</div>
+                        <div class="action-text" id="actionText">NO_TRADE</div>
+                    </div>
+                    <div class="action-description" id="actionDescription">
+                        正在分析市场数据...
+                    </div>
+                </div>
+                
+                <!-- 做多模型评分卡片（辅助参考） -->
                 <div class="long-model-card" id="longModelCard">
                     <div class="model-header">
-                        <span class="model-icon">🎯</span>
-                        <span class="model-title">标准做多模型</span>
+                        <span class="model-icon">📊</span>
+                        <span class="model-title">做多模型评分（参考）</span>
                     </div>
                     <div class="model-score-container">
                         <div class="score-circle" id="scoreCircle">
@@ -149,7 +163,7 @@
                             <div class="score-label">评分</div>
                         </div>
                         <div class="model-signal" id="modelSignal">
-                            <div class="signal-label">交易信号</div>
+                            <div class="signal-label">辅助信号</div>
                             <div class="signal-value" id="tradingSignal">--</div>
                         </div>
                     </div>
