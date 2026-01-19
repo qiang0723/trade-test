@@ -167,7 +167,6 @@ function updateMarketTypeButtons() {
 // 刷新当前市场数据
 function refreshCurrentMarket() {
     loadTicker();
-    loadOrderbook();
     loadKlines();
     loadTrades();
     loadLargeOrders();
@@ -426,109 +425,6 @@ async function loadTicker() {
         console.error('加载行情数据失败:', error);
     }
 }
-
-// 加载订单深度（订单簿样式）
-async function loadOrderbook() {
-    try {
-        // 同时获取订单深度和最新价格
-        const [orderbookResponse, tickerResponse] = await Promise.all([
-            fetch(`/api/orderbook/${currentMarketType}/${currentSymbol}?limit=10`),
-            fetch(`/api/ticker/${currentMarketType}/${currentSymbol}`)
-        ]);
-        
-        const orderbookResult = await orderbookResponse.json();
-        const tickerResult = await tickerResponse.json();
-        
-        if (orderbookResult.success && tickerResult.success) {
-            const data = orderbookResult.data;
-            const tickerData = tickerResult.data;
-            
-            // 更新标题
-            document.getElementById('orderbookSymbol').textContent = currentSymbol + '/USDT';
-            document.getElementById('orderbookMarketType').textContent = 
-                currentMarketType === 'spot' ? '现货' : '合约';
-            
-            // 只取前10档
-            const asks = data.asks.slice(0, 10);
-            const bids = data.bids.slice(0, 10);
-            
-            // 计算最大数量（用于深度背景条）
-            const allQty = [...asks.map(a => parseFloat(a[1])), ...bids.map(b => parseFloat(b[1]))];
-            const maxQty = Math.max(...allQty);
-            
-            // 更新卖单（从低到高，最接近成交价的在底部）
-            const askTableBody = document.querySelector('#askTable tbody');
-            askTableBody.innerHTML = '';
-            let askCumulative = 0;
-            
-            // 卖单反转，从低到高显示
-            asks.reverse().forEach(([price, qty]) => {
-                const qtyNum = parseFloat(qty);
-                askCumulative += qtyNum;
-                const depthPercent = (qtyNum / maxQty) * 100;
-                
-                const row = askTableBody.insertRow();
-                row.className = 'ask-row';
-                row.style.setProperty('--depth-width', `${depthPercent}%`);
-                
-                row.insertCell(0).textContent = formatNumber(price, 4);
-                row.insertCell(1).textContent = formatNumber(qtyNum, 2);  // 数量用2位小数
-                row.insertCell(2).textContent = formatNumber(askCumulative, 2);
-                
-                // 设置深度背景
-                row.style.background = `linear-gradient(to left, rgba(239, 68, 68, 0.08) ${depthPercent}%, transparent ${depthPercent}%)`;
-            });
-            
-            // 更新最新成交价
-            const spreadPrice = document.getElementById('spreadPrice');
-            const spreadChange = document.getElementById('spreadChange');
-            const currentPrice = parseFloat(tickerData.last_price);
-            const priceChange = parseFloat(tickerData.price_change_percent);
-            
-            spreadPrice.textContent = formatNumber(currentPrice, 4);
-            spreadChange.textContent = `${priceChange >= 0 ? '+' : ''}${priceChange.toFixed(2)}%`;
-            spreadChange.className = priceChange >= 0 ? 'spread-change positive' : 'spread-change negative';
-            
-            // 更新买单（从高到低，最接近成交价的在顶部）
-            const bidTableBody = document.querySelector('#bidTable tbody');
-            bidTableBody.innerHTML = '';
-            let bidCumulative = 0;
-            
-            bids.forEach(([price, qty]) => {
-                const qtyNum = parseFloat(qty);
-                bidCumulative += qtyNum;
-                const depthPercent = (qtyNum / maxQty) * 100;
-                
-                const row = bidTableBody.insertRow();
-                row.className = 'bid-row';
-                row.style.setProperty('--depth-width', `${depthPercent}%`);
-                
-                row.insertCell(0).textContent = formatNumber(price, 4);
-                row.insertCell(1).textContent = formatNumber(qtyNum, 2);  // 数量用2位小数
-                row.insertCell(2).textContent = formatNumber(bidCumulative, 2);
-                
-                // 设置深度背景
-                row.style.background = `linear-gradient(to left, rgba(16, 185, 129, 0.08) ${depthPercent}%, transparent ${depthPercent}%)`;
-            });
-        } else {
-            console.error('订单深度数据加载失败');
-            console.log('Orderbook result:', orderbookResult);
-            console.log('Ticker result:', tickerResult);
-        }
-    } catch (error) {
-        console.error('加载订单深度失败:', error);
-        console.error('错误堆栈:', error.stack);
-        
-        // 显示错误信息给用户
-        const askTableBody = document.querySelector('#askTable tbody');
-        const bidTableBody = document.querySelector('#bidTable tbody');
-        if (askTableBody && bidTableBody) {
-            askTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#ef4444;">加载失败，请刷新重试</td></tr>';
-            bidTableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#ef4444;">加载失败，请刷新重试</td></tr>';
-        }
-    }
-}
-
 // 加载综合K线数据（价格+成交量+成交额+持仓量）
 async function loadKlines() {
     try {
@@ -850,7 +746,6 @@ function startAutoRefresh() {
     // 设置定时刷新（每10秒）
     autoRefreshInterval = setInterval(() => {
         loadTicker();
-        loadOrderbook();
         loadTrades();
         loadLargeOrders();
         loadAllMarketsOverview();
