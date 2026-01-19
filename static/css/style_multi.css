@@ -1,0 +1,1114 @@
+/* 全局样式 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 
+                 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #333;
+    line-height: 1.5;
+    min-height: 100vh;
+    padding: 10px;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+/* 头部样式 */
+header {
+    background: white;
+    padding: 15px 20px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+header h1 {
+    font-size: 1.6em;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.update-time {
+    font-size: 0.85em;
+    color: #666;
+}
+
+.refresh-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9em;
+    margin-left: 8px;
+    transition: transform 0.2s;
+}
+
+.refresh-btn:hover {
+    transform: scale(1.05);
+}
+
+/* 币种选择器 */
+.symbol-selector {
+    background: white;
+    padding: 12px 15px;
+    border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    margin-bottom: 12px;
+}
+
+.selector-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 1em;
+    font-weight: 600;
+    color: #333;
+}
+
+.selector-icon {
+    font-size: 1.2em;
+    margin-right: 8px;
+}
+
+.selector-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.symbol-btn {
+    padding: 8px 20px;
+    border: 2px solid #667eea;
+    background: white;
+    color: #667eea;
+    border-radius: 8px;
+    font-size: 0.95em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.symbol-btn:hover {
+    background: #667eea;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+}
+
+.symbol-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: transparent;
+}
+
+.symbol-btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.symbol-btn.disabled:hover {
+    background: white;
+    color: #667eea;
+    transform: none;
+    box-shadow: none;
+}
+
+/* 交易类型选择器 */
+.market-type-selector {
+    background: white;
+    padding: 10px;
+    border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    margin-bottom: 12px;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.market-btn {
+    padding: 10px 30px;
+    border: 2px solid #e5e7eb;
+    background: white;
+    color: #666;
+    border-radius: 8px;
+    font-size: 0.95em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    flex: 1;
+    max-width: 250px;
+}
+
+.market-btn:hover {
+    border-color: #667eea;
+    color: #667eea;
+    transform: translateY(-2px);
+}
+
+.market-btn.active {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: white;
+    border-color: transparent;
+}
+
+.market-btn.disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.market-btn.disabled:hover {
+    border-color: #e5e7eb;
+    color: #666;
+    transform: none;
+}
+
+/* 主要数据卡片 */
+.main-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 15px;
+}
+
+.stat-card {
+    background: white;
+    padding: 15px;
+    border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.12);
+}
+
+.price-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 0.85em;
+}
+
+.card-icon {
+    font-size: 1.5em;
+    margin-right: 10px;
+}
+
+.card-title {
+    font-weight: 500;
+    opacity: 0.9;
+}
+
+.market-badge {
+    margin-left: auto;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-size: 0.8em;
+}
+
+.card-value {
+    font-size: 1.6em;
+    font-weight: bold;
+    margin: 8px 0;
+}
+
+.card-subtitle {
+    font-size: 0.9em;
+    opacity: 0.7;
+}
+
+.price-up {
+    color: #10b981;
+}
+
+.price-down {
+    color: #ef4444;
+}
+
+/* 图表区域 */
+.chart-section {
+    background: white;
+    padding: 15px 20px;
+    border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    margin-bottom: 12px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.section-header h2 {
+    color: #333;
+    font-size: 1.2em;
+}
+
+.chart-symbol, .section-symbol {
+    color: #667eea;
+    font-weight: bold;
+    margin: 0 5px;
+}
+
+.chart-market-type, .section-market-type {
+    background: #10b981;
+    color: white;
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-size: 0.7em;
+    margin-left: 10px;
+}
+
+.chart-controls select {
+    padding: 6px 12px;
+    border: 2px solid #667eea;
+    border-radius: 6px;
+    font-size: 0.9em;
+    cursor: pointer;
+    background: white;
+}
+
+/* 分析控制器容器 */
+.analysis-controls {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* 时间范围选择器 */
+.time-range-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.time-range-controls label {
+    font-size: 0.85em;
+    color: #666;
+    font-weight: 500;
+}
+
+.time-range-controls select {
+    padding: 6px 12px;
+    border: 2px solid #667eea;
+    border-radius: 6px;
+    font-size: 0.9em;
+    cursor: pointer;
+    background: white;
+    color: #667eea;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.time-range-controls select:hover {
+    border-color: #764ba2;
+    background: #f8f9ff;
+}
+
+.time-range-controls select:focus {
+    outline: none;
+    border-color: #764ba2;
+    box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.1);
+}
+
+/* 金额阈值选择器 */
+.threshold-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.threshold-controls label {
+    font-size: 0.95em;
+    color: #666;
+    font-weight: 500;
+}
+
+.threshold-controls select {
+    padding: 6px 12px;
+    border: 2px solid #10b981;
+    border-radius: 6px;
+    font-size: 0.9em;
+    cursor: pointer;
+    background: white;
+    color: #10b981;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.threshold-controls select:hover {
+    border-color: #059669;
+    background: #f0fdf4;
+}
+
+.threshold-controls select:focus {
+    outline: none;
+    border-color: #059669;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+#klineChart {
+    max-height: 350px;
+}
+
+/* 数据区域 */
+.data-section {
+    background: white;
+    padding: 15px 20px;
+    border-radius: 10px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    margin-bottom: 12px;
+}
+
+.data-section h2 {
+    color: #333;
+    margin-bottom: 12px;
+    font-size: 1.2em;
+}
+
+/* 双列布局 */
+.two-column {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 12px;
+    margin-bottom: 30px;
+}
+
+/* 订单簿样式 */
+.orderbook-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.orderbook-column h3 {
+    margin-bottom: 15px;
+    font-size: 1.1em;
+}
+
+.sell-header {
+    color: #ef4444;
+}
+
+.buy-header {
+    color: #10b981;
+}
+
+.orderbook-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.orderbook-table th {
+    background: #f3f4f6;
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.85em;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.orderbook-table td {
+    padding: 6px 10px;
+    font-size: 0.85em;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.orderbook-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.ask-row {
+    color: #ef4444;
+}
+
+.bid-row {
+    color: #10b981;
+}
+
+/* 市场概览 */
+.markets-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+.market-overview-card {
+    background: #f9fafb;
+    padding: 20px;
+    border-radius: 10px;
+    border: 2px solid #e5e7eb;
+    transition: all 0.3s;
+}
+
+.market-overview-card:hover {
+    border-color: #667eea;
+    transform: translateY(-3px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+.market-overview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.market-overview-symbol {
+    font-size: 1.5em;
+    font-weight: bold;
+    color: #333;
+}
+
+.market-overview-type {
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-size: 0.8em;
+    font-weight: 600;
+}
+
+.market-overview-type.spot {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.market-overview-type.futures {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.market-overview-price {
+    font-size: 1.8em;
+    font-weight: bold;
+    margin: 10px 0;
+    color: #333;
+}
+
+.market-overview-change {
+    font-size: 1.2em;
+    font-weight: bold;
+    padding: 5px 10px;
+    border-radius: 5px;
+}
+
+.change-up {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.change-down {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.market-unavailable {
+    color: #999;
+    font-style: italic;
+    text-align: center;
+    padding: 30px;
+}
+
+/* 页脚 */
+footer {
+    background: white;
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    margin-top: 30px;
+    text-align: center;
+    color: #666;
+}
+
+footer p {
+    margin: 5px 0;
+}
+
+/* 成交记录样式 */
+.trades-container {
+    max-height: 450px;
+    overflow-y: auto;
+}
+
+/* 最近成交时间选择器 */
+.trades-time-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.trades-time-controls label {
+    font-size: 0.95em;
+    color: #666;
+    font-weight: 500;
+}
+
+.trades-time-controls select {
+    padding: 8px 15px;
+    border: 2px solid #f59e0b;
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+    background: white;
+    color: #f59e0b;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.trades-time-controls select:hover {
+    border-color: #d97706;
+    background: #fffbeb;
+}
+
+.trades-time-controls select:focus {
+    outline: none;
+    border-color: #d97706;
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+}
+
+/* 最近成交统计分析 */
+.trades-analysis {
+    background: linear-gradient(135deg, #f0f9ff 0%, #f8fafc 100%);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+    border: 2px solid #e0f2fe;
+}
+
+.trades-stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.trades-stats-row:last-of-type {
+    margin-bottom: 20px;
+}
+
+.trades-stat-card {
+    background: white;
+    padding: 10px;
+    border-radius: 8px;
+    border: 2px solid #e5e7eb;
+    text-align: center;
+    transition: all 0.3s;
+}
+
+.trades-stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.trades-stat-card.buy {
+    border-color: #10b981;
+    background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+}
+
+.trades-stat-card.sell {
+    border-color: #ef4444;
+    background: linear-gradient(135deg, #ffffff 0%, #fef2f2 100%);
+}
+
+.trades-stat-card .stat-label {
+    font-size: 0.8em;
+    color: #666;
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.trades-stat-card.buy .stat-label {
+    color: #059669;
+}
+
+.trades-stat-card.sell .stat-label {
+    color: #dc2626;
+}
+
+.trades-stat-card .stat-value {
+    font-size: 1.1em;
+    font-weight: 700;
+    color: #333;
+}
+
+.trades-stat-card.buy .stat-value {
+    color: #10b981;
+}
+
+.trades-stat-card.sell .stat-value {
+    color: #ef4444;
+}
+
+/* 成交力量对比条 */
+.trades-power-bar {
+    background: white;
+    padding: 10px;
+    border-radius: 8px;
+    border: 2px solid #e5e7eb;
+}
+
+.power-label-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 0.95em;
+    font-weight: 600;
+}
+
+.power-label-row span:first-child {
+    color: #10b981;
+}
+
+.power-label-row span:last-child {
+    color: #ef4444;
+}
+
+.trades-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.trades-table th {
+    background: #f3f4f6;
+    padding: 8px 6px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    font-size: 0.82em;
+}
+
+.trades-table td {
+    padding: 6px 6px;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 0.82em;
+}
+
+.trades-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.trade-buy {
+    color: #10b981;
+    font-weight: 600;
+}
+
+.trade-sell {
+    color: #ef4444;
+    font-weight: 600;
+}
+
+/* 大单分析样式 */
+.large-orders-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.summary-card {
+    background: #f9fafb;
+    padding: 12px;
+    border-radius: 8px;
+    border: 2px solid #e5e7eb;
+}
+
+.summary-header {
+    font-size: 0.95em;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.summary-grid {
+    display: grid;
+    gap: 15px;
+}
+
+.summary-item {
+    text-align: center;
+}
+
+.summary-label {
+    font-size: 0.85em;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.summary-value {
+    font-size: 1.8em;
+    font-weight: bold;
+    color: #333;
+}
+
+.buy-color {
+    color: #10b981 !important;
+}
+
+.sell-color {
+    color: #ef4444 !important;
+}
+
+/* 买卖力量指示器 */
+.power-indicator {
+    background: #f9fafb;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 25px;
+}
+
+.power-label {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+.power-bar {
+    height: 40px;
+    display: flex;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.power-buy {
+    background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+    transition: width 0.5s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+}
+
+.power-sell {
+    background: linear-gradient(90deg, #f87171 0%, #ef4444 100%);
+    transition: width 0.5s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+}
+
+.power-values {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 10px;
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+.power-values span:first-child {
+    color: #10b981;
+}
+
+.power-values span:last-child {
+    color: #ef4444;
+}
+
+/* 大单列表 */
+.large-orders-list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-top: 15px;
+}
+
+.large-orders-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.large-orders-table th {
+    background: #f3f4f6;
+    padding: 8px 6px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.82em;
+    border-bottom: 2px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+}
+
+.large-orders-table td {
+    padding: 6px 6px;
+    font-size: 0.82em;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.large-orders-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.large-order-buy {
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.large-order-sell {
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.large-order-type {
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-weight: 600;
+    font-size: 0.85em;
+}
+
+.large-order-type.buy {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.large-order-type.sell {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+/* 市场分析区域 */
+.analysis-refresh-btn {
+    float: right;
+    background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 600;
+    transition: all 0.3s;
+    margin-left: 10px;
+}
+
+.analysis-refresh-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+}
+
+.analysis-refresh-btn:active {
+    transform: scale(0.98);
+}
+
+.analysis-update-time {
+    font-size: 0.8em;
+    color: #64748b;
+    margin-bottom: 12px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 6px;
+    display: inline-block;
+}
+
+.market-analysis-container {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border-radius: 10px;
+    padding: 15px;
+    border: 2px solid #0ea5e9;
+}
+
+.analysis-header {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.analysis-badge {
+    flex: 1;
+    min-width: 150px;
+    background: white;
+    padding: 10px 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.badge-label {
+    display: block;
+    font-size: 0.8em;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.badge-value {
+    display: block;
+    font-size: 1.1em;
+    font-weight: 700;
+}
+
+#sentimentBadge .badge-value {
+    color: #0ea5e9;
+}
+
+#riskBadge .badge-value {
+    color: #f59e0b;
+}
+
+#buyPowerBadge {
+    min-width: 200px;
+}
+
+.mini-power-bar {
+    display: flex;
+    height: 20px;
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 8px 0 5px 0;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.mini-power-buy {
+    background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+    transition: width 0.5s ease;
+}
+
+.mini-power-sell {
+    background: linear-gradient(90deg, #dc2626 0%, #ef4444 100%);
+    transition: width 0.5s ease;
+}
+
+.mini-power-text {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8em;
+    font-weight: 600;
+}
+
+.mini-power-text .buy-text {
+    color: #10b981;
+}
+
+.mini-power-text .sell-text {
+    color: #ef4444;
+}
+
+.main-operation {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.operation-icon {
+    font-size: 2em;
+    flex-shrink: 0;
+}
+
+.operation-text {
+    font-size: 1em;
+    font-weight: 600;
+    color: #0c4a6e;
+    line-height: 1.5;
+}
+
+.analysis-conclusions {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.conclusions-title {
+    font-size: 0.95em;
+    font-weight: 600;
+    color: #0c4a6e;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e0f2fe;
+}
+
+#conclusionsList {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#conclusionsList li {
+    padding: 8px 0;
+    font-size: 0.9em;
+    line-height: 1.6;
+    border-bottom: 1px solid #f0f9ff;
+}
+
+#conclusionsList li:last-child {
+    border-bottom: none;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    header {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    header h1 {
+        font-size: 1.5em;
+        margin-bottom: 15px;
+    }
+
+    .main-stats {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+
+    .two-column {
+        grid-template-columns: 1fr;
+    }
+
+    .orderbook-container {
+        grid-template-columns: 1fr;
+    }
+
+    .market-type-selector {
+        flex-direction: column;
+    }
+
+    .markets-overview {
+        grid-template-columns: 1fr;
+    }
+
+    .large-orders-summary {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 加载动画 */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.loading {
+    animation: pulse 1.5s ease-in-out infinite;
+}

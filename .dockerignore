@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# 项目特定
+btc_market_data/*.csv
+btc_market_data/*.json
+*.log
+
+# 文档
+*.md
+!README.md
+
+# 临时文件
+*.tmp
+*.bak
+
+# Cursor相关
+.cursor/
+
+# 配置文件（如果有敏感信息）
+config.ini
+.env

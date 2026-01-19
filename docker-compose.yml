@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  trade-info:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: trade-info:latest
+    container_name: trade-info-app
+    ports:
+      - "5001:5001"
+    volumes:
+      # 挂载数据目录，用于保存导出的数据
+      - ./btc_market_data:/app/btc_market_data
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - trade-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5001/api/markets', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  trade-network:
+    driver: bridge

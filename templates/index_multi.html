@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多币种行情监控 - 现货&合约</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style_multi.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header>
+            <h1>🚀 多币种行情监控中心（现货 & 合约）</h1>
+            <div class="update-time">
+                最后更新: <span id="lastUpdate">--</span>
+                <button onclick="refreshAll()" class="refresh-btn">🔄 刷新</button>
+            </div>
+        </header>
+
+        <!-- 币种选择器 -->
+        <div class="symbol-selector">
+            <div class="selector-header">
+                <span class="selector-icon">💰</span>
+                <span class="selector-title">选择币种</span>
+            </div>
+            <div class="selector-buttons" id="symbolButtons">
+                <!-- 动态生成 -->
+            </div>
+        </div>
+
+        <!-- 交易类型选择器 -->
+        <div class="market-type-selector">
+            <button class="market-btn active" data-type="spot" onclick="switchMarketType('spot')">
+                📊 现货市场
+            </button>
+            <button class="market-btn" data-type="futures" onclick="switchMarketType('futures')">
+                📈 合约市场
+            </button>
+        </div>
+
+        <!-- 主要数据卡片 -->
+        <div class="main-stats">
+            <div class="stat-card price-card">
+                <div class="card-header">
+                    <span class="card-icon">💰</span>
+                    <span class="card-title">当前价格</span>
+                    <span class="market-badge" id="marketBadge">现货</span>
+                </div>
+                <div class="card-value" id="currentPrice">--</div>
+                <div class="card-subtitle">USDT</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="card-header">
+                    <span class="card-icon">📊</span>
+                    <span class="card-title">24h涨跌</span>
+                </div>
+                <div class="card-value" id="priceChange">--</div>
+                <div class="card-subtitle" id="priceChangePercent">--</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="card-header">
+                    <span class="card-icon">📈</span>
+                    <span class="card-title">24h最高</span>
+                </div>
+                <div class="card-value" id="highPrice">--</div>
+                <div class="card-subtitle">USDT</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="card-header">
+                    <span class="card-icon">📉</span>
+                    <span class="card-title">24h最低</span>
+                </div>
+                <div class="card-value" id="lowPrice">--</div>
+                <div class="card-subtitle">USDT</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="card-header">
+                    <span class="card-icon">💹</span>
+                    <span class="card-title">24h成交量</span>
+                </div>
+                <div class="card-value" id="volume">--</div>
+                <div class="card-subtitle">
+                    <span id="volumeSymbol">--</span>
+                    <span id="volumeChange" style="margin-left: 5px;">--</span>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="card-header">
+                    <span class="card-icon">💵</span>
+                    <span class="card-title">24h成交额</span>
+                </div>
+                <div class="card-value" id="quoteVolume">--</div>
+                <div class="card-subtitle">
+                    <span>USDT</span>
+                    <span id="quoteVolumeChange" style="margin-left: 5px;">--</span>
+                </div>
+            </div>
+
+            <div class="stat-card futures-only" id="fundingRateCard" style="display: none;">
+                <div class="card-header">
+                    <span class="card-icon">💸</span>
+                    <span class="card-title">资金费率</span>
+                </div>
+                <div class="card-value" id="fundingRate">--</div>
+                <div class="card-subtitle" id="fundingRatePercent">--</div>
+            </div>
+
+            <div class="stat-card futures-only" id="openInterestCard" style="display: none;">
+                <div class="card-header">
+                    <span class="card-icon">📊</span>
+                    <span class="card-title">持仓量</span>
+                </div>
+                <div class="card-value" id="openInterest">--</div>
+                <div class="card-subtitle">
+                    <span id="openInterestSymbol">--</span>
+                    <span id="openInterestChange" style="margin-left: 5px;">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 合约市场分析（仅合约） -->
+        <div class="data-section futures-only" id="marketAnalysisSection" style="display: none;">
+            <h2>
+                🎯 市场分析
+                <span class="section-symbol" id="analysisSymbol">--</span>
+                <button class="analysis-refresh-btn" onclick="loadMarketAnalysis()" title="重新获取最新数据并分析">
+                    🔄 更新分析
+                </button>
+            </h2>
+            <div class="analysis-update-time" id="analysisUpdateTime">
+                数据更新时间: --
+            </div>
+            <div class="market-analysis-container">
+                <div class="analysis-header">
+                    <div class="analysis-badge" id="sentimentBadge">
+                        <span class="badge-label">市场情绪</span>
+                        <span class="badge-value" id="marketSentiment">--</span>
+                    </div>
+                    <div class="analysis-badge" id="riskBadge">
+                        <span class="badge-label">风险等级</span>
+                        <span class="badge-value" id="riskLevel">--</span>
+                    </div>
+                    <div class="analysis-badge" id="buyPowerBadge">
+                        <span class="badge-label">1h买卖力量</span>
+                        <div class="mini-power-bar">
+                            <div class="mini-power-buy" id="miniPowerBuy" style="width: 50%"></div>
+                            <div class="mini-power-sell" id="miniPowerSell" style="width: 50%"></div>
+                        </div>
+                        <div class="mini-power-text">
+                            <span class="buy-text" id="miniPowerBuyText">50%</span>
+                            <span class="sell-text" id="miniPowerSellText">50%</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="main-operation">
+                    <div class="operation-icon">💡</div>
+                    <div class="operation-text" id="mainOperation">正在分析市场数据...</div>
+                </div>
+                <div class="analysis-conclusions">
+                    <div class="conclusions-title">📋 详细分析</div>
+                    <ul id="conclusionsList">
+                        <li>加载中...</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- 综合K线图表 -->
+        <div class="chart-section">
+            <div class="section-header">
+                <h2>
+                    📊 综合走势图（价格/成交量/成交额<span id="oiTitle" style="display:none;">/持仓量</span>）
+                    <span class="chart-symbol" id="chartSymbol">--</span>
+                    <span class="chart-market-type" id="chartMarketType">--</span>
+                </h2>
+                <div class="chart-controls">
+                    <select id="intervalSelect" onchange="loadKlines()">
+                        <option value="15m">15分钟</option>
+                        <option value="1h" selected>1小时</option>
+                        <option value="4h">4小时</option>
+                        <option value="1d">1天</option>
+                    </select>
+                </div>
+            </div>
+            <canvas id="klineChart" style="height: 450px;"></canvas>
+        </div>
+
+        <!-- 双列布局：订单深度 和 最近成交 -->
+        <div class="two-column">
+            <!-- 订单深度 -->
+            <div class="data-section">
+                <h2>
+                    📖 订单深度
+                    <span class="section-symbol" id="orderbookSymbol">--</span>
+                    <span class="section-market-type" id="orderbookMarketType">--</span>
+                </h2>
+                <div class="orderbook-container">
+                    <div class="orderbook-column">
+                        <h3 class="sell-header">🔴 卖单 (Ask)</h3>
+                        <table id="askTable" class="orderbook-table">
+                            <thead>
+                                <tr>
+                                    <th>价格</th>
+                                    <th>数量</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="orderbook-column">
+                        <h3 class="buy-header">🟢 买单 (Bid)</h3>
+                        <table id="bidTable" class="orderbook-table">
+                            <thead>
+                                <tr>
+                                    <th>价格</th>
+                                    <th>数量</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 最近成交 -->
+            <div class="data-section">
+                <div class="section-header">
+                    <h2>
+                        💹 最近成交
+                        <span class="section-symbol" id="tradesSymbol">--</span>
+                        <span class="section-market-type" id="tradesMarketType">--</span>
+                    </h2>
+                    <div class="trades-time-controls">
+                        <label for="tradesTimeRangeSelect">⏱️ 时间范围：</label>
+                        <select id="tradesTimeRangeSelect" onchange="loadTrades()">
+                            <option value="1">1分钟</option>
+                            <option value="5" selected>5分钟</option>
+                            <option value="30">30分钟</option>
+                            <option value="120">2小时</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- 成交统计分析 -->
+                <div class="trades-analysis">
+                    <div class="trades-stats-row">
+                        <div class="trades-stat-card">
+                            <div class="stat-label">📊 总成交笔数</div>
+                            <div class="stat-value" id="tradesTotal">--</div>
+                        </div>
+                        <div class="trades-stat-card buy">
+                            <div class="stat-label">🟢 买入笔数</div>
+                            <div class="stat-value" id="tradesBuyCount">--</div>
+                        </div>
+                        <div class="trades-stat-card sell">
+                            <div class="stat-label">🔴 卖出笔数</div>
+                            <div class="stat-value" id="tradesSellCount">--</div>
+                        </div>
+                    </div>
+                    
+                    <div class="trades-stats-row">
+                        <div class="trades-stat-card buy">
+                            <div class="stat-label">🟢 买入总量</div>
+                            <div class="stat-value" id="tradesBuyVolume">--</div>
+                        </div>
+                        <div class="trades-stat-card sell">
+                            <div class="stat-label">🔴 卖出总量</div>
+                            <div class="stat-value" id="tradesSellVolume">--</div>
+                        </div>
+                    </div>
+                    
+                    <div class="trades-stats-row">
+                        <div class="trades-stat-card buy">
+                            <div class="stat-label">🟢 买入金额</div>
+                            <div class="stat-value" id="tradesBuyAmount">--</div>
+                        </div>
+                        <div class="trades-stat-card sell">
+                            <div class="stat-label">🔴 卖出金额</div>
+                            <div class="stat-value" id="tradesSellAmount">--</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 买卖力量对比条 -->
+                    <div class="trades-power-bar">
+                        <div class="power-label-row">
+                            <span>🟢 买入力量</span>
+                            <span>🔴 卖出力量</span>
+                        </div>
+                        <div class="power-bar">
+                            <div class="power-buy" id="tradesPowerBuy" style="width: 50%"></div>
+                            <div class="power-sell" id="tradesPowerSell" style="width: 50%"></div>
+                        </div>
+                        <div class="power-values">
+                            <span id="tradesPowerBuyPercent">50%</span>
+                            <span id="tradesPowerSellPercent">50%</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="trades-container">
+                    <table id="tradesTable" class="trades-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>价格</th>
+                                <th>数量</th>
+                                <th>金额(USDT)</th>
+                                <th>方向</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 大单分析 -->
+        <div class="data-section">
+            <div class="section-header">
+                <h2>
+                    🐋 大单买卖分析
+                    <span class="section-symbol" id="largeOrdersSymbol">--</span>
+                    <span class="section-market-type" id="largeOrdersMarketType">--</span>
+                </h2>
+                <div class="analysis-controls">
+                    <div class="time-range-controls">
+                        <label for="timeRangeSelect">⏰ 时间范围：</label>
+                        <select id="timeRangeSelect" onchange="loadLargeOrders()">
+                            <option value="1">1小时</option>
+                            <option value="2">2小时</option>
+                            <option value="3">3小时</option>
+                            <option value="4">4小时</option>
+                            <option value="5">5小时</option>
+                            <option value="6">6小时</option>
+                            <option value="12" selected>12小时</option>
+                        </select>
+                    </div>
+                    <div class="threshold-controls">
+                        <label for="thresholdSelect">💰 大单金额：</label>
+                        <select id="thresholdSelect" onchange="loadLargeOrders()">
+                            <option value="1000">≥ 1,000 USDT</option>
+                            <option value="5000">≥ 5,000 USDT</option>
+                            <option value="10000" selected>≥ 10,000 USDT</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 买卖力量对比 -->
+            <div class="large-orders-summary">
+                <div class="summary-card">
+                    <div class="summary-header">📊 成交统计</div>
+                    <div class="summary-grid">
+                        <div class="summary-item">
+                            <div class="summary-label">总成交笔数</div>
+                            <div class="summary-value" id="totalTrades">--</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="summary-label">大单笔数</div>
+                            <div class="summary-value" id="largeOrdersCount">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="summary-card">
+                    <div class="summary-header">🟢 买入力量</div>
+                    <div class="summary-grid">
+                        <div class="summary-item">
+                            <div class="summary-label">买入占比</div>
+                            <div class="summary-value buy-color" id="buyRatio">--</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="summary-label">买入金额</div>
+                            <div class="summary-value" id="buyAmount">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="summary-card">
+                    <div class="summary-header">🔴 卖出力量</div>
+                    <div class="summary-grid">
+                        <div class="summary-item">
+                            <div class="summary-label">卖出占比</div>
+                            <div class="summary-value sell-color" id="sellRatio">--</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="summary-label">卖出金额</div>
+                            <div class="summary-value" id="sellAmount">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="summary-card">
+                    <div class="summary-header">🐋 大单统计</div>
+                    <div class="summary-grid">
+                        <div class="summary-item">
+                            <div class="summary-label">大额买入</div>
+                            <div class="summary-value buy-color" id="largeBuyCount">--</div>
+                        </div>
+                        <div class="summary-item">
+                            <div class="summary-label">大额卖出</div>
+                            <div class="summary-value sell-color" id="largeSellCount">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 买卖力量进度条 -->
+            <div class="power-indicator">
+                <div class="power-label">
+                    <span>🟢 买入力量</span>
+                    <span>🔴 卖出力量</span>
+                </div>
+                <div class="power-bar">
+                    <div class="power-buy" id="powerBuy" style="width: 50%"></div>
+                    <div class="power-sell" id="powerSell" style="width: 50%"></div>
+                </div>
+                <div class="power-values">
+                    <span id="powerBuyPercent">50%</span>
+                    <span id="powerSellPercent">50%</span>
+                </div>
+            </div>
+
+            <!-- 大单列表 -->
+            <h3>
+                📋 大单明细
+                <span id="thresholdDisplay" style="font-size: 0.9em; color: #667eea; font-weight: 600;"></span>
+                <span id="timeRangeDisplay" style="font-size: 0.9em; color: #666; font-weight: normal;"></span>
+            </h3>
+            <div class="large-orders-list">
+                <table id="largeOrdersTable" class="large-orders-table">
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>价格</th>
+                            <th>数量</th>
+                            <th>金额(USDT)</th>
+                            <th>类型</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 所有币种概览 -->
+        <div class="data-section">
+            <h2>🌐 所有币种行情概览</h2>
+            <div id="allMarketsOverview" class="markets-overview">
+                <!-- 动态生成 -->
+            </div>
+        </div>
+
+        <!-- 页脚 -->
+        <footer>
+            <p>💡 数据来源: 币安交易所 (Binance) | 仅供参考，不构成投资建议</p>
+            <p>🔄 自动更新: 每10秒刷新一次数据</p>
+            <p>📊 支持币种: TA, BTR, AT | 交易类型: 现货 & 合约（如果可用）</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app_multi.js') }}"></script>
+</body>
+</html>
