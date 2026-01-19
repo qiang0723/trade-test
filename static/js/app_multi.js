@@ -4,6 +4,7 @@ let autoRefreshInterval = null;
 let availableMarkets = {};
 let currentSymbol = 'BTC';
 let currentMarketType = 'spot';
+let analysisCountdown = 60; // 市场分析自动刷新倒计时
 
 // 格式化数字
 function formatNumber(num, decimals = 2) {
@@ -183,6 +184,9 @@ async function loadMarketAnalysis() {
     }
     
     analysisSection.style.display = 'block';
+    
+    // 重置倒计时（手动刷新或自动刷新都会触发）
+    analysisCountdown = 60;
     
     try {
         // 显示加载状态
@@ -865,6 +869,29 @@ function startAutoRefresh() {
     
     // K线图每30秒更新一次
     setInterval(loadKlines, 30000);
+    
+    // 市场分析每60秒更新一次（仅合约）
+    const countdownElement = document.getElementById('analysisCountdown');
+    
+    // 倒计时显示
+    setInterval(() => {
+        analysisCountdown--;
+        if (analysisCountdown <= 0) {
+            analysisCountdown = 60;
+        }
+        if (countdownElement && currentMarketType === 'futures') {
+            countdownElement.textContent = `自动刷新：${analysisCountdown}秒`;
+            countdownElement.style.color = analysisCountdown <= 10 ? '#e74c3c' : '#888';
+        }
+    }, 1000);
+    
+    // 每60秒自动刷新市场分析
+    setInterval(() => {
+        if (currentMarketType === 'futures') {
+            loadMarketAnalysis();
+            analysisCountdown = 60; // 重置倒计时
+        }
+    }, 60000);
 }
 
 // 页面加载完成后初始化
