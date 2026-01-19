@@ -588,11 +588,144 @@ class MultiMarketAPI:
             buy_ratio_1h = (buy_amount_1h / total_amount_1h * 100) if total_amount_1h > 0 else 50
             sell_ratio_1h = 100 - buy_ratio_1h
             
+            # 转换资金费率为百分比（提前计算，供后面使用）
+            funding_rate_percent = funding_rate * 100
+            
             # 生成分析结论
             conclusions = []
             market_sentiment = "中性"
             main_operation = ""
             risk_level = "中"
+            trading_signal = "观望"  # 交易信号：做多、做空、观望
+            
+            # ========== 标准做多模型评分 ==========
+            long_score = 0
+            long_conditions = []
+            
+            # 条件1: 结构向上（或刚突破）
+            structure_up = False
+            if price_change_24h > 3 and price_trend_6h > 1:
+                long_score += 2
+                structure_up = True
+                long_conditions.append("✓ 结构向上：24h涨幅>3%且6h延续上涨")
+            elif price_change_24h > 0 and price_trend_6h > 2:
+                long_score += 1.5
+                structure_up = True
+                long_conditions.append("✓ 刚突破：6h涨幅>2%，突破初期")
+            elif 0 < price_change_24h <= 3 and price_trend_6h > 0:
+                long_score += 1
+                long_conditions.append("○ 结构偏多：价格缓慢向上")
+            
+            # 条件2: 突破放量 / 回调缩量
+            volume_quality = False
+            if structure_up:
+                # 如果是上涨，应该放量
+                if volume_change > 15:
+                    long_score += 2
+                    volume_quality = True
+                    long_conditions.append("✓ 突破放量：成交量放大>15%")
+                elif volume_change > 0:
+                    long_score += 1
+                    long_conditions.append("○ 量能一般：成交量小幅增加")
+            else:
+                # 如果是回调，应该缩量
+                if volume_change < -10:
+                    long_score += 1.5
+                    volume_quality = True
+                    long_conditions.append("✓ 回调缩量：成交量萎缩>10%")
+                elif volume_change < 0:
+                    long_score += 0.5
+                    long_conditions.append("○ 量能缩减：成交量小幅下降")
+            
+            # 条件3: OI 小幅持续上升（不是暴涨）
+            oi_quality = False
+            if 2 <= oi_change <= 8:
+                long_score += 2
+                oi_quality = True
+                long_conditions.append(f"✓ OI小幅增长：持仓量+{oi_change:.1f}%（健康区间2-8%）")
+            elif 0 < oi_change < 2:
+                long_score += 1
+                long_conditions.append(f"○ OI温和增长：持仓量+{oi_change:.1f}%")
+            elif oi_change > 8:
+                long_score -= 0.5
+                long_conditions.append(f"⚠ OI暴涨：持仓量+{oi_change:.1f}%（过热风险）")
+            
+            # 条件4: 资金费率温和
+            funding_quality = False
+            if -0.03 <= funding_rate_percent <= 0.08:
+                long_score += 1.5
+                funding_quality = True
+                long_conditions.append(f"✓ 资金费率温和：{funding_rate_percent:+.4f}%（正常范围）")
+            elif 0.08 < funding_rate_percent <= 0.15:
+                long_score += 0.5
+                long_conditions.append(f"○ 资金费率偏高：{funding_rate_percent:+.4f}%（多头偏热）")
+            elif funding_rate_percent > 0.15:
+                long_score -= 1
+                long_conditions.append(f"⚠ 资金费率过高：{funding_rate_percent:+.4f}%（极度过热）")
+            
+            # 条件5: 主动买单略占优
+            buy_quality = False
+            if 53 <= buy_ratio_1h <= 65:
+                long_score += 2
+                buy_quality = True
+                long_conditions.append(f"✓ 买单略占优：买入{buy_ratio_1h:.1f}%（理想范围53-65%）")
+            elif 65 < buy_ratio_1h <= 70:
+                long_score += 1
+                long_conditions.append(f"○ 买单占优：买入{buy_ratio_1h:.1f}%（偏强）")
+            elif buy_ratio_1h > 70:
+                long_score += 0.5
+                long_conditions.append(f"⚠ 买单过强：买入{buy_ratio_1h:.1f}%（追涨风险）")
+            elif 45 <= buy_ratio_1h < 53:
+                long_score += 0.5
+                long_conditions.append(f"○ 买卖均衡：买入{buy_ratio_1h:.1f}%")
+            
+            # ========== 标准做多模型判断 ==========
+            perfect_long = (structure_up and volume_quality and oi_quality and 
+                          funding_quality and buy_quality)
+            
+            if long_score >= 8 or perfect_long:
+                trading_signal = "强烈做多"
+                market_sentiment = "极度看涨"
+                risk_level = "低"
+                main_operation = "🚀 标准做多模型：高胜率做多机会！"
+                conclusions.insert(0, "=" * 50)
+                conclusions.insert(1, "🎯 【标准做多模型】满足条件！")
+                conclusions.insert(2, f"📊 做多评分：{long_score:.1f}/10.0 分")
+                conclusions.insert(3, "=" * 50)
+                for cond in long_conditions:
+                    conclusions.insert(4, cond)
+                conclusions.insert(4 + len(long_conditions), "=" * 50)
+                conclusions.insert(5 + len(long_conditions), "💡 操作建议：顺势做多，设置合理止损")
+                conclusions.insert(6 + len(long_conditions), "=" * 50)
+            elif long_score >= 6:
+                trading_signal = "偏多"
+                market_sentiment = "看涨"
+                risk_level = "中"
+                main_operation = f"✅ 做多信号较强（评分{long_score:.1f}/10），可考虑做多"
+                conclusions.insert(0, "─" * 50)
+                conclusions.insert(1, f"📈 做多模型评分：{long_score:.1f}/10.0 分（偏多）")
+                for cond in long_conditions:
+                    conclusions.insert(2, cond)
+                conclusions.insert(2 + len(long_conditions), "─" * 50)
+            elif long_score >= 4:
+                trading_signal = "观望"
+                main_operation = f"⚖️ 做多信号一般（评分{long_score:.1f}/10），建议观望"
+                if long_conditions:
+                    conclusions.append("─" * 50)
+                    conclusions.append(f"📊 做多模型评分：{long_score:.1f}/10.0 分（中性）")
+                    for cond in long_conditions:
+                        conclusions.append(cond)
+            else:
+                trading_signal = "不建议做多"
+                if price_change_24h < -3:
+                    market_sentiment = "看跌"
+                if long_conditions:
+                    conclusions.append(f"❌ 不符合做多模型（评分{long_score:.1f}/10）")
+            
+            # ========== 补充详细分析 ==========
+            conclusions.append("")
+            conclusions.append("📋 详细数据分析：")
+            conclusions.append("─" * 50)
             
             # 1. 1小时买卖量分析（短期多空力量对比）
             if total_amount_1h > 0:
@@ -657,7 +790,6 @@ class MultiMarketAPI:
                 conclusions.append(f"📊 6h持仓量基本持平 {oi_change:+.2f}%，市场观望情绪浓厚")
             
             # 2. 资金费率分析（反映多空情绪）
-            funding_rate_percent = funding_rate * 100
             if abs(funding_rate_percent) > 0.05:
                 if funding_rate_percent > 0.05:
                     conclusions.append(f"💰 资金费率偏高 {funding_rate_percent:+.4f}%，多头支付空头")
@@ -738,6 +870,8 @@ class MultiMarketAPI:
                     'market_sentiment': market_sentiment,
                     'main_operation': main_operation,
                     'risk_level': risk_level,
+                    'trading_signal': trading_signal,  # 新增：交易信号
+                    'long_score': long_score,  # 新增：做多模型评分
                     'conclusions': conclusions,
                     'data': {
                         'current_price': current_price,

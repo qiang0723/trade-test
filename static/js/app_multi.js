@@ -209,6 +209,25 @@ async function loadMarketAnalysis() {
             document.getElementById('analysisUpdateTime').textContent = 
                 `数据更新时间: ${timeStr} | 📊 数据来源: 币安实时行情`;
             
+            // 更新做多模型评分和交易信号
+            const longScore = analysis.long_score || 0;
+            const tradingSignal = analysis.trading_signal || '观望';
+            const longModelCard = document.getElementById('longModelCard');
+            
+            // 更新评分显示
+            document.getElementById('longScoreValue').textContent = longScore.toFixed(1);
+            document.getElementById('tradingSignal').textContent = tradingSignal;
+            
+            // 根据评分设置卡片样式
+            longModelCard.classList.remove('score-high', 'score-medium', 'score-low');
+            if (longScore >= 8) {
+                longModelCard.classList.add('score-high');
+            } else if (longScore >= 6) {
+                longModelCard.classList.add('score-medium');
+            } else {
+                longModelCard.classList.add('score-low');
+            }
+            
             // 更新市场情绪
             const sentiment = analysis.market_sentiment;
             const sentimentElement = document.getElementById('marketSentiment');
