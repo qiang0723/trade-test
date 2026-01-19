@@ -33,6 +33,13 @@ btc_market_data/
 *.json
 *.log
 
+# 数据库文件
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+market_signals.db*
+
 # 临时文件
 *.tmp
 *.bak

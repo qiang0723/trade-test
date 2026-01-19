@@ -27,6 +27,7 @@ COPY btc_market_data.py .
 COPY btc_market_export.py .
 COPY btc_market_multi_symbols.py .
 COPY btc_web_app.py .
+COPY database.py .
 COPY static/ ./static/
 COPY templates/ ./templates/
 

@@ -19,6 +19,15 @@ import threading
 import time
 from collections import defaultdict
 
+# 导入数据库模块
+try:
+    from database import get_signal_db
+    DB_ENABLED = True
+    print("✅ 数据库模块已加载，历史信号记录功能已启用")
+except ImportError:
+    DB_ENABLED = False
+    print("⚠️ 数据库模块未找到，历史信号记录功能将被禁用")
+
 app = Flask(__name__)
 
 class MultiMarketAPI:
@@ -976,8 +985,8 @@ class MultiMarketAPI:
                 '─' * 50
             ])
             
-            # 返回最终结果
-            return {
+            # 构造返回结果
+            result = {
                 'success': True,
                 'symbol': symbol,
                 'analysis': {
@@ -997,6 +1006,18 @@ class MultiMarketAPI:
                     }
                 }
             }
+            
+            # 保存信号到数据库（异步，不影响主功能）
+            if DB_ENABLED:
+                try:
+                    db = get_signal_db()
+                    db.save_signal(result)
+                except Exception as db_error:
+                    # 数据库保存失败不影响主功能，只记录日志
+                    print(f"⚠️ 数据库保存失败: {str(db_error)}")
+            
+            # 返回最终结果
+            return result
             
         except Exception as e:
             import traceback
@@ -1354,6 +1375,88 @@ def api_large_orders(market_type, symbol):
         return jsonify(market_api.analyze_large_orders(trades_data, threshold, time_range_hours))
     else:
         return jsonify(trades_data)
+
+
+@app.route('/api/signal-history')
+def api_signal_history():
+    """API: 获取历史信号记录"""
+    if not DB_ENABLED:
+        return jsonify({
+            'success': False,
+            'error': '数据库功能未启用'
+        })
+    
+    try:
+        symbol = request.args.get('symbol', None)
+        limit = int(request.args.get('limit', 10))
+        
+        db = get_signal_db()
+        signals = db.get_latest_signals(symbol, limit)
+        
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'count': len(signals),
+            'signals': signals
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+
+@app.route('/api/signal-stats')
+def api_signal_stats():
+    """API: 获取信号统计数据"""
+    if not DB_ENABLED:
+        return jsonify({
+            'success': False,
+            'error': '数据库功能未启用'
+        })
+    
+    try:
+        symbol = request.args.get('symbol', None)
+        days = int(request.args.get('days', 7))
+        
+        db = get_signal_db()
+        stats = db.get_signal_stats(symbol, days)
+        
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'days': days,
+            'stats': stats
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+
+@app.route('/api/database-info')
+def api_database_info():
+    """API: 获取数据库信息"""
+    if not DB_ENABLED:
+        return jsonify({
+            'success': False,
+            'error': '数据库功能未启用'
+        })
+    
+    try:
+        db = get_signal_db()
+        info = db.get_database_info()
+        
+        return jsonify({
+            'success': True,
+            'info': info
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 
 if __name__ == '__main__':
