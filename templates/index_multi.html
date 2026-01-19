@@ -151,20 +151,39 @@
                     </div>
                 </div>
                 
-                <!-- 做多模型评分卡片（辅助参考） -->
-                <div class="long-model-card" id="longModelCard">
-                    <div class="model-header">
-                        <span class="model-icon">📊</span>
-                        <span class="model-title">做多模型评分（参考）</span>
-                    </div>
-                    <div class="model-score-container">
-                        <div class="score-circle" id="scoreCircle">
-                            <div class="score-value" id="longScoreValue">--</div>
-                            <div class="score-label">评分</div>
+                <!-- 做多做空模型评分卡片（辅助参考） -->
+                <div class="model-cards-row">
+                    <div class="long-model-card" id="longModelCard">
+                        <div class="model-header">
+                            <span class="model-icon">📈</span>
+                            <span class="model-title">做多模型评分</span>
                         </div>
-                        <div class="model-signal" id="modelSignal">
-                            <div class="signal-label">辅助信号</div>
-                            <div class="signal-value" id="tradingSignal">--</div>
+                        <div class="model-score-container">
+                            <div class="score-circle" id="longScoreCircle">
+                                <div class="score-value" id="longScoreValue">--</div>
+                                <div class="score-label">分</div>
+                            </div>
+                            <div class="model-signal" id="longModelSignal">
+                                <div class="signal-label">做多信号</div>
+                                <div class="signal-value" id="tradingSignal">--</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="short-model-card" id="shortModelCard">
+                        <div class="model-header">
+                            <span class="model-icon">📉</span>
+                            <span class="model-title">做空模型评分</span>
+                        </div>
+                        <div class="model-score-container">
+                            <div class="score-circle" id="shortScoreCircle">
+                                <div class="score-value" id="shortScoreValue">--</div>
+                                <div class="score-label">分</div>
+                            </div>
+                            <div class="model-signal" id="shortModelSignal">
+                                <div class="signal-label">做空信号</div>
+                                <div class="signal-value" id="shortSignal">--</div>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -722,6 +722,132 @@ class MultiMarketAPI:
                 if long_conditions:
                     conclusions.append(f"❌ 不符合做多模型（评分{long_score:.1f}/10）")
             
+            # ========== 标准做空模型评分 ==========
+            short_score = 0
+            short_conditions = []
+            short_signal = "观望"  # 默认值
+            
+            # 条件1: 结构向下（或刚破位）
+            structure_down = False
+            if price_change_24h < -3 and price_trend_6h < -1:
+                short_score += 2
+                structure_down = True
+                short_conditions.append("✓ 结构向下：24h跌幅>3%且6h延续下跌")
+            elif price_change_24h < 0 and price_trend_6h < -2:
+                short_score += 1.5
+                structure_down = True
+                short_conditions.append("✓ 刚破位：6h跌幅>2%，破位初期")
+            elif -3 < price_change_24h <= 0 and price_trend_6h < 0:
+                short_score += 1
+                short_conditions.append("○ 结构偏空：价格缓慢向下")
+            
+            # 条件2: 下跌放量 / 反弹缩量
+            volume_quality_short = False
+            if structure_down:
+                # 如果是下跌，应该放量
+                if volume_change > 15:
+                    short_score += 2
+                    volume_quality_short = True
+                    short_conditions.append("✓ 下跌放量：成交量放大>15%")
+                elif volume_change > 0:
+                    short_score += 1
+                    short_conditions.append("○ 量能一般：成交量小幅增加")
+            else:
+                # 如果是反弹，应该缩量
+                if volume_change < -10:
+                    short_score += 1.5
+                    volume_quality_short = True
+                    short_conditions.append("✓ 反弹缩量：成交量萎缩>10%")
+                elif volume_change < 0:
+                    short_score += 0.5
+                    short_conditions.append("○ 量能缩减：成交量小幅下降")
+            
+            # 条件3: OI堆积或上涨配合下跌
+            oi_quality_short = False
+            if 8 <= oi_change <= 15:
+                short_score += 2
+                oi_quality_short = True
+                short_conditions.append(f"✓ OI堆积：持仓量+{oi_change:.1f}%（风险堆积区间8-15%）")
+            elif price_change_24h < -1 and oi_change > 2:
+                short_score += 2
+                oi_quality_short = True
+                short_conditions.append(f"✓ 价格下跌+OI上升：空头增仓，OI+{oi_change:.1f}%")
+            elif 2 < oi_change < 8:
+                short_score += 1
+                short_conditions.append(f"○ OI温和增长：持仓量+{oi_change:.1f}%")
+            
+            # 条件4: 资金费率过热或极度过热
+            funding_quality_short = False
+            if funding_rate_percent > 0.15:
+                short_score += 1.5
+                funding_quality_short = True
+                short_conditions.append(f"✓ 资金费率极度过热：{funding_rate_percent:+.4f}%（>0.15%）")
+            elif 0.1 < funding_rate_percent <= 0.15:
+                short_score += 1
+                funding_quality_short = True
+                short_conditions.append(f"✓ 资金费率过热：{funding_rate_percent:+.4f}%（>0.1%）")
+            elif 0.08 < funding_rate_percent <= 0.1:
+                short_score += 0.5
+                short_conditions.append(f"○ 资金费率偏高：{funding_rate_percent:+.4f}%")
+            
+            # 条件5: 主动卖单占优
+            sell_quality = False
+            if 53 <= sell_ratio_1h <= 65:
+                short_score += 2
+                sell_quality = True
+                short_conditions.append(f"✓ 卖单略占优：卖出{sell_ratio_1h:.1f}%（理想范围53-65%）")
+            elif 65 < sell_ratio_1h <= 70:
+                short_score += 1
+                short_conditions.append(f"○ 卖单占优：卖出{sell_ratio_1h:.1f}%（偏强）")
+            elif sell_ratio_1h > 70:
+                short_score += 0.5
+                short_conditions.append(f"⚠ 卖单过强：卖出{sell_ratio_1h:.1f}%（杀跌风险）")
+            elif 45 <= sell_ratio_1h < 53:
+                short_score += 0.5
+                short_conditions.append(f"○ 买卖均衡：卖出{sell_ratio_1h:.1f}%")
+            
+            # ========== 标准做空模型判断 ==========
+            perfect_short = (structure_down and volume_quality_short and oi_quality_short and 
+                           funding_quality_short and sell_quality)
+            
+            # 添加做空模型结论到详细分析中
+            if short_score >= 8 or perfect_short:
+                short_signal = "强烈做空"
+                if not main_operation or "做空" not in main_operation:
+                    if not extreme_condition and market_sentiment != "看涨":
+                        market_sentiment = "极度看跌"
+                        risk_level = "低"
+                conclusions.append("")
+                conclusions.append("=" * 50)
+                conclusions.append("🎯 【标准做空模型】满足条件！")
+                conclusions.append(f"📊 做空评分：{short_score:.1f}/10.0 分")
+                conclusions.append("=" * 50)
+                for cond in short_conditions:
+                    conclusions.append(cond)
+                conclusions.append("=" * 50)
+                conclusions.append("💡 操作建议：顺势做空，设置合理止损")
+                conclusions.append("=" * 50)
+            elif short_score >= 6:
+                short_signal = "偏空"
+                conclusions.append("")
+                conclusions.append("─" * 50)
+                conclusions.append(f"📉 做空模型评分：{short_score:.1f}/10.0 分（偏空）")
+                for cond in short_conditions:
+                    conclusions.append(cond)
+                conclusions.append("─" * 50)
+            elif short_score >= 4:
+                short_signal = "观望"
+                if short_conditions:
+                    conclusions.append("")
+                    conclusions.append("─" * 50)
+                    conclusions.append(f"📊 做空模型评分：{short_score:.1f}/10.0 分（中性）")
+                    for cond in short_conditions:
+                        conclusions.append(cond)
+            else:
+                short_signal = "不建议做空"
+                if short_conditions:
+                    conclusions.append(f"❌ 不符合做空模型（评分{short_score:.1f}/10）")
+            
             # ========== 三态交易信号判断 ==========
             # 根据成交量、OI、资金费率、买卖行为，判断 LONG / SHORT / NO_TRADE
             trade_action = "NO_TRADE"
@@ -992,12 +1118,14 @@ class MultiMarketAPI:
                 'success': True,
                 'symbol': symbol,
                 'analysis': {
-                    'trade_action': trade_action,  # 新增：三态交易信号 LONG/SHORT/NO_TRADE
+                    'trade_action': trade_action,  # 三态交易信号 LONG/SHORT/NO_TRADE
                     'market_sentiment': market_sentiment,
                     'main_operation': main_operation,
                     'risk_level': risk_level,
                     'trading_signal': trading_signal,  # 做多模型信号
                     'long_score': long_score,  # 做多模型评分
+                    'short_signal': short_signal,  # 做空模型信号
+                    'short_score': short_score,  # 做空模型评分
                     'conclusions': conclusions,
                     'data': {
                         'current_price': current_price,

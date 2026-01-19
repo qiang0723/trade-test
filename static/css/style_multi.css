@@ -944,13 +944,32 @@ footer p {
     margin-top: 10px;
 }
 
-/* 做多模型评分卡片（调整为辅助参考） */
+/* 做多做空模型评分卡片并排布局 */
+.model-cards-row {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.model-cards-row > div {
+    flex: 1;
+}
+
+/* 做多模型评分卡片 */
 .long-model-card {
-    background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
     border-radius: 12px;
     padding: 15px 20px;
-    margin-bottom: 15px;
-    box-shadow: 0 6px 15px rgba(14, 165, 233, 0.3);
+    box-shadow: 0 6px 15px rgba(16, 185, 129, 0.3);
+    color: white;
+}
+
+/* 做空模型评分卡片 */
+.short-model-card {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    border-radius: 12px;
+    padding: 15px 20px;
+    box-shadow: 0 6px 15px rgba(239, 68, 68, 0.3);
     color: white;
 }
 
@@ -1174,6 +1193,11 @@ footer p {
     header {
         flex-direction: column;
         text-align: center;
+    }
+    
+    /* 模型卡片在小屏幕上垂直堆叠 */
+    .model-cards-row {
+        flex-direction: column;
     }
 
     header h1 {

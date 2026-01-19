@@ -242,18 +242,43 @@ async function loadMarketAnalysis() {
             const tradingSignal = analysis.trading_signal || '观望';
             const longModelCard = document.getElementById('longModelCard');
             
-            // 更新评分显示
+            // 更新做多评分显示
             document.getElementById('longScoreValue').textContent = longScore.toFixed(1);
             document.getElementById('tradingSignal').textContent = tradingSignal;
             
-            // 根据评分设置卡片样式
-            longModelCard.classList.remove('score-high', 'score-medium', 'score-low');
+            // 根据做多评分设置评分圈颜色
+            const longScoreCircle = document.getElementById('longScoreCircle');
             if (longScore >= 8) {
-                longModelCard.classList.add('score-high');
+                longScoreCircle.style.borderColor = 'rgba(255, 255, 255, 0.9)';
+                longScoreCircle.style.background = 'rgba(255, 255, 255, 0.25)';
             } else if (longScore >= 6) {
-                longModelCard.classList.add('score-medium');
+                longScoreCircle.style.borderColor = 'rgba(255, 255, 255, 0.7)';
+                longScoreCircle.style.background = 'rgba(255, 255, 255, 0.2)';
             } else {
-                longModelCard.classList.add('score-low');
+                longScoreCircle.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+                longScoreCircle.style.background = 'rgba(255, 255, 255, 0.15)';
+            }
+            
+            // 更新做空模型评分和交易信号（辅助参考）
+            const shortScore = analysis.short_score || 0;
+            const shortSignal = analysis.short_signal || '观望';
+            const shortModelCard = document.getElementById('shortModelCard');
+            
+            // 更新做空评分显示
+            document.getElementById('shortScoreValue').textContent = shortScore.toFixed(1);
+            document.getElementById('shortSignal').textContent = shortSignal;
+            
+            // 根据做空评分设置评分圈颜色
+            const shortScoreCircle = document.getElementById('shortScoreCircle');
+            if (shortScore >= 8) {
+                shortScoreCircle.style.borderColor = 'rgba(255, 255, 255, 0.9)';
+                shortScoreCircle.style.background = 'rgba(255, 255, 255, 0.25)';
+            } else if (shortScore >= 6) {
+                shortScoreCircle.style.borderColor = 'rgba(255, 255, 255, 0.7)';
+                shortScoreCircle.style.background = 'rgba(255, 255, 255, 0.2)';
+            } else {
+                shortScoreCircle.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+                shortScoreCircle.style.background = 'rgba(255, 255, 255, 0.15)';
             }
             
             // 更新市场情绪
