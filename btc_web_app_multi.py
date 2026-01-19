@@ -116,13 +116,14 @@ class MultiMarketAPI:
             futures_symbol = f"{symbol}{self.quote_currency}"
             ticker = self.client.futures_ticker(symbol=futures_symbol)
             
-            # 获取资金费率
+            # 获取实时资金费率（使用mark_price获取最新数据）
             funding_rate_data = {'funding_rate': 0, 'next_funding_time': 0}
             try:
-                funding_info = self.client.futures_funding_rate(symbol=futures_symbol, limit=1)
-                if funding_info and len(funding_info) > 0:
-                    funding_rate_data['funding_rate'] = float(funding_info[0]['fundingRate'])
-                    funding_rate_data['next_funding_time'] = funding_info[0]['fundingTime']
+                mark_price = self.client.futures_mark_price(symbol=futures_symbol)
+                if mark_price:
+                    # lastFundingRate 是当前实时的资金费率
+                    funding_rate_data['funding_rate'] = float(mark_price['lastFundingRate'])
+                    funding_rate_data['next_funding_time'] = mark_price['nextFundingTime']
             except Exception as e:
                 print(f"获取{symbol}资金费率失败: {str(e)}")
             
