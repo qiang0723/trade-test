@@ -614,6 +614,11 @@ class MarketStateMachine:
     
     def _format_result(self, symbol, decision, system_state, market_regime, reason, data):
         """格式化返回结果"""
+        # 构建详细分析过程
+        detailed_analysis = self._build_detailed_analysis(
+            symbol, decision, system_state, market_regime, reason, data
+        )
+        
         return {
             'success': True,
             'symbol': symbol,
@@ -633,23 +638,343 @@ class MarketStateMachine:
                     'sell_ratio_1h': (1 - data.get('aggressive_buy_ratio', 0.5)) * 100,
                     'total_amount_1h': data.get('total_amount_1h', 0)
                 },
-                'detailed_analysis': [
-                    f"🤖 系统状态：{system_state.value}",
-                    f"🌍 市场环境：{market_regime.value}",
-                    f"📊 交易决策：{decision.value}",
-                    f"💡 决策原因：{reason}",
-                    "",
-                    "─" * 50,
-                    "📋 数据摘要：",
-                    f"💹 价格：${data.get('price', 0):.4f} (24h: {data.get('price_change_24h', 0):+.2f}%, 6h: {data.get('price_trend_6h', 0)*100:+.2f}%)",
-                    f"📊 成交量6h变化：{data.get('volume_change_6h', 0):+.2f}%",
-                    f"📈 持仓量6h变化：{data.get('oi_change_6h', 0):+.2f}%",
-                    f"💰 资金费率：{data.get('funding_rate', 0)*100:+.4f}%",
-                    f"🔄 1h买卖比：买{data.get('aggressive_buy_ratio', 0.5)*100:.1f}% vs 卖{(1-data.get('aggressive_buy_ratio', 0.5))*100:.1f}%",
-                    "─" * 50
-                ]
+                'detailed_analysis': detailed_analysis
             }
         }
+    
+    def _build_detailed_analysis(self, symbol, decision, system_state, market_regime, reason, data):
+        """构建详细分析过程
+        
+        Args:
+            symbol: 币种符号
+            decision: 交易决策
+            system_state: 系统状态
+            market_regime: 市场环境
+            reason: 决策原因
+            data: 市场数据
+            
+        Returns:
+            list: 详细分析内容列表
+        """
+        analysis = []
+        
+        # ========== 第一部分：状态概览 ==========
+        analysis.extend([
+            "=" * 60,
+            f"🤖 系统状态：{system_state.value}",
+            f"🌍 市场环境：{market_regime.value}",
+            f"📊 交易决策：{decision.value}",
+            f"💡 决策原因：{reason}",
+            "=" * 60,
+            ""
+        ])
+        
+        # ========== 第二部分：市场环境分析 ==========
+        analysis.append("📍 【市场环境判定】")
+        analysis.append("─" * 60)
+        
+        volatility = data.get('volatility', 0)
+        volume = data.get('volume', 0)
+        volume_avg = data.get('volume_avg', 1)
+        volume_ratio = volume / volume_avg if volume_avg > 0 else 0
+        price_structure = data.get('price_structure_continuous', False)
+        
+        # 极端市场判定
+        if market_regime == MarketRegime.EXTREME:
+            analysis.append(f"⚠️ 市场环境：EXTREME（极端市场）")
+            if volatility > self.config.VOLATILITY_EXTREME_THRESHOLD:
+                analysis.append(f"  • 波动率：{volatility*100:.2f}% > {self.config.VOLATILITY_EXTREME_THRESHOLD*100:.0f}%（极端波动）")
+            if volume_ratio > self.config.VOLUME_EXTREME_MULTIPLIER:
+                analysis.append(f"  • 成交量：{volume_ratio:.2f}x > {self.config.VOLUME_EXTREME_MULTIPLIER:.0f}x（异常放量）")
+            analysis.append("  ⇒ 系统强制保护，禁止开仓")
+        
+        # 趋势市场判定
+        elif market_regime == MarketRegime.TREND:
+            analysis.append(f"✅ 市场环境：TREND（趋势市场）")
+            analysis.append(f"  • 波动率：{volatility*100:.2f}%（正常范围 {self.config.VOLATILITY_NORMAL_RANGE[0]*100:.0f}%-{self.config.VOLATILITY_NORMAL_RANGE[1]*100:.0f}%）")
+            analysis.append(f"  • 价格结构：{'连续' if price_structure else '不连续'}")
+            analysis.append(f"  • 成交量比：{volume_ratio:.2f}x")
+            analysis.append("  ⇒ 使用标准阈值")
+        
+        # 震荡市场判定
+        else:
+            analysis.append(f"⚡ 市场环境：RANGE（震荡市场）")
+            analysis.append(f"  • 波动率：{volatility*100:.2f}%")
+            analysis.append(f"  • 价格结构：不明确")
+            analysis.append(f"  • 成交量比：{volume_ratio:.2f}x")
+            analysis.append(f"  ⇒ 使用严格阈值（{self.config.RANGE_STRICTER_MULTIPLIER:.1f}倍）")
+        
+        analysis.append("")
+        
+        # ========== 第三部分：核心指标检查 ==========
+        analysis.append("📊 【核心指标检查】")
+        analysis.append("─" * 60)
+        
+        # 价格趋势
+        price_trend_6h = data.get('price_trend_6h', 0)
+        price_change_24h = data.get('price_change_24h', 0)
+        analysis.append(f"💹 价格趋势：")
+        analysis.append(f"  • 6h趋势：{price_trend_6h*100:+.2f}%")
+        analysis.append(f"  • 24h涨跌：{price_change_24h*100:+.2f}%")
+        
+        # 成交量分析
+        volume_change_6h = data.get('volume_change_6h', 0)
+        analysis.append(f"📊 成交量分析：")
+        analysis.append(f"  • 6h变化：{volume_change_6h*100:+.2f}%")
+        analysis.append(f"  • 当前/平均：{volume_ratio:.2f}x")
+        if volume_ratio > self.config.VOLUME_BREAKOUT_MULTIPLIER:
+            analysis.append(f"  ✓ 突破放量（> {self.config.VOLUME_BREAKOUT_MULTIPLIER:.1f}x）")
+        elif volume_ratio < self.config.VOLUME_STALL_MULTIPLIER:
+            analysis.append(f"  ✓ 滞涨缩量（< {self.config.VOLUME_STALL_MULTIPLIER:.1f}x）")
+        else:
+            analysis.append(f"  • 成交量正常")
+        
+        # OI分析
+        oi_delta = data.get('oi_delta', 0)
+        oi_delta_rate = data.get('oi_delta_rate', 0)
+        oi_change_6h = data.get('oi_change_6h', 0)
+        analysis.append(f"📈 持仓量（OI）分析：")
+        analysis.append(f"  • 6h变化：{oi_change_6h*100:+.2f}%")
+        analysis.append(f"  • 变化速率：{oi_delta_rate*100:.2f}%")
+        if oi_delta > 0:
+            if oi_delta_rate > self.config.OI_EXTREME_RATE:
+                analysis.append(f"  ⚠️ OI极端增长（> {self.config.OI_EXTREME_RATE*100:.0f}%）")
+            else:
+                analysis.append(f"  ✓ OI健康增长")
+        elif oi_change_6h < self.config.OI_COLLAPSE_RATE:
+            analysis.append(f"  ⚠️ OI崩溃（< {self.config.OI_COLLAPSE_RATE*100:.0f}%）")
+        else:
+            analysis.append(f"  • OI {'增长' if oi_delta > 0 else '下降'}")
+        
+        # 资金费率分析
+        funding_rate = data.get('funding_rate', 0)
+        analysis.append(f"💰 资金费率分析：")
+        analysis.append(f"  • 当前费率：{funding_rate*100:+.4f}%")
+        if abs(funding_rate) > self.config.FUNDING_RATE_EXTREME:
+            analysis.append(f"  ⚠️ 极端费率（绝对值 > {self.config.FUNDING_RATE_EXTREME*100:.2f}%）")
+        elif funding_rate > self.config.FUNDING_RATE_OVERHEATED:
+            analysis.append(f"  ⚠️ 费率过热（> {self.config.FUNDING_RATE_OVERHEATED*100:.2f}%）")
+        elif self.config.FUNDING_RATE_HEALTHY_RANGE[0] <= funding_rate <= self.config.FUNDING_RATE_HEALTHY_RANGE[1]:
+            analysis.append(f"  ✓ 费率健康（{self.config.FUNDING_RATE_HEALTHY_RANGE[0]*100:.2f}% ~ {self.config.FUNDING_RATE_HEALTHY_RANGE[1]*100:.2f}%）")
+        elif funding_rate < self.config.FUNDING_RATE_NEGATIVE:
+            analysis.append(f"  ⚠️ 费率转负（< {self.config.FUNDING_RATE_NEGATIVE*100:.2f}%）")
+        else:
+            analysis.append(f"  • 费率略高但可接受")
+        
+        # 买卖力量分析
+        buy_ratio = data.get('aggressive_buy_ratio', 0.5)
+        sell_ratio = 1 - buy_ratio
+        analysis.append(f"🔄 买卖力量分析（1h）：")
+        analysis.append(f"  • 主动买单：{buy_ratio*100:.1f}%")
+        analysis.append(f"  • 主动卖单：{sell_ratio*100:.1f}%")
+        if buy_ratio >= self.config.AGGRESSIVE_BUY_STRONG:
+            analysis.append(f"  ✓ 买单主导（≥ {self.config.AGGRESSIVE_BUY_STRONG*100:.0f}%）")
+        elif buy_ratio < self.config.AGGRESSIVE_BUY_WEAK:
+            analysis.append(f"  ✓ 买单弱势（< {self.config.AGGRESSIVE_BUY_WEAK*100:.0f}%）")
+        elif sell_ratio >= self.config.AGGRESSIVE_SELL_STRONG:
+            analysis.append(f"  ✓ 卖单主导（≥ {self.config.AGGRESSIVE_SELL_STRONG*100:.0f}%）")
+        else:
+            analysis.append(f"  • 买卖均衡")
+        
+        analysis.append("")
+        
+        # ========== 第四部分：条件判断过程 ==========
+        if system_state == SystemState.WAIT:
+            analysis.extend(self._build_wait_analysis(data, market_regime, decision))
+        elif system_state == SystemState.LONG_ACTIVE:
+            analysis.extend(self._build_long_active_analysis(data, decision))
+        elif system_state == SystemState.SHORT_ACTIVE:
+            analysis.extend(self._build_short_active_analysis(data, decision))
+        elif system_state == SystemState.COOL_DOWN:
+            state_data = self.storage.get_state(symbol)
+            cooldown_counter = state_data.get('cooldown_counter', 0)
+            analysis.extend(self._build_cooldown_analysis(cooldown_counter))
+        
+        # ========== 第五部分：数据摘要 ==========
+        analysis.extend([
+            "",
+            "=" * 60,
+            "📋 【数据摘要】",
+            "─" * 60,
+            f"💹 价格：${data.get('price', 0):.4f}",
+            f"📊 24h涨跌：{data.get('price_change_24h', 0)*100:+.2f}%",
+            f"📈 6h趋势：{data.get('price_trend_6h', 0)*100:+.2f}%",
+            f"📊 成交量6h：{data.get('volume_change_6h', 0)*100:+.2f}%",
+            f"📈 持仓量6h：{data.get('oi_change_6h', 0)*100:+.2f}%",
+            f"💰 资金费率：{data.get('funding_rate', 0)*100:+.4f}%",
+            f"🔄 1h买卖：买{buy_ratio*100:.1f}% vs 卖{sell_ratio*100:.1f}%",
+            f"💵 1h成交额：${data.get('total_amount_1h', 0)/1000000:.2f}M",
+            "=" * 60
+        ])
+        
+        return analysis
+    
+    def _build_wait_analysis(self, data, market_regime, decision):
+        """构建WAIT状态的分析过程"""
+        analysis = [
+            "🔍 【等待状态 - 条件检查】",
+            "─" * 60
+        ]
+        
+        # 检查结构性失败
+        if self.detect_structural_failure(data):
+            analysis.append("⚠️ 检测到结构性失败：")
+            oi_delta_rate = abs(data.get('oi_delta_rate', 0))
+            funding_rate = abs(data.get('funding_rate', 0))
+            if oi_delta_rate > self.config.OI_EXTREME_RATE:
+                analysis.append(f"  • OI极端波动：{oi_delta_rate*100:.2f}% > {self.config.OI_EXTREME_RATE*100:.0f}%")
+            if funding_rate > self.config.FUNDING_RATE_EXTREME:
+                analysis.append(f"  • 资金费率极端：{funding_rate*100:.4f}% > {self.config.FUNDING_RATE_EXTREME*100:.2f}%")
+            analysis.append("  ⇒ 保持等待，不开仓")
+            return analysis
+        
+        # 检查做空条件（优先级高）
+        analysis.append("📉 检查做空条件（优先）：")
+        short_allowed = self.allow_short(data, market_regime)
+        if market_regime == MarketRegime.EXTREME:
+            analysis.append("  ✗ 市场环境极端，禁止开空")
+        else:
+            price_trend_6h = data.get('price_trend_6h', 0)
+            volume = data.get('volume', 0)
+            volume_avg = data.get('volume_avg', 1)
+            oi_delta = data.get('oi_delta', 0)
+            funding_rate = data.get('funding_rate', 0)
+            buy_ratio = data.get('aggressive_buy_ratio', 0.5)
+            
+            price_stalls = price_trend_6h > 0 and volume < volume_avg * self.config.VOLUME_STALL_MULTIPLIER
+            oi_accumulation = oi_delta > 0
+            funding_overheated = funding_rate > self.config.FUNDING_RATE_OVERHEATED
+            buy_weakens = buy_ratio < self.config.AGGRESSIVE_BUY_WEAK
+            
+            analysis.append(f"  • 滞涨缩量：{'✓' if price_stalls else '✗'} (6h涨{price_trend_6h*100:+.2f}%, 量{volume/volume_avg:.2f}x)")
+            analysis.append(f"  • OI堆积：{'✓' if oi_accumulation else '✗'} (OI变化{oi_delta*100:+.2f}%)")
+            analysis.append(f"  • 费率过热：{'✓' if funding_overheated else '✗'} (费率{funding_rate*100:.4f}%)")
+            analysis.append(f"  • 买单弱势：{'✓' if buy_weakens else '✗'} (买单{buy_ratio*100:.1f}%)")
+            
+            if short_allowed:
+                analysis.append("  ⇒ ✅ 满足做空条件，进入SHORT_ACTIVE")
+            else:
+                analysis.append("  ⇒ 条件不足，检查做多条件")
+        
+        # 检查做多条件
+        if not short_allowed:
+            analysis.append("")
+            analysis.append("📈 检查做多条件：")
+            long_allowed = self.allow_long(data, market_regime)
+            if market_regime == MarketRegime.EXTREME:
+                analysis.append("  ✗ 市场环境极端，禁止开多")
+            else:
+                volume = data.get('volume', 0)
+                volume_avg = data.get('volume_avg', 1)
+                oi_delta = data.get('oi_delta', 0)
+                oi_delta_rate = data.get('oi_delta_rate', 0)
+                funding_rate = data.get('funding_rate', 0)
+                buy_ratio = data.get('aggressive_buy_ratio', 0.5)
+                
+                volume_threshold = self.config.VOLUME_BREAKOUT_MULTIPLIER
+                if market_regime == MarketRegime.RANGE:
+                    volume_threshold *= self.config.RANGE_STRICTER_MULTIPLIER
+                
+                volume_condition = volume > volume_avg * volume_threshold
+                oi_growth = oi_delta > 0 and oi_delta_rate < self.config.OI_EXTREME_RATE
+                funding_healthy = (self.config.FUNDING_RATE_HEALTHY_RANGE[0] <= 
+                                  funding_rate <= self.config.FUNDING_RATE_HEALTHY_RANGE[1])
+                buy_drives = buy_ratio >= self.config.AGGRESSIVE_BUY_STRONG
+                
+                analysis.append(f"  • 突破放量：{'✓' if volume_condition else '✗'} (量{volume/volume_avg:.2f}x > {volume_threshold:.2f}x)")
+                analysis.append(f"  • OI健康增长：{'✓' if oi_growth else '✗'} (OI+{oi_delta*100:.2f}%, 速率{oi_delta_rate*100:.2f}%)")
+                analysis.append(f"  • 费率健康：{'✓' if funding_healthy else '✗'} (费率{funding_rate*100:.4f}%)")
+                analysis.append(f"  • 买单主导：{'✓' if buy_drives else '✗'} (买单{buy_ratio*100:.1f}%)")
+                
+                if long_allowed:
+                    analysis.append("  ⇒ ✅ 满足做多条件，进入LONG_ACTIVE")
+                else:
+                    analysis.append("  ⇒ 条件不足，继续等待")
+        
+        return analysis
+    
+    def _build_long_active_analysis(self, data, decision):
+        """构建LONG_ACTIVE状态的分析过程"""
+        analysis = [
+            "📈 【做多状态 - 持续检查】",
+            "─" * 60
+        ]
+        
+        # 检查结构性失败
+        if self.detect_structural_failure(data):
+            analysis.append("⚠️ 检测到结构性失败，退出做多状态")
+            return analysis
+        
+        # 检查做多失效条件
+        price_trend_6h = data.get('price_trend_6h', 0)
+        funding_rate = data.get('funding_rate', 0)
+        oi_change_6h = data.get('oi_change_6h', 0)
+        
+        price_breaks = price_trend_6h < -0.03
+        funding_extreme = abs(funding_rate) > self.config.FUNDING_RATE_EXTREME
+        oi_collapses = oi_change_6h < self.config.OI_COLLAPSE_RATE
+        
+        analysis.append("🔍 做多失效检查：")
+        analysis.append(f"  • 价格跌破：{'✗ 失效' if price_breaks else '✓ 正常'} (6h{price_trend_6h*100:+.2f}%)")
+        analysis.append(f"  • 费率极端：{'✗ 失效' if funding_extreme else '✓ 正常'} (费率{funding_rate*100:.4f}%)")
+        analysis.append(f"  • OI崩溃：{'✗ 失效' if oi_collapses else '✓ 正常'} (OI{oi_change_6h*100:+.2f}%)")
+        
+        if decision == Decision.NO_TRADE:
+            analysis.append("  ⇒ ❌ 做多条件失效，返回WAIT")
+        else:
+            analysis.append("  ⇒ ✅ 做多状态保持")
+        
+        return analysis
+    
+    def _build_short_active_analysis(self, data, decision):
+        """构建SHORT_ACTIVE状态的分析过程"""
+        analysis = [
+            "📉 【做空状态 - 持续检查】",
+            "─" * 60
+        ]
+        
+        # 检查结构性失败
+        if self.detect_structural_failure(data):
+            analysis.append("⚠️ 检测到结构性失败，退出做空状态")
+            return analysis
+        
+        # 检查做空失效条件
+        sell_ratio = 1 - data.get('aggressive_buy_ratio', 0.5)
+        funding_rate = data.get('funding_rate', 0)
+        oi_change_6h = data.get('oi_change_6h', 0)
+        
+        selling_exhausted = sell_ratio < 0.40
+        funding_negative = funding_rate < self.config.FUNDING_RATE_NEGATIVE
+        oi_collapses = oi_change_6h < self.config.OI_COLLAPSE_RATE
+        
+        analysis.append("🔍 做空失效检查：")
+        analysis.append(f"  • 卖压耗尽：{'✗ 失效' if selling_exhausted else '✓ 正常'} (卖单{sell_ratio*100:.1f}%)")
+        analysis.append(f"  • 费率转负：{'✗ 失效' if funding_negative else '✓ 正常'} (费率{funding_rate*100:.4f}%)")
+        analysis.append(f"  • OI崩溃：{'✗ 失效' if oi_collapses else '✓ 正常'} (OI{oi_change_6h*100:+.2f}%)")
+        
+        if decision == Decision.NO_TRADE:
+            analysis.append("  ⇒ ❌ 做空条件失效，返回WAIT")
+        else:
+            analysis.append("  ⇒ ✅ 做空状态保持")
+        
+        return analysis
+    
+    def _build_cooldown_analysis(self, cooldown_counter):
+        """构建COOL_DOWN状态的分析过程"""
+        analysis = [
+            "❄️ 【冷却状态 - 强制休眠】",
+            "─" * 60,
+            f"⏰ 剩余冷却周期：{cooldown_counter}",
+            "🚫 冷却期间禁止所有交易操作",
+            ""
+        ]
+        
+        if cooldown_counter > 0:
+            analysis.append(f"  ⇒ 继续冷却，还需等待 {cooldown_counter} 个周期")
+        else:
+            analysis.append("  ⇒ 冷却结束，返回WAIT状态")
+        
+        return analysis
 
 
 # ==================== 全局实例 ====================
