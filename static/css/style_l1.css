@@ -814,92 +814,6 @@ header {
 }
 
 /* ===========================
-   市场数据概览
-   =========================== */
-.market-data-panel {
-    background: var(--bg-primary);
-    border-radius: var(--border-radius);
-    box-shadow: var(--shadow-md);
-    margin-bottom: 16px;
-    overflow: hidden;
-}
-
-.panel-toggle {
-    padding: 20px 24px;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    transition: background 0.2s;
-}
-
-.panel-toggle:hover {
-    background: var(--bg-secondary);
-}
-
-.panel-toggle h3 {
-    font-size: 1.2em;
-    font-weight: 700;
-    color: #1f2937;
-}
-
-.toggle-icon {
-    font-size: 1.2em;
-    color: #6b7280;
-    transition: transform 0.3s;
-}
-
-.toggle-icon.expanded {
-    transform: rotate(180deg);
-}
-
-.market-data-content {
-    padding: 0 24px 24px 24px;
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease;
-}
-
-.market-data-content.expanded {
-    max-height: 800px;
-}
-
-.data-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 12px;
-}
-
-.data-card {
-    background: var(--bg-secondary);
-    padding: 16px;
-    border-radius: 8px;
-    border: 2px solid var(--border-color);
-}
-
-.data-label {
-    font-size: 0.8em;
-    color: #6b7280;
-    margin-bottom: 6px;
-    font-weight: 500;
-}
-
-.data-value {
-    font-size: 1.3em;
-    font-weight: 700;
-    color: #1f2937;
-}
-
-/* 数值颜色 */
-.value-up {
-    color: var(--signal-long) !important;
-}
-
-.value-down {
-    color: var(--signal-short) !important;
-}
-
-/* ===========================
    页脚
    =========================== */
 footer {
@@ -969,10 +883,6 @@ footer {
     }
     
     .gates-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .data-grid {
         grid-template-columns: 1fr;
     }
 }

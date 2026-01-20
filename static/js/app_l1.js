@@ -510,22 +510,6 @@ function switchMarketType(type) {
 // 市场数据概览（可折叠）
 // ==========================================
 
-/**
- * 切换市场数据展开/折叠
- */
-function toggleMarketData() {
-    const content = document.getElementById('marketDataContent');
-    const toggleIcon = document.getElementById('marketDataToggle');
-    
-    if (content.classList.contains('expanded')) {
-        content.classList.remove('expanded');
-        toggleIcon.classList.remove('expanded');
-    } else {
-        content.classList.add('expanded');
-        toggleIcon.classList.add('expanded');
-    }
-}
-
 // ==========================================
 // 自动刷新
 // ==========================================

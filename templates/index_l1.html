@@ -208,65 +208,6 @@
             </div>
         </div>
 
-        <!-- 市场数据概览（可折叠） -->
-        <div class="market-data-panel">
-            <div class="panel-toggle" onclick="toggleMarketData()">
-                <h3>💹 市场数据概览</h3>
-                <span class="toggle-icon" id="marketDataToggle">▼</span>
-            </div>
-            <div class="market-data-content" id="marketDataContent">
-                <div class="data-grid">
-                    <!-- 价格 -->
-                    <div class="data-card">
-                        <div class="data-label">当前价格</div>
-                        <div class="data-value" id="currentPrice">--</div>
-                    </div>
-
-                    <!-- 24h涨跌 -->
-                    <div class="data-card">
-                        <div class="data-label">24h涨跌</div>
-                        <div class="data-value" id="priceChange">--</div>
-                    </div>
-
-                    <!-- 成交量 -->
-                    <div class="data-card">
-                        <div class="data-label">24h成交量</div>
-                        <div class="data-value" id="volume">--</div>
-                    </div>
-
-                    <!-- 持仓量（仅合约） -->
-                    <div class="data-card futures-only" id="openInterestCard" style="display: none;">
-                        <div class="data-label">持仓量</div>
-                        <div class="data-value" id="openInterest">--</div>
-                    </div>
-
-                    <!-- 资金费率（仅合约） -->
-                    <div class="data-card futures-only" id="fundingRateCard" style="display: none;">
-                        <div class="data-label">资金费率</div>
-                        <div class="data-value" id="fundingRate">--</div>
-                    </div>
-
-                    <!-- 买卖失衡 -->
-                    <div class="data-card">
-                        <div class="data-label">1h买卖失衡</div>
-                        <div class="data-value" id="buyImbalance">--</div>
-                    </div>
-
-                    <!-- 1h价格变化 -->
-                    <div class="data-card">
-                        <div class="data-label">1h价格变化</div>
-                        <div class="data-value" id="priceChange1h">--</div>
-                    </div>
-
-                    <!-- 1h持仓量变化（仅合约） -->
-                    <div class="data-card futures-only" id="oiChange1hCard" style="display: none;">
-                        <div class="data-label">1h持仓量变化</div>
-                        <div class="data-value" id="oiChange1h">--</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- 页脚信息 -->
         <footer>
             <div class="footer-info">
