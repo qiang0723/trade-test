@@ -216,26 +216,31 @@
                     <div class="operation-icon">💡</div>
                     <div class="operation-text" id="mainOperation">正在分析市场数据...</div>
                 </div>
-                <div class="analysis-conclusions">
-                    <div class="conclusions-title">📋 详细分析</div>
-                    <ul id="conclusionsList">
-                        <li>加载中...</li>
-                    </ul>
+                
+                <!-- 详细分析和历史信号两列布局 -->
+                <div class="analysis-history-container">
+                    <!-- 左列：详细分析 -->
+                    <div class="analysis-conclusions">
+                        <div class="conclusions-title">📋 详细分析</div>
+                        <ul id="conclusionsList">
+                            <li>加载中...</li>
+                        </ul>
+                    </div>
+                    
+                    <!-- 右列：历史交易信号 -->
+                    <div class="history-signals-wrapper" id="historySignalsSection" style="display:none;">
+                        <div class="history-header">
+                            <div class="conclusions-title">
+                                📜 历史交易信号（最近10条）
+                                <span class="chart-symbol" id="historySymbol" style="font-size: 13px; margin-left: 5px;">--</span>
+                            </div>
+                            <a href="/history" class="view-more-btn" target="_blank">查看全部 →</a>
+                        </div>
+                        <div id="historySignalsList" class="history-signals-list">
+                            <div class="loading-text">加载中...</div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- 历史交易信号 -->
-        <div class="data-section" id="historySignalsSection" style="display:none;">
-            <div class="section-header">
-                <h2>
-                    📜 历史交易信号（最近10条）
-                    <span class="chart-symbol" id="historySymbol">--</span>
-                </h2>
-                <a href="/history" class="view-more-btn" target="_blank">查看全部 →</a>
-            </div>
-            <div id="historySignalsList" class="history-signals-list">
-                <div class="loading-text">加载中...</div>
             </div>
         </div>
 

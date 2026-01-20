@@ -1155,11 +1155,33 @@ footer p {
     line-height: 1.5;
 }
 
+/* 详细分析和历史信号两列布局 */
+.analysis-history-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-top: 15px;
+}
+
 .analysis-conclusions {
     background: white;
     padding: 15px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.history-signals-wrapper {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
 }
 
 .conclusions-title {
@@ -1198,6 +1220,11 @@ footer p {
     /* 模型卡片在小屏幕上垂直堆叠 */
     .model-cards-row {
         flex-direction: column;
+    }
+    
+    /* 详细分析和历史信号在小屏幕上垂直堆叠 */
+    .analysis-history-container {
+        grid-template-columns: 1fr;
     }
 
     header h1 {
@@ -1261,6 +1288,26 @@ footer p {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.history-signals-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.history-signals-list::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.history-signals-list::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 3px;
+}
+
+.history-signals-list::-webkit-scrollbar-thumb:hover {
+    background: #555;
 }
 
 .history-signal-item {
