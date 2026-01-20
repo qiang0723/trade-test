@@ -250,42 +250,6 @@ class MultiMarketAPI:
         
         return result
     
-    def get_spot_orderbook(self, symbol, limit=10):
-        """获取现货订单深度"""
-        try:
-            spot_symbol = f"{symbol}{self.quote_currency}"
-            depth = self.client.get_order_book(symbol=spot_symbol, limit=limit)
-            
-            return {
-                'success': True,
-                'market_type': 'spot',
-                'symbol': symbol,
-                'data': {
-                    'bids': [[float(x[0]), float(x[1])] for x in depth['bids'][:limit]],
-                    'asks': [[float(x[0]), float(x[1])] for x in depth['asks'][:limit]]
-                }
-            }
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
-    
-    def get_futures_orderbook(self, symbol, limit=10):
-        """获取合约订单深度"""
-        try:
-            futures_symbol = f"{symbol}{self.quote_currency}"
-            depth = self.client.futures_order_book(symbol=futures_symbol, limit=limit)
-            
-            return {
-                'success': True,
-                'market_type': 'futures',
-                'symbol': symbol,
-                'data': {
-                    'bids': [[float(x[0]), float(x[1])] for x in depth['bids'][:limit]],
-                    'asks': [[float(x[0]), float(x[1])] for x in depth['asks'][:limit]]
-                }
-            }
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
-    
     def get_spot_klines(self, symbol, interval='1h', limit=24):
         """获取现货K线数据"""
         try:
@@ -1419,19 +1383,6 @@ def api_all_tickers():
     return jsonify(market_api.get_all_tickers())
 
 
-@app.route('/api/orderbook/<market_type>/<symbol>')
-def api_orderbook(market_type, symbol):
-    """API: 获取订单深度"""
-    limit = int(request.args.get('limit', 10))
-    
-    if market_type == 'spot':
-        return jsonify(market_api.get_spot_orderbook(symbol, limit))
-    elif market_type == 'futures':
-        return jsonify(market_api.get_futures_orderbook(symbol, limit))
-    else:
-        return jsonify({'success': False, 'error': 'Invalid market type'})
-
-
 @app.route('/api/klines/<market_type>/<symbol>')
 def api_klines(market_type, symbol):
     """API: 获取K线数据"""
@@ -1453,30 +1404,6 @@ def api_open_interest_history(symbol):
     limit = int(request.args.get('limit', 288))  # 默认288个5分钟数据点（24小时）
     
     return jsonify(market_api.get_open_interest_history(symbol, period, limit))
-
-
-@app.route('/api/trades/<market_type>/<symbol>')
-def api_trades(market_type, symbol):
-    """API: 获取最近成交记录"""
-    # 获取时间范围（分钟）
-    time_range_minutes = request.args.get('time_range', type=float)
-    
-    # 根据时间范围估算需要的数据量
-    if time_range_minutes:
-        # 估算：主流币种平均每秒1-2笔成交
-        # 1分钟约100笔，5分钟约500笔，30分钟约1000笔（达到上限）
-        estimated_limit = int(time_range_minutes * 100)
-        # 限制在50到1000之间
-        limit = max(50, min(estimated_limit, 1000))
-    else:
-        limit = int(request.args.get('limit', 50))
-    
-    if market_type == 'spot':
-        return jsonify(market_api.get_spot_trades(symbol, limit, time_range_minutes))
-    elif market_type == 'futures':
-        return jsonify(market_api.get_futures_trades(symbol, limit, time_range_minutes))
-    else:
-        return jsonify({'success': False, 'error': 'Invalid market type'})
 
 
 @app.route('/api/large-orders/<market_type>/<symbol>')

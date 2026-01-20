@@ -169,7 +169,6 @@ function updateMarketTypeButtons() {
 function refreshCurrentMarket() {
     loadTicker();
     loadKlines();
-    loadTrades();
     loadLargeOrders();
     loadMarketAnalysis();
 }
@@ -862,7 +861,6 @@ function startAutoRefresh() {
     // 设置定时刷新（每10秒）
     autoRefreshInterval = setInterval(() => {
         loadTicker();
-        loadTrades();
         loadLargeOrders();
         loadAllMarketsOverview();
     }, 10000);
@@ -901,103 +899,6 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // 加载最近成交
-async function loadTrades() {
-    try {
-        const timeRange = document.getElementById('tradesTimeRangeSelect').value;
-        const response = await fetch(`/api/trades/${currentMarketType}/${currentSymbol}?time_range=${timeRange}`);
-        const result = await response.json();
-        
-        if (result.success) {
-            // 更新标题
-            const timeRangeMinutes = result.time_range_minutes;
-            let timeRangeText = '';
-            if (timeRangeMinutes) {
-                if (timeRangeMinutes < 60) {
-                    timeRangeText = ` - 近${timeRangeMinutes}分钟`;
-                } else {
-                    timeRangeText = ` - 近${timeRangeMinutes / 60}小时`;
-                }
-            }
-            
-            document.getElementById('tradesSymbol').textContent = currentSymbol + '/USDT' + timeRangeText;
-            document.getElementById('tradesMarketType').textContent = 
-                currentMarketType === 'spot' ? '现货' : '合约';
-            
-            // 统计买卖数据
-            let buyCount = 0;
-            let sellCount = 0;
-            let buyVolume = 0;
-            let sellVolume = 0;
-            let buyAmount = 0;
-            let sellAmount = 0;
-            
-            const tradesTableBody = document.querySelector('#tradesTable tbody');
-            tradesTableBody.innerHTML = '';
-            
-            result.data.forEach(trade => {
-                const isBuy = !trade.is_buyer_maker;
-                
-                // 统计数据
-                if (isBuy) {
-                    buyCount++;
-                    buyVolume += trade.qty;
-                    buyAmount += trade.quote_qty;
-                } else {
-                    sellCount++;
-                    sellVolume += trade.qty;
-                    sellAmount += trade.quote_qty;
-                }
-                
-                // 填充表格
-                const row = tradesTableBody.insertRow();
-                
-                row.insertCell(0).textContent = trade.time;
-                row.insertCell(1).textContent = formatNumber(trade.price, 4);
-                row.insertCell(2).textContent = formatNumber(trade.qty, 6);
-                row.insertCell(3).textContent = formatNumber(trade.quote_qty, 2);
-                
-                const directionCell = row.insertCell(4);
-                directionCell.textContent = isBuy ? '🟢买入' : '🔴卖出';
-                directionCell.className = isBuy ? 'trade-buy' : 'trade-sell';
-            });
-            
-            // 更新统计信息
-            updateTradesStatistics(buyCount, sellCount, buyVolume, sellVolume, buyAmount, sellAmount);
-        }
-    } catch (error) {
-        console.error('加载成交记录失败:', error);
-    }
-}
-
-// 更新成交统计信息
-function updateTradesStatistics(buyCount, sellCount, buyVolume, sellVolume, buyAmount, sellAmount) {
-    const totalCount = buyCount + sellCount;
-    const totalAmount = buyAmount + sellAmount;
-    
-    // 更新笔数
-    document.getElementById('tradesTotal').textContent = totalCount;
-    document.getElementById('tradesBuyCount').textContent = buyCount;
-    document.getElementById('tradesSellCount').textContent = sellCount;
-    
-    // 更新成交量
-    document.getElementById('tradesBuyVolume').textContent = formatNumber(buyVolume, 4) + ' ' + currentSymbol;
-    document.getElementById('tradesSellVolume').textContent = formatNumber(sellVolume, 4) + ' ' + currentSymbol;
-    
-    // 更新成交额
-    document.getElementById('tradesBuyAmount').textContent = '$' + formatLargeNumber(buyAmount);
-    document.getElementById('tradesSellAmount').textContent = '$' + formatLargeNumber(sellAmount);
-    
-    // 计算买卖力量占比
-    const buyRatio = totalAmount > 0 ? (buyAmount / totalAmount * 100) : 50;
-    const sellRatio = 100 - buyRatio;
-    
-    // 更新买卖力量进度条
-    document.getElementById('tradesPowerBuy').style.width = buyRatio + '%';
-    document.getElementById('tradesPowerSell').style.width = sellRatio + '%';
-    document.getElementById('tradesPowerBuyPercent').textContent = formatNumber(buyRatio, 1) + '%';
-    document.getElementById('tradesPowerSellPercent').textContent = formatNumber(sellRatio, 1) + '%';
-}
-
 // 加载大单分析
 async function loadLargeOrders() {
     try {
