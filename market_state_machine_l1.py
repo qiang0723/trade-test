@@ -31,6 +31,45 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class DecisionMemory:
+    """
+    决策记忆管理（PR-C）
+    
+    职责：
+    - 记录每个币种的上次非NO_TRADE决策
+    - 用于决策频率控制（最小间隔、翻转冷却）
+    """
+    
+    def __init__(self):
+        self._memory = {}  # {symbol: {"time": datetime, "side": Decision}}
+    
+    def get_last_decision(self, symbol: str) -> Optional[Dict]:
+        """获取指定币种的上次决策记录"""
+        return self._memory.get(symbol)
+    
+    def update_decision(self, symbol: str, decision: Decision, timestamp: datetime):
+        """
+        更新决策记忆（仅LONG/SHORT）
+        
+        Args:
+            symbol: 币种符号
+            decision: 决策方向
+            timestamp: 决策时间
+        """
+        # 只记录LONG和SHORT，NO_TRADE不更新记忆
+        if decision in [Decision.LONG, Decision.SHORT]:
+            self._memory[symbol] = {
+                "time": timestamp,
+                "side": decision
+            }
+            logger.debug(f"[{symbol}] Updated decision memory: {decision.value} at {timestamp}")
+    
+    def clear(self, symbol: str):
+        """清除指定币种的记忆"""
+        self._memory.pop(symbol, None)
+        logger.debug(f"[{symbol}] Cleared decision memory")
+
+
 class L1AdvisoryEngine:
     """
     L1 决策层核心引擎
@@ -69,6 +108,9 @@ class L1AdvisoryEngine:
         
         # 管道执行记录（用于可视化）
         self.last_pipeline_steps = []
+        
+        # 决策记忆管理（PR-C）
+        self.decision_memory = DecisionMemory()
         
         logger.info(f"L1AdvisoryEngine initialized with {len(self.thresholds)} thresholds")
     
@@ -202,16 +244,22 @@ class L1AdvisoryEngine:
             'result': decision.value
         })
         
-        # ===== Step 7: 状态机约束检查 =====
-        original_decision = decision
-        decision, state_tags = self._check_state_transition(decision)
-        reason_tags.extend(state_tags)
+        # ===== Step 7: 决策频率控制（PR-C）=====
+        original_decision_for_control = decision
+        decision, control_tags = self._apply_decision_control(
+            symbol=symbol,
+            decision=decision,
+            reason_tags=reason_tags,
+            timestamp=datetime.now()
+        )
+        reason_tags.extend(control_tags)
         
+        control_blocked = (decision != original_decision_for_control)
         self.last_pipeline_steps.append({
-            'step': 7, 'name': 'check_transition',
-            'status': 'success' if decision == original_decision else 'failed',
-            'message': '状态转换检查通过' if decision == original_decision else '状态转换被拒绝',
-            'result': 'Allowed' if decision == original_decision else 'Denied'
+            'step': 7, 'name': 'decision_control',
+            'status': 'success' if not control_blocked else 'failed',
+            'message': '频率控制通过' if not control_blocked else f'频率控制阻断：{control_tags[0].value if control_tags else ""}',
+            'result': 'Allowed' if not control_blocked else 'Blocked'
         })
         
         # ===== Step 8: 构造结果 =====
@@ -230,6 +278,8 @@ class L1AdvisoryEngine:
         # 添加辅助标签（资金费率、持仓量变化）
         self._add_auxiliary_tags(data, reason_tags)
         
+        result_timestamp = datetime.now()
+        
         result = AdvisoryResult(
             decision=decision,
             confidence=confidence,
@@ -238,12 +288,15 @@ class L1AdvisoryEngine:
             risk_exposure_allowed=True,
             trade_quality=quality,
             reason_tags=reason_tags,
-            timestamp=datetime.now(),
+            timestamp=result_timestamp,
             executable=False  # 先初始化为False
         )
         
         # 计算executable标志位（P2）
         result.executable = result.compute_executable()
+        
+        # 🔥 更新决策记忆（PR-C）- 仅LONG/SHORT会更新
+        self.decision_memory.update_decision(symbol, decision, result_timestamp)
         
         logger.info(f"[{symbol}] Decision: {result}")
         
@@ -749,6 +802,79 @@ class L1AdvisoryEngine:
         elif oi_change_1h < -5.0:
             reason_tags.append(ReasonTag.OI_DECLINING)
     
+    def _apply_decision_control(
+        self, 
+        symbol: str, 
+        decision: Decision, 
+        reason_tags: List[ReasonTag],
+        timestamp: datetime
+    ) -> Tuple[Decision, List[ReasonTag]]:
+        """
+        Step 7: 决策频率控制（PR-C）
+        
+        规则：
+        1. 最小决策间隔：防止短时间内重复输出
+        2. 翻转冷却：防止方向频繁切换
+        
+        Args:
+            symbol: 币种符号
+            decision: 当前决策
+            reason_tags: 现有标签列表
+            timestamp: 当前时间
+        
+        Returns:
+            (可能被修改的decision, 新增的控制标签列表)
+        """
+        control_tags = []
+        
+        # 如果当前决策已经是NO_TRADE，无需检查
+        if decision == Decision.NO_TRADE:
+            return decision, control_tags
+        
+        # 获取配置
+        config = self.config.get('decision_control', {})
+        enable_min_interval = config.get('enable_min_interval', True)
+        enable_flip_cooldown = config.get('enable_flip_cooldown', True)
+        min_interval = config.get('min_decision_interval_seconds', 300)
+        flip_cooldown = config.get('flip_cooldown_seconds', 600)
+        
+        # 获取上次决策记忆
+        last = self.decision_memory.get_last_decision(symbol)
+        
+        if last is None:
+            # 首次决策，不阻断
+            logger.debug(f"[{symbol}] First decision, no control applied")
+            return decision, control_tags
+        
+        last_time = last['time']
+        last_side = last['side']
+        elapsed = (timestamp - last_time).total_seconds()
+        
+        # 检查1: 最小决策间隔
+        if enable_min_interval and elapsed < min_interval:
+            logger.info(
+                f"[{symbol}] MIN_INTERVAL_BLOCK: elapsed={elapsed:.0f}s < {min_interval}s"
+            )
+            control_tags.append(ReasonTag.MIN_INTERVAL_BLOCK)
+            return Decision.NO_TRADE, control_tags
+        
+        # 检查2: 翻转冷却
+        if enable_flip_cooldown:
+            is_flip = (decision == Decision.LONG and last_side == Decision.SHORT) or \
+                     (decision == Decision.SHORT and last_side == Decision.LONG)
+            
+            if is_flip and elapsed < flip_cooldown:
+                logger.info(
+                    f"[{symbol}] FLIP_COOLDOWN_BLOCK: {last_side.value}→{decision.value}, "
+                    f"elapsed={elapsed:.0f}s < {flip_cooldown}s"
+                )
+                control_tags.append(ReasonTag.FLIP_COOLDOWN_BLOCK)
+                return Decision.NO_TRADE, control_tags
+        
+        # 通过所有检查
+        logger.debug(f"[{symbol}] Decision control passed")
+        return decision, control_tags
+    
     def _build_no_trade_result(
         self,
         reason_tags: List[ReasonTag],
@@ -902,6 +1028,12 @@ class L1AdvisoryEngine:
             'state_machine': {
                 'cool_down_minutes': 60,
                 'signal_timeout_minutes': 30
+            },
+            'decision_control': {
+                'min_decision_interval_seconds': 300,
+                'flip_cooldown_seconds': 600,
+                'enable_min_interval': True,
+                'enable_flip_cooldown': True
             }
         }
     

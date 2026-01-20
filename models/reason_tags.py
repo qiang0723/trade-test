@@ -34,6 +34,10 @@ class ReasonTag(Enum):
     COOL_DOWN_ACTIVE = "cool_down_active"
     STATE_TRANSITION_DENIED = "state_transition_denied"
     
+    # ===== 决策频率控制类（PR-C）=====
+    MIN_INTERVAL_BLOCK = "min_interval_block"
+    FLIP_COOLDOWN_BLOCK = "flip_cooldown_block"
+    
     # ===== 辅助信息类（非否决）=====
     HIGH_FUNDING_RATE = "high_funding_rate"
     LOW_FUNDING_RATE = "low_funding_rate"
@@ -68,6 +72,10 @@ REASON_TAG_EXPLANATIONS = {
     # 状态机约束类
     "cool_down_active": "⏸️ 冷却期：系统处于冷却期，暂不发出新信号",
     "state_transition_denied": "🚫 状态约束：当前系统状态不允许此决策",
+    
+    # 决策频率控制类（PR-C）
+    "min_interval_block": "⏱️ 间隔过短：距离上次决策时间过短，防止频繁输出",
+    "flip_cooldown_block": "🔄 翻转冷却：方向翻转冷却期内，防止频繁切换",
     
     # 辅助信息类
     "high_funding_rate": "💸 高资金费率：当前资金费率较高（辅助参考）",
@@ -125,7 +133,9 @@ def get_reason_tag_category(tag: ReasonTag) -> str:
     
     state_constraint_tags = [
         ReasonTag.COOL_DOWN_ACTIVE,
-        ReasonTag.STATE_TRANSITION_DENIED
+        ReasonTag.STATE_TRANSITION_DENIED,
+        ReasonTag.MIN_INTERVAL_BLOCK,
+        ReasonTag.FLIP_COOLDOWN_BLOCK
     ]
     
     positive_tags = [

@@ -43,6 +43,9 @@ COPY config/ ./config/
 COPY static/ ./static/
 COPY templates/ ./templates/
 
+# 测试文件（PR-C）
+COPY tests/ ./tests/
+
 # 创建数据目录
 RUN mkdir -p data/db
 

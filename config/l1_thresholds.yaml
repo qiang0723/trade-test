@@ -23,6 +23,20 @@ data_quality:
   max_staleness_seconds: 120      # 数据最大过期时间（秒），超过视为过期
 
 # ==================
+# 决策频率控制（PR-C）
+# ==================
+decision_control:
+  # 最小决策间隔（秒）- 防止短时间内重复建议
+  min_decision_interval_seconds: 300  # 5分钟
+  
+  # 翻转冷却时间（秒）- 防止LONG<->SHORT频繁切换
+  flip_cooldown_seconds: 600  # 10分钟
+  
+  # 功能开关
+  enable_min_interval: true
+  enable_flip_cooldown: true
+
+# ==================
 # 市场环境识别阈值
 # ==================
 market_regime:
