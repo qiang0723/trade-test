@@ -735,8 +735,18 @@ class L1AdvisoryEngine:
         elif quality == TradeQuality.POOR:
             score += scoring_config.get('quality_poor_score', 0)
         
-        # 强信号加分
-        strong_signals = [ReasonTag.STRONG_BUY_PRESSURE, ReasonTag.STRONG_SELL_PRESSURE]
+        # 强信号加分（P1-1修复：从配置读取required_tags，而非硬编码）
+        boost_config = scoring_config.get('strong_signal_boost', {})
+        required_tag_values = boost_config.get('required_tags', ['strong_buy_pressure', 'strong_sell_pressure'])
+        
+        # 将配置中的字符串转换为 ReasonTag 枚举
+        strong_signals = []
+        for tag_value in required_tag_values:
+            try:
+                strong_signals.append(ReasonTag(tag_value))
+            except ValueError:
+                logger.warning(f"Invalid required_tag in config: {tag_value}, skipping")
+        
         has_strong_signal = any(tag in reason_tags for tag in strong_signals)
         if has_strong_signal:
             score += scoring_config.get('strong_signal_bonus', 10)
