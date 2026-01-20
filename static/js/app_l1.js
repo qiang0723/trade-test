@@ -109,7 +109,11 @@ async function loadAvailableMarkets() {
         const result = await response.json();
         
         if (result.success && result.data) {
-            createSymbolButtons(result.data);
+            // 使用default_symbol作为初始币种
+            if (result.data.default_symbol) {
+                currentSymbol = result.data.default_symbol;
+            }
+            createSymbolButtons(result.data.markets);
         }
     } catch (error) {
         console.error('Error loading markets:', error);

@@ -6,16 +6,14 @@
 [![Python](https://img.shields.io/badge/python-3.12-green)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
-## 🌐 AWS生产环境
+## 🌐 生产环境
 
-**服务器状态**: ✅ 运行中  
-**IP地址**: 43.212.176.169  
-**服务端口**: 8001  
-**快速部署**: `./aws-connect.sh deploy`
+**AWS服务器**: 43.212.176.169:8001  
+**部署命令**: `./aws-connect.sh deploy`（仅在需要部署时使用）
 
 **工作流程**：
-1. 📝 **本地开发** - 代码编写、测试、Git提交
-2. 🚀 **AWS部署** - 使用 `aws-connect.sh` 上传并启动服务
+1. 📝 **本地开发调试** - 在本地进行开发、测试和Git提交
+2. 🚀 **按需部署AWS** - 完成开发后，使用命令部署到AWS服务器
 
 ## ✨ 核心特性
 
