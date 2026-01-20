@@ -13,7 +13,7 @@ import os
 from typing import List, Optional
 from datetime import datetime, timedelta
 from models.advisory_result import AdvisoryResult
-from models.enums import Decision, Confidence, TradeQuality, MarketRegime, SystemState
+from models.enums import Decision, Confidence, TradeQuality, MarketRegime, SystemState, ExecutionPermission
 from models.reason_tags import ReasonTag
 import logging
 
@@ -67,10 +67,14 @@ class L1Database:
                     risk_exposure_allowed INTEGER NOT NULL,
                     trade_quality TEXT NOT NULL,
                     reason_tags TEXT NOT NULL,
+                    execution_permission TEXT DEFAULT 'allow',
                     executable INTEGER DEFAULT 0,
                     created_at TEXT DEFAULT (datetime('now'))
                 )
             ''')
+            
+            # 迁移：为已存在的表添加 execution_permission 字段（向后兼容）
+            self._migrate_add_execution_permission(cursor)
             
             # 创建索引（优化查询性能）
             cursor.execute('''
@@ -115,6 +119,34 @@ class L1Database:
             conn.commit()
             logger.info("Database tables initialized")
     
+    def _migrate_add_execution_permission(self, cursor):
+        """
+        数据库迁移：添加 execution_permission 字段
+        
+        向后兼容处理：
+        - 检测字段是否存在
+        - 如不存在，添加字段并设置默认值为 'allow'
+        - 老数据自动获得默认值
+        """
+        try:
+            # 检查字段是否存在
+            cursor.execute("PRAGMA table_info(l1_advisory_results)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if 'execution_permission' not in columns:
+                logger.info("Migrating database: adding execution_permission column")
+                cursor.execute('''
+                    ALTER TABLE l1_advisory_results 
+                    ADD COLUMN execution_permission TEXT DEFAULT 'allow'
+                ''')
+                logger.info("✅ Database migration completed: execution_permission added")
+            else:
+                logger.debug("execution_permission column already exists, skipping migration")
+        
+        except Exception as e:
+            logger.error(f"Error during database migration: {e}")
+            # 非致命错误，继续运行（新表创建时已包含该字段）
+    
     def save_advisory_result(self, symbol: str, result: AdvisoryResult) -> int:
         """
         保存决策结果到数据库
@@ -133,8 +165,8 @@ class L1Database:
                 cursor.execute('''
                     INSERT INTO l1_advisory_results 
                     (symbol, timestamp, decision, confidence, market_regime, system_state, 
-                     risk_exposure_allowed, trade_quality, reason_tags, executable)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     symbol,
                     result.timestamp.isoformat(),
@@ -145,6 +177,7 @@ class L1Database:
                     1 if result.risk_exposure_allowed else 0,
                     result.trade_quality.value,
                     json.dumps([tag.value for tag in result.reason_tags]),
+                    result.execution_permission.value,  # 方案D新增
                     1 if result.executable else 0
                 ))
                 
@@ -249,7 +282,8 @@ class L1Database:
                 
                 cursor.execute('''
                     SELECT decision, confidence, market_regime, system_state,
-                           risk_exposure_allowed, trade_quality, reason_tags, executable, timestamp
+                           risk_exposure_allowed, trade_quality, reason_tags, 
+                           execution_permission, executable, timestamp
                     FROM l1_advisory_results
                     WHERE symbol = ?
                     ORDER BY timestamp DESC
@@ -266,8 +300,9 @@ class L1Database:
                         risk_exposure_allowed=bool(row[4]),
                         trade_quality=TradeQuality(row[5]),
                         reason_tags=[ReasonTag(tag) for tag in json.loads(row[6])],
-                        executable=bool(row[7]),
-                        timestamp=datetime.fromisoformat(row[8])
+                        execution_permission=ExecutionPermission(row[7] or 'allow'),  # 向后兼容
+                        executable=bool(row[8]),
+                        timestamp=datetime.fromisoformat(row[9])
                     )
                 return None
         
@@ -300,7 +335,8 @@ class L1Database:
                 
                 cursor.execute('''
                     SELECT decision, confidence, market_regime, system_state,
-                           risk_exposure_allowed, trade_quality, reason_tags, executable, timestamp
+                           risk_exposure_allowed, trade_quality, reason_tags, 
+                           execution_permission, executable, timestamp
                     FROM l1_advisory_results
                     WHERE symbol = ? AND timestamp >= ?
                     ORDER BY timestamp DESC
@@ -317,8 +353,9 @@ class L1Database:
                         'risk_exposure_allowed': bool(row[4]),
                         'trade_quality': row[5],
                         'reason_tags': json.loads(row[6]),
-                        'executable': bool(row[7]),
-                        'timestamp': row[8]
+                        'execution_permission': row[7] or 'allow',  # 向后兼容
+                        'executable': bool(row[8]),
+                        'timestamp': row[9]
                     })
                 
                 logger.info(f"Retrieved {len(results)} history records for {symbol}")
@@ -462,14 +499,15 @@ class L1Database:
                         1 if result.risk_exposure_allowed else 0,
                         result.trade_quality.value,
                         json.dumps([tag.value for tag in result.reason_tags]),
+                        result.execution_permission.value,  # 方案D新增
                         1 if result.executable else 0
                     ))
                 
                 cursor.executemany('''
                     INSERT INTO l1_advisory_results 
                     (symbol, timestamp, decision, confidence, market_regime, system_state, 
-                     risk_exposure_allowed, trade_quality, reason_tags, executable)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', data)
                 
                 conn.commit()
