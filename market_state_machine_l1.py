@@ -100,8 +100,10 @@ class L1AdvisoryEngine:
         
         self.config = self._load_config(config_path)
         
-        # ⚠️ 启动时校验：防止口径回归
-        self._validate_decimal_calibration(self.config)
+        # ⚠️ 启动时校验：防止配置错误（P1-3）
+        self._validate_decimal_calibration(self.config)        # 1. 口径校验：百分比必须用小数
+        self._validate_threshold_consistency(self.config)      # 2. 门槛一致性校验（P1-3）
+        self._validate_reason_tag_spelling(self.config)        # 3. ReasonTag拼写校验（P1-3）
         
         self.thresholds = self._flatten_thresholds(self.config)
         
@@ -1271,6 +1273,180 @@ class L1AdvisoryEngine:
             raise ValueError(error_message)
         
         logger.info("✅ 配置口径校验通过：所有百分比阈值使用小数格式")
+    
+    def _validate_threshold_consistency(self, config: dict):
+        """
+        启动时校验：门槛一致性检查（P1-3）
+        
+        目标：防止"允许降级但永远达不到门槛"的逻辑矛盾
+        
+        检查项：
+        1. min_confidence_reduced <= uncertain_quality_max
+           - reduced门槛不能高于UNCERTAIN的cap
+           - 否则UNCERTAIN质量永远达不到reduced门槛
+        
+        2. min_confidence_reduced <= tag_caps (for reduce_tags)
+           - reduced门槛不能高于降级标签的cap
+           - 否则有降级标签时永远达不到reduced门槛
+        
+        Args:
+            config: 配置字典
+        
+        Raises:
+            ValueError: 如果发现门槛一致性问题
+        """
+        from models.enums import Confidence
+        
+        errors = []
+        
+        # 获取配置
+        exec_config = config.get('executable_control', {})
+        min_reduced_str = exec_config.get('min_confidence_reduced', 'MEDIUM')
+        
+        scoring_config = config.get('confidence_scoring', {})
+        caps_config = scoring_config.get('caps', {})
+        uncertain_max_str = caps_config.get('uncertain_quality_max', 'MEDIUM')
+        tag_caps = caps_config.get('tag_caps', {})
+        
+        tag_rules = config.get('reason_tag_rules', {})
+        reduce_tags = tag_rules.get('reduce_tags', [])
+        
+        # 置信度顺序映射
+        confidence_order = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2, 'ULTRA': 3}
+        
+        min_reduced_level = confidence_order.get(min_reduced_str.upper(), 1)
+        uncertain_max_level = confidence_order.get(uncertain_max_str.upper(), 1)
+        
+        # 检查1: min_confidence_reduced <= uncertain_quality_max
+        if min_reduced_level > uncertain_max_level:
+            errors.append(
+                f"min_confidence_reduced ({min_reduced_str}) > uncertain_quality_max ({uncertain_max_str})\n"
+                f"  → UNCERTAIN质量被cap到 {uncertain_max_str}，但reduced门槛要求 {min_reduced_str}\n"
+                f"  → 逻辑矛盾：UNCERTAIN永远达不到reduced门槛，降级执行失效"
+            )
+        
+        # 检查2: min_confidence_reduced <= tag_caps (for reduce_tags)
+        for tag_name in reduce_tags:
+            if tag_name in tag_caps:
+                tag_cap_str = tag_caps[tag_name]
+                tag_cap_level = confidence_order.get(tag_cap_str.upper(), 1)
+                
+                if min_reduced_level > tag_cap_level:
+                    errors.append(
+                        f"min_confidence_reduced ({min_reduced_str}) > tag_caps['{tag_name}'] ({tag_cap_str})\n"
+                        f"  → {tag_name} 被cap到 {tag_cap_str}，但reduced门槛要求 {min_reduced_str}\n"
+                        f"  → 逻辑矛盾：有{tag_name}时永远达不到reduced门槛"
+                    )
+        
+        if errors:
+            error_message = (
+                "\n" + "="*80 + "\n"
+                "⚠️  门槛一致性错误检测（Threshold Consistency Validation Failed）\n"
+                "="*80 + "\n"
+                "发现门槛配置不一致，会导致'允许降级但永远达不到门槛'的逻辑矛盾！\n\n"
+                "错误项：\n" + "\n".join(f"  {i+1}. {err}\n" for i, err in enumerate(errors)) + "\n"
+                "修复方法：\n"
+                "  1. 确保 min_confidence_reduced <= uncertain_quality_max\n"
+                "  2. 确保 min_confidence_reduced <= tag_caps (for all reduce_tags)\n"
+                "  3. 推荐配置（方案D）:\n"
+                "     - min_confidence_reduced: MEDIUM\n"
+                "     - uncertain_quality_max: HIGH\n"
+                "     - tag_caps: {noisy_market: HIGH, weak_signal_in_range: HIGH}\n"
+                "     - 确保 MEDIUM <= HIGH 的一致性\n\n"
+                "设计原理：\n"
+                "  ALLOW_REDUCED场景需要 cap >= reduced门槛，否则降级执行永远失效\n"
+                "="*80 + "\n"
+            )
+            raise ValueError(error_message)
+        
+        logger.info("✅ 门槛一致性校验通过：reduced门槛 <= caps，降级执行逻辑正确")
+    
+    def _validate_reason_tag_spelling(self, config: dict):
+        """
+        启动时校验：ReasonTag拼写有效性检查（P1-3）
+        
+        目标：防止配置中的标签名拼写错误，fail-fast
+        
+        检查范围：
+        1. reason_tag_rules.reduce_tags
+        2. reason_tag_rules.deny_tags
+        3. confidence_scoring.caps.tag_caps (keys)
+        4. confidence_scoring.strong_signal_boost.required_tags
+        
+        Args:
+            config: 配置字典
+        
+        Raises:
+            ValueError: 如果发现无效的ReasonTag名称
+        """
+        from models.reason_tags import ReasonTag
+        
+        # 获取所有有效的ReasonTag值
+        valid_tags = {tag.value for tag in ReasonTag}
+        
+        errors = []
+        
+        # 检查 reduce_tags
+        tag_rules = config.get('reason_tag_rules', {})
+        reduce_tags = tag_rules.get('reduce_tags', [])
+        for tag_name in reduce_tags:
+            if tag_name not in valid_tags:
+                errors.append(
+                    f"reason_tag_rules.reduce_tags: '{tag_name}' 不是有效的ReasonTag\n"
+                    f"  → 可能是拼写错误，请检查 models/reason_tags.py 中的定义"
+                )
+        
+        # 检查 deny_tags
+        deny_tags = tag_rules.get('deny_tags', [])
+        for tag_name in deny_tags:
+            if tag_name not in valid_tags:
+                errors.append(
+                    f"reason_tag_rules.deny_tags: '{tag_name}' 不是有效的ReasonTag\n"
+                    f"  → 可能是拼写错误，请检查 models/reason_tags.py 中的定义"
+                )
+        
+        # 检查 tag_caps (keys)
+        scoring_config = config.get('confidence_scoring', {})
+        caps_config = scoring_config.get('caps', {})
+        tag_caps = caps_config.get('tag_caps', {})
+        for tag_name in tag_caps.keys():
+            if tag_name not in valid_tags:
+                errors.append(
+                    f"confidence_scoring.caps.tag_caps: '{tag_name}' 不是有效的ReasonTag\n"
+                    f"  → 可能是拼写错误，请检查 models/reason_tags.py 中的定义"
+                )
+        
+        # 检查 required_tags
+        boost_config = scoring_config.get('strong_signal_boost', {})
+        required_tags = boost_config.get('required_tags', [])
+        for tag_name in required_tags:
+            if tag_name not in valid_tags:
+                errors.append(
+                    f"confidence_scoring.strong_signal_boost.required_tags: '{tag_name}' 不是有效的ReasonTag\n"
+                    f"  → 可能是拼写错误，请检查 models/reason_tags.py 中的定义"
+                )
+        
+        if errors:
+            error_message = (
+                "\n" + "="*80 + "\n"
+                "⚠️  ReasonTag拼写错误检测（ReasonTag Spelling Validation Failed）\n"
+                "="*80 + "\n"
+                "发现无效的ReasonTag名称，系统拒绝启动（fail-fast）！\n\n"
+                "错误项：\n" + "\n".join(f"  {i+1}. {err}\n" for i, err in enumerate(errors)) + "\n"
+                "有效的ReasonTag列表：\n"
+                "  " + ", ".join(sorted(valid_tags)) + "\n\n"
+                "修复方法：\n"
+                "  1. 检查配置文件: config/l1_thresholds.yaml\n"
+                "  2. 修正拼写错误的标签名\n"
+                "  3. 参考 models/reason_tags.py 中的 ReasonTag 枚举定义\n"
+                "  4. 标签名必须使用下划线小写格式（如 strong_buy_pressure）\n\n"
+                "设计原理：\n"
+                "  配置中的标签拼写错误会导致运行时逻辑失效，fail-fast机制确保启动前发现\n"
+                "="*80 + "\n"
+            )
+            raise ValueError(error_message)
+        
+        logger.info("✅ ReasonTag拼写校验通过：所有标签名有效")
     
     
     def _flatten_thresholds(self, config: dict) -> dict:
