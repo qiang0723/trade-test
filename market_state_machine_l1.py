@@ -1110,15 +1110,15 @@ class L1AdvisoryEngine:
         
         # 市场环境
         mr = config.get('market_regime', {})
-        flat['extreme_price_change_1h'] = mr.get('extreme_price_change_1h', 5.0)
-        flat['trend_price_change_6h'] = mr.get('trend_price_change_6h', 3.0)
+        flat['extreme_price_change_1h'] = mr.get('extreme_price_change_1h', 0.05)
+        flat['trend_price_change_6h'] = mr.get('trend_price_change_6h', 0.03)
         
         # 风险准入
         re = config.get('risk_exposure', {})
-        flat['liquidation_price_change'] = re.get('liquidation', {}).get('price_change', 5.0)
-        flat['liquidation_oi_drop'] = re.get('liquidation', {}).get('oi_drop', -15.0)
+        flat['liquidation_price_change'] = re.get('liquidation', {}).get('price_change', 0.05)
+        flat['liquidation_oi_drop'] = re.get('liquidation', {}).get('oi_drop', -0.15)
         flat['crowding_funding_abs'] = re.get('crowding', {}).get('funding_abs', 0.001)
-        flat['crowding_oi_growth'] = re.get('crowding', {}).get('oi_growth', 30.0)
+        flat['crowding_oi_growth'] = re.get('crowding', {}).get('oi_growth', 0.30)
         flat['extreme_volume_multiplier'] = re.get('extreme_volume', {}).get('multiplier', 10.0)
         
         # 交易质量
@@ -1127,23 +1127,23 @@ class L1AdvisoryEngine:
         flat['absorption_volume_ratio'] = tq.get('absorption', {}).get('volume_ratio', 0.5)
         flat['noisy_funding_volatility'] = tq.get('noise', {}).get('funding_volatility', 0.0005)
         flat['noisy_funding_abs'] = tq.get('noise', {}).get('funding_abs', 0.0001)
-        flat['rotation_price_threshold'] = tq.get('rotation', {}).get('price_threshold', 2.0)
-        flat['rotation_oi_threshold'] = tq.get('rotation', {}).get('oi_threshold', 5.0)
+        flat['rotation_price_threshold'] = tq.get('rotation', {}).get('price_threshold', 0.02)
+        flat['rotation_oi_threshold'] = tq.get('rotation', {}).get('oi_threshold', 0.05)
         flat['range_weak_imbalance'] = tq.get('range_weak', {}).get('imbalance', 0.6)
-        flat['range_weak_oi'] = tq.get('range_weak', {}).get('oi', 10.0)
+        flat['range_weak_oi'] = tq.get('range_weak', {}).get('oi', 0.10)
         
         # 方向评估
         d = config.get('direction', {})
         flat['long_imbalance_trend'] = d.get('trend', {}).get('long', {}).get('imbalance', 0.6)
-        flat['long_oi_change_trend'] = d.get('trend', {}).get('long', {}).get('oi_change', 5.0)
-        flat['long_price_change_trend'] = d.get('trend', {}).get('long', {}).get('price_change', 1.0)
+        flat['long_oi_change_trend'] = d.get('trend', {}).get('long', {}).get('oi_change', 0.05)
+        flat['long_price_change_trend'] = d.get('trend', {}).get('long', {}).get('price_change', 0.01)
         flat['short_imbalance_trend'] = d.get('trend', {}).get('short', {}).get('imbalance', 0.6)
-        flat['short_oi_change_trend'] = d.get('trend', {}).get('short', {}).get('oi_change', 5.0)
-        flat['short_price_change_trend'] = d.get('trend', {}).get('short', {}).get('price_change', 1.0)
+        flat['short_oi_change_trend'] = d.get('trend', {}).get('short', {}).get('oi_change', 0.05)
+        flat['short_price_change_trend'] = d.get('trend', {}).get('short', {}).get('price_change', 0.01)
         flat['long_imbalance_range'] = d.get('range', {}).get('long', {}).get('imbalance', 0.7)
-        flat['long_oi_change_range'] = d.get('range', {}).get('long', {}).get('oi_change', 10.0)
+        flat['long_oi_change_range'] = d.get('range', {}).get('long', {}).get('oi_change', 0.10)
         flat['short_imbalance_range'] = d.get('range', {}).get('short', {}).get('imbalance', 0.7)
-        flat['short_oi_change_range'] = d.get('range', {}).get('short', {}).get('oi_change', 10.0)
+        flat['short_oi_change_range'] = d.get('range', {}).get('short', {}).get('oi_change', 0.10)
         
         return flat
     
@@ -1163,28 +1163,28 @@ class L1AdvisoryEngine:
                 'max_staleness_seconds': 120
             },
             'market_regime': {
-                'extreme_price_change_1h': 5.0,
-                'trend_price_change_6h': 3.0
+                'extreme_price_change_1h': 0.05,
+                'trend_price_change_6h': 0.03
             },
             'risk_exposure': {
-                'liquidation': {'price_change': 5.0, 'oi_drop': -15.0},
-                'crowding': {'funding_abs': 0.001, 'oi_growth': 30.0},
+                'liquidation': {'price_change': 0.05, 'oi_drop': -0.15},
+                'crowding': {'funding_abs': 0.001, 'oi_growth': 0.30},
                 'extreme_volume': {'multiplier': 10.0}
             },
             'trade_quality': {
                 'absorption': {'imbalance': 0.7, 'volume_ratio': 0.5},
                 'noise': {'funding_volatility': 0.0005, 'funding_abs': 0.0001},
-                'rotation': {'price_threshold': 2.0, 'oi_threshold': 5.0},
-                'range_weak': {'imbalance': 0.6, 'oi': 10.0}
+                'rotation': {'price_threshold': 0.02, 'oi_threshold': 0.05},
+                'range_weak': {'imbalance': 0.6, 'oi': 0.10}
             },
             'direction': {
                 'trend': {
-                    'long': {'imbalance': 0.6, 'oi_change': 5.0, 'price_change': 1.0},
-                    'short': {'imbalance': 0.6, 'oi_change': 5.0, 'price_change': 1.0}
+                    'long': {'imbalance': 0.6, 'oi_change': 0.05, 'price_change': 0.01},
+                    'short': {'imbalance': 0.6, 'oi_change': 0.05, 'price_change': 0.01}
                 },
                 'range': {
-                    'long': {'imbalance': 0.7, 'oi_change': 10.0},
-                    'short': {'imbalance': 0.7, 'oi_change': 10.0}
+                    'long': {'imbalance': 0.7, 'oi_change': 0.10},
+                    'short': {'imbalance': 0.7, 'oi_change': 0.10}
                 }
             },
             'state_machine': {

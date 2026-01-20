@@ -38,8 +38,8 @@ decision_control:
 # 市场环境识别阈值
 # ==================
 market_regime:
-  extreme_price_change_1h: 5.0    # 1小时价格变化 > 5% → EXTREME
-  trend_price_change_6h: 3.0      # 6小时价格变化 > 3% → TREND
+  extreme_price_change_1h: 0.05   # 1小时价格变化 > 5% → EXTREME（小数格式：0.05=5%）
+  trend_price_change_6h: 0.03     # 6小时价格变化 > 3% → TREND（小数格式：0.03=3%）
 
 # ==================
 # 风险准入阈值
@@ -47,13 +47,13 @@ market_regime:
 risk_exposure:
   # 清算阶段检测
   liquidation:
-    price_change: 5.0             # 价格变化阈值(%)
-    oi_drop: -15.0                # OI下降阈值(%)
+    price_change: 0.05            # 价格变化阈值（小数格式：0.05=5%）
+    oi_drop: -0.15                # OI下降阈值（小数格式：-0.15=-15%）
   
   # 拥挤风险检测
   crowding:
-    funding_abs: 0.001            # 费率绝对值阈值（0.1%）
-    oi_growth: 30.0               # 6h OI增长阈值(%)
+    funding_abs: 0.001            # 费率绝对值阈值（小数格式：0.001=0.1%）
+    oi_growth: 0.30               # 6h OI增长阈值（小数格式：0.30=30%）
   
   # 极端成交量检测
   extreme_volume:
@@ -75,13 +75,13 @@ trade_quality:
   
   # 轮动风险
   rotation:
-    price_threshold: 2.0          # 价格变化阈值(%)
-    oi_threshold: 5.0             # OI变化阈值(%)
+    price_threshold: 0.02         # 价格变化阈值（小数格式：0.02=2%）
+    oi_threshold: 0.05            # OI变化阈值（小数格式：0.05=5%）
   
   # 震荡市弱信号
   range_weak:
-    imbalance: 0.6                # 失衡阈值
-    oi: 10.0                      # OI变化阈值(%)
+    imbalance: 0.6                # 失衡阈值（-1到1范围）
+    oi: 0.10                      # OI变化阈值（小数格式：0.10=10%）
 
 # ==================
 # 方向评估阈值
@@ -90,22 +90,22 @@ direction:
   # 趋势市
   trend:
     long:
-      imbalance: 0.6              # 买卖失衡阈值（多方）
-      oi_change: 5.0              # 1h OI增长阈值(%)
-      price_change: 1.0           # 1h价格上涨阈值(%)
+      imbalance: 0.6              # 买卖失衡阈值（-1到1范围）
+      oi_change: 0.05             # 1h OI增长阈值（小数格式：0.05=5%）
+      price_change: 0.01          # 1h价格上涨阈值（小数格式：0.01=1%）
     short:
-      imbalance: 0.6              # 买卖失衡阈值（空方，绝对值）
-      oi_change: 5.0              # 1h OI增长阈值(%)
-      price_change: 1.0           # 1h价格下跌阈值(%)（绝对值）
+      imbalance: 0.6              # 买卖失衡阈值（-1到1范围，绝对值）
+      oi_change: 0.05             # 1h OI增长阈值（小数格式：0.05=5%）
+      price_change: 0.01          # 1h价格下跌阈值（小数格式：0.01=1%，绝对值）
   
   # 震荡市（需要更强信号）
   range:
     long:
-      imbalance: 0.7              # 更高的失衡要求
-      oi_change: 10.0             # 更高的OI增长要求
+      imbalance: 0.7              # 更高的失衡要求（-1到1范围）
+      oi_change: 0.10             # 更高的OI增长要求（小数格式：0.10=10%）
     short:
-      imbalance: 0.7
-      oi_change: 10.0
+      imbalance: 0.7              # 更高的失衡要求（-1到1范围）
+      oi_change: 0.10             # 更高的OI增长要求（小数格式：0.10=10%）
 
 # ==================
 # 状态机配置
