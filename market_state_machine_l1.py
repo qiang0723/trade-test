@@ -389,7 +389,15 @@ class L1AdvisoryEngine:
             logger.error(f"Metrics normalization failed: {error_msg}")
             return False, data, ReasonTag.INVALID_DATA
         
-        # 基础异常值检查
+        # PR-J: 超范围拦截（统一校验链路）
+        # 在规范化后显式调用 validate_ranges，确保所有指标在合理范围内
+        from metrics_normalizer import MetricsNormalizer
+        range_valid, range_error = MetricsNormalizer.validate_ranges(normalized_data)
+        if not range_valid:
+            logger.error(f"Metrics range validation failed: {range_error}")
+            return False, normalized_data, ReasonTag.INVALID_DATA
+        
+        # 基础异常值检查（保留，作为双重保护）
         if normalized_data['buy_sell_imbalance'] < -1 or normalized_data['buy_sell_imbalance'] > 1:
             logger.error(f"Invalid buy_sell_imbalance: {normalized_data['buy_sell_imbalance']}")
             return False, normalized_data, ReasonTag.INVALID_DATA

@@ -119,7 +119,7 @@ class MetricsNormalizer:
     @classmethod
     def validate_ranges(cls, data: Dict) -> Tuple[bool, str]:
         """
-        验证指标合理性范围
+        验证指标合理性范围（PR-J: 纳入L1校验链路）
         
         Args:
             data: 规范化后的数据
@@ -128,22 +128,54 @@ class MetricsNormalizer:
             (是否有效, 错误信息)
         """
         # 价格变化率合理性检查（1小时内 ±20% 视为极限）
-        if 'price_change_1h' in data:
+        if 'price_change_1h' in data and data['price_change_1h'] is not None:
             value = abs(data['price_change_1h'])
             if value > 0.20:  # 20%
                 return False, f"price_change_1h超出合理范围：{value*100:.2f}% (>20%)"
         
+        # 价格变化率合理性检查（6小时内 ±50% 视为极限）
+        if 'price_change_6h' in data and data['price_change_6h'] is not None:
+            value = abs(data['price_change_6h'])
+            if value > 0.50:  # 50%
+                return False, f"price_change_6h超出合理范围：{value*100:.2f}% (>50%)"
+        
+        # OI变化率合理性检查（1小时内 ±100% 视为极限）
+        if 'oi_change_1h' in data and data['oi_change_1h'] is not None:
+            value = abs(data['oi_change_1h'])
+            if value > 1.0:  # 100%
+                return False, f"oi_change_1h超出合理范围：{value*100:.2f}% (>100%)"
+        
+        # OI变化率合理性检查（6小时内 ±200% 视为极限）
+        if 'oi_change_6h' in data and data['oi_change_6h'] is not None:
+            value = abs(data['oi_change_6h'])
+            if value > 2.0:  # 200%
+                return False, f"oi_change_6h超出合理范围：{value*100:.2f}% (>200%)"
+        
         # 买卖失衡必须在 -1 到 1 之间
-        if 'buy_sell_imbalance' in data:
+        if 'buy_sell_imbalance' in data and data['buy_sell_imbalance'] is not None:
             value = data['buy_sell_imbalance']
             if value < -1 or value > 1:
-                return False, f"buy_sell_imbalance超出范围：{value} (应在-1到1之间)"
+                return False, f"buy_sell_imbalance超出范围：{value:.4f} (应在-1到1之间)"
         
         # 资金费率合理性检查（单次费率 ±1% 视为极限）
-        if 'funding_rate' in data:
+        if 'funding_rate' in data and data['funding_rate'] is not None:
             value = abs(data['funding_rate'])
             if value > 0.01:  # 1%
                 return False, f"funding_rate超出合理范围：{value*100:.4f}% (>1%)"
+        
+        # 成交量比例合理性检查（相对于24h均值，10倍视为极限）
+        if 'volume_ratio' in data and data['volume_ratio'] is not None:
+            value = data['volume_ratio']
+            if value < 0:
+                return False, f"volume_ratio不能为负：{value:.2f}"
+            if value > 50:  # 50倍
+                return False, f"volume_ratio超出合理范围：{value:.2f}x (>50x)"
+        
+        # 价格必须为正
+        if 'price' in data and data['price'] is not None:
+            value = data['price']
+            if value <= 0:
+                return False, f"price必须为正：{value}"
         
         return True, ""
 
