@@ -985,5 +985,11 @@ def get_state_machine():
     """获取全局状态机实例"""
     global _state_machine_instance
     if _state_machine_instance is None:
-        _state_machine_instance = MarketStateMachine()
+        import os
+        # 数据库存储在 /app/db 目录（Docker挂载点）
+        db_dir = os.getenv('DB_DIR', '/app/db')
+        os.makedirs(db_dir, exist_ok=True)
+        db_path = os.path.join(db_dir, 'market_state.db')
+        storage = StateStorage(db_path=db_path)
+        _state_machine_instance = MarketStateMachine(storage=storage)
     return _state_machine_instance

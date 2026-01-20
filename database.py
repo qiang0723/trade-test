@@ -317,5 +317,10 @@ def get_signal_db():
     """获取全局数据库实例"""
     global _db_instance
     if _db_instance is None:
-        _db_instance = SignalDatabase()
+        import os
+        # 数据库存储在 /app/db 目录（Docker挂载点）
+        db_dir = os.getenv('DB_DIR', '/app/db')
+        os.makedirs(db_dir, exist_ok=True)
+        db_path = os.path.join(db_dir, 'market_signals.db')
+        _db_instance = SignalDatabase(db_path=db_path)
     return _db_instance

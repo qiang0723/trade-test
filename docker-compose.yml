@@ -12,6 +12,8 @@ services:
     volumes:
       # 挂载数据目录，用于保存导出的数据
       - ./btc_market_data:/app/btc_market_data
+      # 挂载数据库目录，实现持久化存储
+      - ./data/db:/app/db
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
