@@ -919,14 +919,37 @@ class L1AdvisoryEngine:
         return order.get(confidence, 0)
     
     def _string_to_confidence(self, s: str) -> Confidence:
-        """字符串转Confidence枚举"""
+        """
+        字符串转Confidence枚举（P1-2修复：配置错误时返回LOW而非MEDIUM）
+        
+        保守原则：
+        - 配置错误时默认 LOW（最严格），而非 MEDIUM
+        - 避免配置拼写错误导致门槛降低、可执行概率提升
+        - 记录 ERROR 日志让问题可见
+        
+        Args:
+            s: 配置字符串（如 "HIGH", "MEDIUM"）
+        
+        Returns:
+            Confidence: 对应的枚举值，配置错误返回 LOW
+        """
         mapping = {
             'LOW': Confidence.LOW,
             'MEDIUM': Confidence.MEDIUM,
             'HIGH': Confidence.HIGH,
             'ULTRA': Confidence.ULTRA
         }
-        return mapping.get(s.upper(), Confidence.MEDIUM)
+        
+        result = mapping.get(s.upper())
+        if result is None:
+            logger.error(
+                f"⚠️ 配置错误: 未知的置信度字符串 '{s}'，"
+                f"有效值: LOW/MEDIUM/HIGH/ULTRA，"
+                f"已回退到 LOW（最保守）以确保安全"
+            )
+            return Confidence.LOW
+        
+        return result
     
     # ========================================
     # 方案D：执行许可计算
