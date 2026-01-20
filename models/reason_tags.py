@@ -122,8 +122,10 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.EXTREME_VOLUME: ExecutabilityLevel.BLOCK,
     
     # 质量否决类 - POOR阻断，UNCERTAIN降级
-    ReasonTag.ABSORPTION_RISK: ExecutabilityLevel.BLOCK,
-    ReasonTag.ROTATION_RISK: ExecutabilityLevel.BLOCK,
+    # 注意：ABSORPTION_RISK 和 ROTATION_RISK 被设置为 BLOCK（更保守，等价于风险否决类）
+    # 双重保护机制：POOR硬短路 + BLOCK标签 → DENY → 即使强信号也无法绕过
+    ReasonTag.ABSORPTION_RISK: ExecutabilityLevel.BLOCK,   # deny_tags等价物
+    ReasonTag.ROTATION_RISK: ExecutabilityLevel.BLOCK,     # deny_tags等价物
     ReasonTag.NOISY_MARKET: ExecutabilityLevel.DEGRADE,      # 可降级
     ReasonTag.WEAK_SIGNAL_IN_RANGE: ExecutabilityLevel.DEGRADE,  # 可降级
     

@@ -514,7 +514,10 @@ class L1AdvisoryEngine:
         """
         tags = []
         
-        # 1. 吸纳风险
+        # 1. 吸纳风险（deny_tags等价物：双重保护机制）
+        # - 第一道防线：返回POOR → 硬短路为NO_TRADE
+        # - 第二道防线：BLOCK标签 → ExecutionPermission.DENY → executable=False
+        # - 即使有强信号也无法绕过（Step 8先于Step 9的强信号boost）
         imbalance = abs(data.get('buy_sell_imbalance', 0))
         volume_1h = data.get('volume_1h', 0)
         volume_avg = data.get('volume_24h', 0) / 24
@@ -540,7 +543,10 @@ class L1AdvisoryEngine:
             # PR-004: 噪声市场 → UNCERTAIN（不确定性），而非POOR（明确风险）
             return TradeQuality.UNCERTAIN, tags
         
-        # 3. 轮动风险
+        # 3. 轮动风险（deny_tags等价物：双重保护机制）
+        # - 第一道防线：返回POOR → 硬短路为NO_TRADE
+        # - 第二道防线：BLOCK标签 → ExecutionPermission.DENY → executable=False
+        # - 即使有强信号也无法绕过（Step 8先于Step 9的强信号boost）
         price_change_1h = data.get('price_change_1h', 0)
         oi_change_1h = data.get('oi_change_1h', 0)
         
@@ -926,9 +932,15 @@ class L1AdvisoryEngine:
         3. 仅 ALLOW 级别标签 → ALLOW（正常执行）
         
         ExecutabilityLevel → ExecutionPermission 映射：
-        - BLOCK (EXTREME_VOLUME, ABSORPTION_RISK, ...) → DENY
+        - BLOCK (EXTREME_VOLUME, ABSORPTION_RISK, ROTATION_RISK, ...) → DENY
         - DEGRADE (NOISY_MARKET, WEAK_SIGNAL_IN_RANGE) → ALLOW_REDUCED
         - ALLOW (STRONG_BUY_PRESSURE, OI_GROWING, ...) → ALLOW
+        
+        特别说明：
+        - ABSORPTION_RISK 和 ROTATION_RISK 被设置为 BLOCK 而非 DEGRADE（更保守）
+        - 它们等价于风险否决类的 deny_tags（LIQUIDATION_PHASE、CROWDING_RISK等）
+        - 双重保护：POOR硬短路 + BLOCK标签 → 即使强信号也无法绕过
+        - 执行顺序保证：Step 8（执行许可）在 Step 9（置信度+强信号boost）之前
         
         Args:
             reason_tags: 原因标签列表
