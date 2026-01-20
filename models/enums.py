@@ -43,3 +43,22 @@ class SystemState(Enum):
     LONG_ACTIVE = "long_active"    # 做多激活
     SHORT_ACTIVE = "short_active"  # 做空激活
     COOL_DOWN = "cool_down"        # 冷却期
+
+
+class ExecutionPermission(Enum):
+    """
+    执行许可级别（方案D：三级执行许可）
+    
+    用于区分不同风险等级的交易建议，对应 ReasonTag 的 ExecutabilityLevel：
+    - ALLOW: 正常执行（无降级标签，无阻断标签）
+    - ALLOW_REDUCED: 降级执行（有 DEGRADE 级别标签，如 NOISY_MARKET，使用更严格门槛）
+    - DENY: 拒绝执行（有 BLOCK 级别标签，如 EXTREME_VOLUME，永远不可执行）
+    
+    双门槛机制：
+    - ALLOW: 要求 min_confidence_normal (默认 HIGH/ULTRA)
+    - ALLOW_REDUCED: 要求 min_confidence_reduced (默认 MEDIUM 及以上)
+    - DENY: 永远 executable=False
+    """
+    ALLOW = "allow"                    # 正常执行
+    ALLOW_REDUCED = "allow_reduced"    # 降级执行（更严格门槛）
+    DENY = "deny"                      # 拒绝执行

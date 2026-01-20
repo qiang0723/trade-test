@@ -266,11 +266,22 @@ class L1AdvisoryEngine:
             'result': 'Allowed' if not control_blocked else 'Blocked'
         })
         
-        # ===== Step 8: 构造结果 =====
+        # ===== Step 8: 计算执行许可级别（方案D）=====
+        from models.enums import ExecutionPermission
+        execution_permission = self._compute_execution_permission(reason_tags)
+        
+        self.last_pipeline_steps.append({
+            'step': 8, 'name': 'compute_execution_permission',
+            'status': 'success',
+            'message': f"执行许可: {execution_permission.value.upper()}",
+            'result': execution_permission.value
+        })
+        
+        # ===== Step 9: 置信度计算 =====
         confidence = self._compute_confidence(decision, regime, quality, reason_tags)
         
         self.last_pipeline_steps.append({
-            'step': 8, 'name': 'compute_confidence',
+            'step': 9, 'name': 'compute_confidence',
             'status': 'success',
             'message': f"置信度: {confidence.value.upper()}",
             'result': confidence.value
@@ -284,6 +295,7 @@ class L1AdvisoryEngine:
         
         result_timestamp = datetime.now()
         
+        # ===== Step 10: 构造结果 =====
         result = AdvisoryResult(
             decision=decision,
             confidence=confidence,
@@ -293,11 +305,22 @@ class L1AdvisoryEngine:
             trade_quality=quality,
             reason_tags=reason_tags,
             timestamp=result_timestamp,
+            execution_permission=execution_permission,  # 方案D新增
             executable=False  # 先初始化为False
         )
         
-        # 计算executable标志位（P2）
-        result.executable = result.compute_executable()
+        # 计算executable标志位（方案D双门槛）
+        exec_config = self.config.get('executable_control', {})
+        min_conf_normal_str = exec_config.get('min_confidence_normal', 'HIGH')
+        min_conf_reduced_str = exec_config.get('min_confidence_reduced', 'MEDIUM')
+        
+        min_conf_normal = self._string_to_confidence(min_conf_normal_str)
+        min_conf_reduced = self._string_to_confidence(min_conf_reduced_str)
+        
+        result.executable = result.compute_executable(
+            min_confidence_normal=min_conf_normal,
+            min_confidence_reduced=min_conf_reduced
+        )
         
         # 🔥 更新决策记忆（PR-C）- 仅LONG/SHORT会更新
         self.decision_memory.update_decision(symbol, decision, result_timestamp)
@@ -917,6 +940,53 @@ class L1AdvisoryEngine:
         return mapping.get(s.upper(), Confidence.MEDIUM)
     
     # ========================================
+    # 方案D：执行许可计算
+    # ========================================
+    
+    def _compute_execution_permission(self, reason_tags: List[ReasonTag]) -> 'ExecutionPermission':
+        """
+        计算执行许可级别（方案D：三级执行许可）
+        
+        映射规则：
+        1. 任何 BLOCK 级别标签 → DENY（拒绝执行）
+        2. 任何 DEGRADE 级别标签 → ALLOW_REDUCED（降级执行，使用更严格门槛）
+        3. 仅 ALLOW 级别标签 → ALLOW（正常执行）
+        
+        ExecutabilityLevel → ExecutionPermission 映射：
+        - BLOCK (EXTREME_VOLUME, ABSORPTION_RISK, ...) → DENY
+        - DEGRADE (NOISY_MARKET, WEAK_SIGNAL_IN_RANGE) → ALLOW_REDUCED
+        - ALLOW (STRONG_BUY_PRESSURE, OI_GROWING, ...) → ALLOW
+        
+        Args:
+            reason_tags: 原因标签列表
+        
+        Returns:
+            ExecutionPermission: 执行许可级别
+        """
+        from models.reason_tags import REASON_TAG_EXECUTABILITY, ExecutabilityLevel
+        from models.enums import ExecutionPermission
+        
+        # 优先级1: 检查是否有 BLOCK 级别标签（最高优先级）
+        for tag in reason_tags:
+            exec_level = REASON_TAG_EXECUTABILITY.get(tag, ExecutabilityLevel.ALLOW)
+            
+            if exec_level == ExecutabilityLevel.BLOCK:
+                logger.debug(f"[ExecPerm] DENY: found blocking tag {tag.value}")
+                return ExecutionPermission.DENY
+        
+        # 优先级2: 检查是否有 DEGRADE 级别标签
+        for tag in reason_tags:
+            exec_level = REASON_TAG_EXECUTABILITY.get(tag, ExecutabilityLevel.ALLOW)
+            
+            if exec_level == ExecutabilityLevel.DEGRADE:
+                logger.debug(f"[ExecPerm] ALLOW_REDUCED: found degrading tag {tag.value}")
+                return ExecutionPermission.ALLOW_REDUCED
+        
+        # 优先级3: 全是 ALLOW 级别（或没有可识别的标签）
+        logger.debug(f"[ExecPerm] ALLOW: no blocking or degrading tags")
+        return ExecutionPermission.ALLOW
+    
+    # ========================================
     # 状态机更新
     # ========================================
     
@@ -1060,6 +1130,8 @@ class L1AdvisoryEngine:
         Returns:
             AdvisoryResult: NO_TRADE决策结果
         """
+        from models.enums import ExecutionPermission
+        
         result = AdvisoryResult(
             decision=Decision.NO_TRADE,
             confidence=Confidence.LOW,
@@ -1069,6 +1141,7 @@ class L1AdvisoryEngine:
             trade_quality=quality,
             reason_tags=reason_tags,
             timestamp=datetime.now(),
+            execution_permission=ExecutionPermission.DENY,  # NO_TRADE → DENY
             executable=False
         )
         # NO_TRADE的executable永远是False，无需重新计算

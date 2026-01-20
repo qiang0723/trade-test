@@ -134,15 +134,15 @@ confidence_scoring:
     high: 65                       # >=65分 → HIGH
     medium: 40                     # >=40分 → MEDIUM
   
-  # 硬降级上限（caps）
+  # 硬降级上限（caps）- 方案D修订：调整为HIGH以配合ALLOW_REDUCED
   caps:
-    # UNCERTAIN质量的上限
-    uncertain_quality_max: "MEDIUM"  # MEDIUM 或 HIGH
+    # UNCERTAIN质量的上限（修订：MEDIUM → HIGH，使ALLOW_REDUCED可执行）
+    uncertain_quality_max: "HIGH"  # HIGH 允许降级执行
     
-    # 特定ReasonTag的上限
+    # 特定ReasonTag的上限（修订：MEDIUM → HIGH，使ALLOW_REDUCED可执行）
     tag_caps:
-      noisy_market: "MEDIUM"
-      weak_signal_in_range: "MEDIUM"
+      noisy_market: "HIGH"           # HIGH 允许降级执行
+      weak_signal_in_range: "HIGH"   # HIGH 允许降级执行
   
   # 强信号突破
   strong_signal_boost:
@@ -172,3 +172,21 @@ reason_tag_rules:
     - extreme_regime
     - absorption_risk
     - rotation_risk
+
+# ==================
+# 执行控制（方案D：双门槛机制）
+# ==================
+executable_control:
+  # ALLOW 的最低置信度要求（正常执行）
+  min_confidence_normal: "HIGH"     # HIGH 或 ULTRA
+  
+  # ALLOW_REDUCED 的最低置信度要求（降级执行）
+  min_confidence_reduced: "MEDIUM"  # MEDIUM/HIGH/ULTRA
+  
+  # 说明：
+  # - ALLOW: 无降级标签，要求 HIGH/ULTRA
+  # - ALLOW_REDUCED: 有DEGRADE标签（如NOISY_MARKET），要求 MEDIUM及以上
+  # - DENY: 有BLOCK标签（如EXTREME_VOLUME），永远不可执行
+  #
+  # 配合 caps 上限：
+  # - noisy_market → cap to HIGH → ALLOW_REDUCED + MEDIUM门槛 → executable=True ✓
