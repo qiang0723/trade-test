@@ -97,6 +97,10 @@ class L1AdvisoryEngine:
             config_path = os.path.join(os.path.dirname(__file__), 'config', 'l1_thresholds.yaml')
         
         self.config = self._load_config(config_path)
+        
+        # ⚠️ 启动时校验：防止口径回归
+        self._validate_decimal_calibration(self.config)
+        
         self.thresholds = self._flatten_thresholds(self.config)
         
         # 状态机状态
@@ -1091,6 +1095,95 @@ class L1AdvisoryEngine:
         except Exception as e:
             logger.error(f"Error loading config: {e}, using defaults")
             return self._get_default_config()
+    
+    def _validate_decimal_calibration(self, config: dict):
+        """
+        启动时校验：检查配置口径是否为小数格式（防回归）
+        
+        目标：所有百分比阈值必须使用小数格式（0.05=5%），不允许百分点格式（5.0）
+        
+        Args:
+            config: 配置字典
+        
+        Raises:
+            ValueError: 如果发现疑似百分点格式的阈值
+        """
+        errors = []
+        
+        # 定义需要检查的百分比阈值路径（值应 < 1.0）
+        percentage_thresholds = [
+            ('market_regime', 'extreme_price_change_1h', 'EXTREME价格变化阈值'),
+            ('market_regime', 'trend_price_change_6h', 'TREND价格变化阈值'),
+            ('risk_exposure', 'liquidation', 'price_change', '清算价格变化阈值'),
+            ('risk_exposure', 'liquidation', 'oi_drop', '清算OI下降阈值'),
+            ('risk_exposure', 'crowding', 'oi_growth', '拥挤OI增长阈值'),
+            ('trade_quality', 'rotation', 'price_threshold', '轮动价格阈值'),
+            ('trade_quality', 'rotation', 'oi_threshold', '轮动OI阈值'),
+            ('trade_quality', 'range_weak', 'oi', '震荡弱信号OI阈值'),
+        ]
+        
+        # 检查基础百分比阈值
+        for path_parts in percentage_thresholds:
+            *path, last_key, name = path_parts
+            value = config
+            try:
+                for key in path:
+                    value = value[key]
+                threshold_value = value[last_key]
+                
+                # 检查：百分比阈值的绝对值应该 < 1.0（允许负数，如-0.15）
+                if abs(threshold_value) >= 1.0:
+                    config_path = '.'.join(path) + '.' + last_key if path else last_key
+                    errors.append(
+                        f"❌ {config_path} = {threshold_value} ({name}，疑似百分点格式，应使用小数格式，如 0.05 表示 5%)"
+                    )
+            except (KeyError, TypeError):
+                # 配置项不存在，跳过
+                pass
+        
+        # 检查方向评估阈值（嵌套结构）
+        direction_config = config.get('direction', {})
+        for regime in ['trend', 'range']:
+            for side in ['long', 'short']:
+                side_config = direction_config.get(regime, {}).get(side, {})
+                
+                # oi_change 应 < 1.0
+                oi_change = side_config.get('oi_change')
+                if oi_change is not None and abs(oi_change) >= 1.0:
+                    errors.append(
+                        f"❌ direction.{regime}.{side}.oi_change = {oi_change} "
+                        f"(疑似百分点格式，应使用小数格式，如 0.05 表示 5%)"
+                    )
+                
+                # price_change 应 < 1.0
+                price_change = side_config.get('price_change')
+                if price_change is not None and abs(price_change) >= 1.0:
+                    errors.append(
+                        f"❌ direction.{regime}.{side}.price_change = {price_change} "
+                        f"(疑似百分点格式，应使用小数格式，如 0.01 表示 1%)"
+                    )
+        
+        # 如果发现错误，拒绝启动
+        if errors:
+            error_message = (
+                "\n" + "="*80 + "\n"
+                "⚠️  配置口径错误检测（Decimal Calibration Validation Failed）\n"
+                "="*80 + "\n"
+                "发现疑似使用百分点格式的阈值配置，系统拒绝启动！\n\n"
+                "错误项：\n" + "\n".join(f"  {err}" for err in errors) + "\n\n"
+                "修复方法：\n"
+                "  1. 打开配置文件: config/l1_thresholds.yaml\n"
+                "  2. 将所有百分比阈值改为小数格式:\n"
+                "     - 错误: 5.0 (百分点)\n"
+                "     - 正确: 0.05 (小数，表示5%)\n"
+                "  3. 参考文档: doc/平台详解3.0.md 第4章（口径规范）\n"
+                "="*80
+            )
+            logger.error(error_message)
+            raise ValueError(error_message)
+        
+        logger.info("✅ 配置口径校验通过：所有百分比阈值使用小数格式")
+    
     
     def _flatten_thresholds(self, config: dict) -> dict:
         """
