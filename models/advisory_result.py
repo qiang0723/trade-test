@@ -38,7 +38,7 @@ class AdvisoryResult:
     
     # ===== 闸门状态 =====
     risk_exposure_allowed: bool     # 风险准入：True/False
-    trade_quality: TradeQuality     # 交易质量：GOOD/POOR
+    trade_quality: TradeQuality     # 交易质量：GOOD/UNCERTAIN/POOR（三态）
     
     # ===== 可追溯性 =====
     reason_tags: List[ReasonTag]    # 决策原因标签列表
