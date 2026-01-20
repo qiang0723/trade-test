@@ -685,21 +685,12 @@ class L1AdvisoryEngine:
         reason_tags: List[ReasonTag]
     ) -> Confidence:
         """
-        置信度计算（PR-005: 升级为4层）
+        置信度计算（PR-D混合模式）
         
-        逻辑树规则：
-        - ULTRA: TREND + GOOD + 强信号
-        - HIGH: TREND + GOOD（无强信号），或 RANGE + GOOD + 强信号
-        - MEDIUM: TREND + POOR，或 RANGE + GOOD（无强信号）
-        - LOW: 其他情况（RANGE + POOR，EXTREME，NO_TRADE）
-        
-        评分维度（保留评分体系，但映射到4层）：
-        1. 市场环境 (0-3分)
-        2. 交易质量 (0-2分)
-        3. 系统状态 (0-1分)
-        4. 信号强度 (0-2分)
-        
-        总分8分，映射到ULTRA/HIGH/MEDIUM/LOW
+        流程：
+        1. 基础加分（保持PR-005的加分制）
+        2. 硬降级上限（caps）
+        3. 强信号突破（+1档，不突破cap）
         
         Args:
             decision: 决策
@@ -710,65 +701,216 @@ class L1AdvisoryEngine:
         Returns:
             Confidence: 置信度
         """
+        # NO_TRADE强制LOW
         if decision == Decision.NO_TRADE:
             return Confidence.LOW
         
+        # ===== 第1步：基础加分 =====
         score = 0
+        scoring_config = self.config.get('confidence_scoring', {})
         
-        # 1. 市场环境 (0-3分)
+        # 决策类型分
+        if decision in [Decision.LONG, Decision.SHORT]:
+            score += scoring_config.get('decision_score', 30)
+        
+        # 市场环境分
         if regime == MarketRegime.TREND:
-            score += 3
+            score += scoring_config.get('regime_trend_score', 30)
         elif regime == MarketRegime.RANGE:
-            score += 2
-        # EXTREME: 0分（不应该出现在这里）
+            score += scoring_config.get('regime_range_score', 10)
+        elif regime == MarketRegime.EXTREME:
+            score += scoring_config.get('regime_extreme_score', 0)
         
-        # 2. 交易质量 (0-2分)
+        # 质量分
         if quality == TradeQuality.GOOD:
-            score += 2
+            score += scoring_config.get('quality_good_score', 30)
         elif quality == TradeQuality.UNCERTAIN:
-            # PR-B: UNCERTAIN质量降级，只给1分
-            score += 1
-        # POOR: 0分（但POOR已在Step 4短路，不应该到这里）
+            score += scoring_config.get('quality_uncertain_score', 15)
+        elif quality == TradeQuality.POOR:
+            score += scoring_config.get('quality_poor_score', 0)
         
-        # 3. 系统状态 (0-1分)
-        if self.current_state in [SystemState.LONG_ACTIVE, SystemState.SHORT_ACTIVE]:
-            score += 1
-        
-        # 4. 信号强度 (0-2分)
+        # 强信号加分
         strong_signals = [ReasonTag.STRONG_BUY_PRESSURE, ReasonTag.STRONG_SELL_PRESSURE]
         has_strong_signal = any(tag in reason_tags for tag in strong_signals)
         if has_strong_signal:
-            score += 2
+            score += scoring_config.get('strong_signal_bonus', 10)
         
-        # PR-005: 映射到4层置信度（8分满分）
-        initial_confidence = None
-        if score >= 7:
-            # 7-8分：TREND(3) + GOOD(2) + 强信号(2) = 7+
-            initial_confidence = Confidence.ULTRA
-        elif score >= 5:
-            # 5-6分：TREND(3) + GOOD(2) = 5，或 RANGE(2) + GOOD(2) + 强信号(2) = 6
-            initial_confidence = Confidence.HIGH
-        elif score >= 3:
-            # 3-4分：TREND(3) + POOR(0) = 3，或 RANGE(2) + GOOD(2) = 4
-            initial_confidence = Confidence.MEDIUM
+        # 映射到初始档位
+        initial_confidence = self._score_to_confidence(score, scoring_config)
+        
+        # ===== 第2步：硬降级上限（caps）=====
+        capped_confidence, has_cap = self._apply_confidence_caps(
+            confidence=initial_confidence,
+            quality=quality,
+            reason_tags=reason_tags
+        )
+        
+        # ===== 第3步：强信号突破（+1档，不突破cap）=====
+        # 如果有cap限制，则不能突破cap；否则可以突破到ULTRA
+        cap_limit = capped_confidence if has_cap else Confidence.ULTRA
+        final_confidence = self._apply_strong_signal_boost(
+            confidence=capped_confidence,
+            reason_tags=reason_tags,
+            cap_limit=cap_limit,
+            has_strong_signal=has_strong_signal
+        )
+        
+        return final_confidence
+    
+    def _score_to_confidence(self, score: int, scoring_config: dict) -> Confidence:
+        """
+        将分数映射到置信度档位（PR-D）
+        
+        Args:
+            score: 总分
+            scoring_config: 配置字典
+        
+        Returns:
+            Confidence: 置信度档位
+        """
+        thresholds = scoring_config.get('thresholds', {})
+        ultra_threshold = thresholds.get('ultra', 90)
+        high_threshold = thresholds.get('high', 65)
+        medium_threshold = thresholds.get('medium', 40)
+        
+        if score >= ultra_threshold:
+            return Confidence.ULTRA
+        elif score >= high_threshold:
+            return Confidence.HIGH
+        elif score >= medium_threshold:
+            return Confidence.MEDIUM
         else:
-            # <3分：其他情况
-            initial_confidence = Confidence.LOW
+            return Confidence.LOW
+    
+    def _apply_confidence_caps(
+        self,
+        confidence: Confidence,
+        quality: TradeQuality,
+        reason_tags: List[ReasonTag]
+    ) -> tuple:
+        """
+        应用硬降级上限（PR-D）
         
-        # PR-B: 检查降级标签，限制置信度上限
-        from models.reason_tags import has_degrading_tags
-        if has_degrading_tags(reason_tags):
-            # 有降级标签（如NOISY_MARKET），置信度最高MEDIUM
-            confidence_order = [Confidence.LOW, Confidence.MEDIUM, Confidence.HIGH, Confidence.ULTRA]
-            max_level = Confidence.MEDIUM
-            max_idx = confidence_order.index(max_level)
-            initial_idx = confidence_order.index(initial_confidence)
-            
-            if initial_idx > max_idx:
-                logger.debug(f"Confidence degraded by tags: {initial_confidence.value} → {max_level.value}")
-                return max_level
+        优先级：
+        1. deny条件（风险拒绝等） → 强制LOW
+        2. UNCERTAIN质量 → cap
+        3. reduce_tags → cap
         
-        return initial_confidence
+        Args:
+            confidence: 初始置信度
+            quality: 交易质量
+            reason_tags: 原因标签列表
+        
+        Returns:
+            (应用cap后的置信度, 是否有cap限制)
+        """
+        scoring_config = self.config.get('confidence_scoring', {})
+        caps_config = scoring_config.get('caps', {})
+        tag_rules = self.config.get('reason_tag_rules', {})
+        
+        has_cap = False
+        
+        # 1. deny条件：强制LOW（当前不在这里处理，因为risk_denied已经在Step 3短路）
+        
+        # 2. UNCERTAIN质量上限
+        if quality == TradeQuality.UNCERTAIN:
+            max_level_str = caps_config.get('uncertain_quality_max', 'MEDIUM')
+            max_level = self._string_to_confidence(max_level_str)
+            if self._confidence_level(confidence) > self._confidence_level(max_level):
+                logger.debug(f"[Cap] UNCERTAIN quality: {confidence.value} → {max_level.value}")
+                confidence = max_level
+                has_cap = True
+        
+        # 3. reduce_tags上限
+        reduce_tags = tag_rules.get('reduce_tags', [])
+        tag_caps = caps_config.get('tag_caps', {})
+        
+        for tag in reason_tags:
+            tag_value = tag.value
+            if tag_value in reduce_tags or tag_value in tag_caps:
+                max_level_str = tag_caps.get(tag_value, 'MEDIUM')
+                max_level = self._string_to_confidence(max_level_str)
+                if self._confidence_level(confidence) > self._confidence_level(max_level):
+                    logger.debug(f"[Cap] Tag {tag_value}: {confidence.value} → {max_level.value}")
+                    confidence = max_level
+                    has_cap = True
+        
+        return confidence, has_cap
+    
+    def _apply_strong_signal_boost(
+        self,
+        confidence: Confidence,
+        reason_tags: List[ReasonTag],
+        cap_limit: Confidence,
+        has_strong_signal: bool
+    ) -> Confidence:
+        """
+        强信号突破（PR-D）
+        
+        条件：
+        1. 存在强信号标签
+        2. 不能突破cap_limit
+        
+        Args:
+            confidence: cap后的置信度
+            reason_tags: 原因标签列表
+            cap_limit: 上限（不可突破）
+            has_strong_signal: 是否有强信号
+        
+        Returns:
+            Confidence: 最终置信度
+        """
+        boost_config = self.config.get('confidence_scoring', {}).get('strong_signal_boost', {})
+        
+        if not boost_config.get('enabled', True):
+            return confidence
+        
+        if not has_strong_signal:
+            return confidence
+        
+        # 提升1档
+        boost_levels = boost_config.get('boost_levels', 1)
+        boosted = self._boost_confidence(confidence, boost_levels)
+        
+        # 不能突破cap
+        if self._confidence_level(boosted) > self._confidence_level(cap_limit):
+            logger.debug(f"[Boost] Capped at {cap_limit.value}, cannot boost to {boosted.value}")
+            return cap_limit
+        
+        if boosted != confidence:
+            logger.debug(f"[Boost] Strong signal: {confidence.value} → {boosted.value}")
+        
+        return boosted
+    
+    def _boost_confidence(self, confidence: Confidence, levels: int) -> Confidence:
+        """提升置信度档位"""
+        order = [Confidence.LOW, Confidence.MEDIUM, Confidence.HIGH, Confidence.ULTRA]
+        try:
+            current_idx = order.index(confidence)
+            new_idx = min(current_idx + levels, len(order) - 1)
+            return order[new_idx]
+        except ValueError:
+            return confidence
+    
+    def _confidence_level(self, confidence: Confidence) -> int:
+        """置信度档位的数值表示（用于比较）"""
+        order = {
+            Confidence.LOW: 0,
+            Confidence.MEDIUM: 1,
+            Confidence.HIGH: 2,
+            Confidence.ULTRA: 3
+        }
+        return order.get(confidence, 0)
+    
+    def _string_to_confidence(self, s: str) -> Confidence:
+        """字符串转Confidence枚举"""
+        mapping = {
+            'LOW': Confidence.LOW,
+            'MEDIUM': Confidence.MEDIUM,
+            'HIGH': Confidence.HIGH,
+            'ULTRA': Confidence.ULTRA
+        }
+        return mapping.get(s.upper(), Confidence.MEDIUM)
     
     # ========================================
     # 状态机更新

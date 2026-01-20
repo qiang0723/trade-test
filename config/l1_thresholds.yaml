@@ -115,3 +115,62 @@ direction:
 state_machine:
   cool_down_minutes: 60           # 冷却期时长（分钟）
   signal_timeout_minutes: 30      # 信号超时时间（分钟）
+
+# ==================
+# 置信度配置（PR-D混合模式）
+# ==================
+confidence_scoring:
+  # 基础分（保持现有评分体系）
+  decision_score: 30               # 决策类型分（LONG/SHORT=30, NO_TRADE=0）
+  regime_trend_score: 30           # TREND环境分
+  regime_range_score: 10           # RANGE环境分
+  regime_extreme_score: 0          # EXTREME环境分
+  quality_good_score: 30           # GOOD质量分
+  quality_uncertain_score: 15      # UNCERTAIN质量分（降级）
+  quality_poor_score: 0            # POOR质量分
+  strong_signal_bonus: 10          # 强信号加分
+  
+  # 档位映射（保持现有）
+  thresholds:
+    ultra: 90                      # >=90分 → ULTRA
+    high: 65                       # >=65分 → HIGH
+    medium: 40                     # >=40分 → MEDIUM
+  
+  # 硬降级上限（caps）
+  caps:
+    # UNCERTAIN质量的上限
+    uncertain_quality_max: "MEDIUM"  # MEDIUM 或 HIGH
+    
+    # 特定ReasonTag的上限
+    tag_caps:
+      noisy_market: "MEDIUM"
+      weak_signal_in_range: "MEDIUM"
+  
+  # 强信号突破
+  strong_signal_boost:
+    enabled: true                  # 是否启用
+    boost_levels: 1                # 提升档数
+    
+    # 触发突破的标签
+    required_tags:
+      - strong_buy_pressure
+      - strong_sell_pressure
+
+# ==================
+# ReasonTag分类规则（PR-D）
+# ==================
+reason_tag_rules:
+  # 降级标签（触发cap）
+  reduce_tags:
+    - noisy_market
+    - weak_signal_in_range
+  
+  # 否决标签（强制LOW）
+  deny_tags:
+    - liquidation_phase
+    - crowding_risk
+    - extreme_volume
+    - data_stale
+    - extreme_regime
+    - absorption_risk
+    - rotation_risk
