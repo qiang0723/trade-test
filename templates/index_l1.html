@@ -99,13 +99,23 @@
                     </div>
                 </div>
 
-                <!-- L3执行许可 (P2-1新增) -->
+                <!-- 执行许可级别 (方案D新增) -->
+                <div class="gate-card" id="executionPermCard">
+                    <div class="gate-icon" id="executionPermIcon">⏳</div>
+                    <div class="gate-info">
+                        <div class="gate-label">执行许可级别</div>
+                        <div class="gate-value" id="executionPermValue">--</div>
+                        <div class="gate-tip">ALLOW/ALLOW_REDUCED/DENY</div>
+                    </div>
+                </div>
+
+                <!-- L3执行判定 (方案D双门槛) -->
                 <div class="gate-card executable-card" id="executableCard">
                     <div class="gate-icon" id="executableIcon">⏳</div>
                     <div class="gate-info">
-                        <div class="gate-label">L3执行许可</div>
+                        <div class="gate-label">L3执行判定</div>
                         <div class="gate-value" id="executableValue">--</div>
-                        <div class="gate-tip">为L3执行层提供明确许可</div>
+                        <div class="gate-tip">基于执行许可级别+置信度双门槛</div>
                     </div>
                 </div>
             </div>

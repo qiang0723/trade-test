@@ -228,16 +228,25 @@ function updateDecisionPanel(advisory) {
  * 更新安全闸门
  */
 function updateSafetyGates(advisory) {
-    const { risk_exposure_allowed, trade_quality, market_regime, system_state, executable } = advisory;
+    const { risk_exposure_allowed, trade_quality, market_regime, system_state, execution_permission, executable } = advisory;
     
     // 风险准入
     updateGateCard('riskGateCard', 'riskGateIcon', 'riskGateValue', 
         risk_exposure_allowed ? '✅ Allowed' : '❌ Denied',
         risk_exposure_allowed ? 'success' : 'danger');
     
-    // 交易质量
-    const qualityValue = trade_quality === 'good' ? '✅ GOOD' : '⚠️ POOR';
-    const qualityClass = trade_quality === 'good' ? 'success' : 'warning';
+    // 交易质量（P2修复：支持三态 GOOD/UNCERTAIN/POOR）
+    let qualityValue, qualityClass;
+    if (trade_quality === 'good') {
+        qualityValue = '✅ GOOD';
+        qualityClass = 'success';
+    } else if (trade_quality === 'uncertain') {
+        qualityValue = '⚠️ UNCERTAIN';
+        qualityClass = 'warning';
+    } else {
+        qualityValue = '❌ POOR';
+        qualityClass = 'danger';
+    }
     updateGateCard('qualityGateCard', 'qualityGateIcon', 'qualityGateValue',
         qualityValue, qualityClass);
     
@@ -269,7 +278,25 @@ function updateSafetyGates(advisory) {
     updateGateCard('stateCard', 'stateIcon', 'stateValue',
         stateText, stateClass, stateIcon);
     
-    // L3执行许可 (P2-1新增)
+    // 执行许可级别 (方案D新增)
+    let permIcon, permText, permClass;
+    if (execution_permission === 'allow') {
+        permIcon = '✅';
+        permText = '✅ ALLOW';
+        permClass = 'success';
+    } else if (execution_permission === 'allow_reduced') {
+        permIcon = '⚠️';
+        permText = '⚠️ ALLOW_REDUCED';
+        permClass = 'warning';
+    } else {
+        permIcon = '⛔';
+        permText = '⛔ DENY';
+        permClass = 'danger';
+    }
+    updateGateCard('executionPermCard', 'executionPermIcon', 'executionPermValue',
+        permText, permClass, permIcon);
+    
+    // L3执行判定 (方案D双门槛)
     const executableValue = executable ? '✅ Executable' : '⛔ Not Executable';
     const executableClass = executable ? 'success' : 'danger';
     const executableIcon = executable ? '✅' : '⛔';
