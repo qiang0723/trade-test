@@ -44,10 +44,6 @@ class ReasonTag(Enum):
     CONFLICTING_SIGNALS = "conflicting_signals"
     NO_CLEAR_DIRECTION = "no_clear_direction"
     
-    # ===== 状态机约束类 =====
-    COOL_DOWN_ACTIVE = "cool_down_active"
-    STATE_TRANSITION_DENIED = "state_transition_denied"
-    
     # ===== 决策频率控制类（PR-C）=====
     MIN_INTERVAL_BLOCK = "min_interval_block"
     FLIP_COOLDOWN_BLOCK = "flip_cooldown_block"
@@ -82,10 +78,6 @@ REASON_TAG_EXPLANATIONS = {
     # 方向冲突类
     "conflicting_signals": "⚠️ 信号冲突：做多做空信号同时出现，保守选择观望",
     "no_clear_direction": "🤷 方向不明：未检测到明确的做多或做空信号",
-    
-    # 状态机约束类
-    "cool_down_active": "⏸️ 冷却期：系统处于冷却期，暂不发出新信号",
-    "state_transition_denied": "🚫 状态约束：当前系统状态不允许此决策",
     
     # 决策频率控制类（PR-C）
     "min_interval_block": "⏱️ 间隔过短：距离上次决策时间过短，防止频繁输出",
@@ -139,9 +131,7 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.CONFLICTING_SIGNALS: ExecutabilityLevel.BLOCK,
     ReasonTag.NO_CLEAR_DIRECTION: ExecutabilityLevel.BLOCK,
     
-    # 状态机约束类 - 阻断
-    ReasonTag.COOL_DOWN_ACTIVE: ExecutabilityLevel.BLOCK,
-    ReasonTag.STATE_TRANSITION_DENIED: ExecutabilityLevel.BLOCK,
+    # 决策频率控制类（PR-C）- 阻断
     ReasonTag.MIN_INTERVAL_BLOCK: ExecutabilityLevel.BLOCK,
     ReasonTag.FLIP_COOLDOWN_BLOCK: ExecutabilityLevel.BLOCK,
     
@@ -218,9 +208,7 @@ def get_reason_tag_category(tag: ReasonTag) -> str:
         ReasonTag.NO_CLEAR_DIRECTION
     ]
     
-    state_constraint_tags = [
-        ReasonTag.COOL_DOWN_ACTIVE,
-        ReasonTag.STATE_TRANSITION_DENIED,
+    frequency_control_tags = [
         ReasonTag.MIN_INTERVAL_BLOCK,
         ReasonTag.FLIP_COOLDOWN_BLOCK
     ]
@@ -237,8 +225,8 @@ def get_reason_tag_category(tag: ReasonTag) -> str:
         return "quality-deny"
     elif tag in conflict_tags:
         return "conflict"
-    elif tag in state_constraint_tags:
-        return "state-constraint"
+    elif tag in frequency_control_tags:
+        return "frequency-control"
     elif tag in positive_tags:
         return "positive"
     else:

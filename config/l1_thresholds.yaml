@@ -108,13 +108,6 @@ direction:
       oi_change: 0.10             # 更高的OI增长要求（小数格式：0.10=10%）
 
 # ==================
-# 状态机配置
-# ==================
-state_machine:
-  cool_down_minutes: 60           # 冷却期时长（分钟）
-  signal_timeout_minutes: 30      # 信号超时时间（分钟）
-
-# ==================
 # 置信度配置（PR-D混合模式）
 # ==================
 confidence_scoring:

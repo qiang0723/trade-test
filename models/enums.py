@@ -37,12 +37,15 @@ class MarketRegime(Enum):
 
 
 class SystemState(Enum):
-    """系统状态"""
-    INIT = "init"                  # 初始化
-    WAIT = "wait"                  # 等待
-    LONG_ACTIVE = "long_active"    # 做多激活
-    SHORT_ACTIVE = "short_active"  # 做空激活
-    COOL_DOWN = "cool_down"        # 冷却期
+    """
+    系统状态（简化版：L1咨询层不维护持仓状态）
+    
+    L1作为纯咨询层，只输出决策建议，不涉及持仓管理。
+    因此移除了 LONG_ACTIVE/SHORT_ACTIVE/COOL_DOWN 等持仓语义状态。
+    反抖动功能由 DecisionMemory（PR-C）实现。
+    """
+    INIT = "init"  # 初始化
+    WAIT = "wait"  # 等待（默认状态）
 
 
 class ExecutionPermission(Enum):

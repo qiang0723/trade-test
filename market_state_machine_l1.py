@@ -2,12 +2,14 @@
 L1 Advisory Layer - 核心决策引擎
 
 这是L1决策层的核心实现，负责：
-1. 固化8步决策管道
+1. 固化10步决策管道（v3.0扩展：新增Step 8执行许可、Step 9置信度）
 2. 风险准入评估（第一道闸门）
 3. 交易质量评估（第二道闸门）
 4. 方向判断（资金费率降级）
-5. 置信度计算（工程化）
-6. 输出标准化AdvisoryResult
+5. 决策频率控制（PR-C）
+6. ExecutionPermission三级执行许可（方案D）
+7. 置信度混合模式计算（PR-D）
+8. 输出标准化AdvisoryResult（含executable双门槛判定）
 
 不包含：
 - 执行逻辑
@@ -76,7 +78,7 @@ class L1AdvisoryEngine:
     
     职责:
     - 单币种方向决策 (LONG/SHORT/NO_TRADE)
-    - 固化8步决策管道
+    - 固化10步决策管道（v3.0扩展：含ExecutionPermission三级许可、双门槛机制）
     - 输出标准化 AdvisoryResult
     
     不做:
@@ -120,7 +122,7 @@ class L1AdvisoryEngine:
     
     def on_new_tick(self, symbol: str, data: Dict) -> AdvisoryResult:
         """
-        L1决策核心入口 - 固定8步管道
+        L1决策核心入口 - 固定10步管道（v3.0扩展版）
         
         Args:
             symbol: 交易对符号（如 "BTC"）
@@ -136,7 +138,7 @@ class L1AdvisoryEngine:
                 - oi_change_6h: 6小时持仓量变化率(%)
         
         Returns:
-            AdvisoryResult: 标准化决策结果
+            AdvisoryResult: 标准化决策结果（含execution_permission和executable字段）
         """
         reason_tags = []
         
@@ -666,42 +668,9 @@ class L1AdvisoryEngine:
         
         return Decision.NO_TRADE, tags
     
-    # ========================================
-    # Step 7: 状态机约束
-    # ========================================
-    
-    def _check_state_transition(
-        self, 
-        decision: Decision
-    ) -> Tuple[Decision, List[ReasonTag]]:
-        """
-        状态机约束检查
-        
-        规则：
-        - COOL_DOWN期间不允许新信号
-        
-        Args:
-            decision: 待检查的决策
-        
-        Returns:
-            (最终决策, 原因标签列表)
-        """
-        tags = []
-        
-        # COOL_DOWN期间不允许新信号
-        if self.current_state == SystemState.COOL_DOWN:
-            if decision in [Decision.LONG, Decision.SHORT]:
-                cool_down_minutes = self.config.get('state_machine', {}).get('cool_down_minutes', 60)
-                elapsed = (datetime.now() - self.state_enter_time).total_seconds() / 60
-                
-                if elapsed < cool_down_minutes:
-                    tags.append(ReasonTag.COOL_DOWN_ACTIVE)
-                    return Decision.NO_TRADE, tags
-        
-        return decision, tags
     
     # ========================================
-    # Step 8: 置信度计算
+    # Step 9: 置信度计算（PR-D混合模式）
     # ========================================
     
     def _compute_confidence(
@@ -987,29 +956,22 @@ class L1AdvisoryEngine:
         return ExecutionPermission.ALLOW
     
     # ========================================
-    # 状态机更新
+    # 状态维护（简化版：L1咨询层不维护持仓状态）
     # ========================================
     
     def _update_state(self, decision: Decision):
         """
-        更新状态机
+        状态维护（简化版）
         
-        简化版状态转换（完整版需要考虑更多规则）
+        L1作为纯咨询层，不维护持仓状态，固定为WAIT状态。
+        反抖动功能由DecisionMemory（PR-C）实现。
         
         Args:
-            decision: 当前决策
+            decision: 当前决策（保留参数以兼容现有调用）
         """
-        if decision == Decision.LONG:
-            self.current_state = SystemState.LONG_ACTIVE
-            self.state_enter_time = datetime.now()
-        elif decision == Decision.SHORT:
-            self.current_state = SystemState.SHORT_ACTIVE
-            self.state_enter_time = datetime.now()
-        elif decision == Decision.NO_TRADE:
-            if self.current_state in [SystemState.LONG_ACTIVE, SystemState.SHORT_ACTIVE]:
-                # 从激活状态转为等待
-                self.current_state = SystemState.WAIT
-                self.state_enter_time = datetime.now()
+        # L1咨询层固定为WAIT状态
+        self.current_state = SystemState.WAIT
+        self.state_enter_time = datetime.now()
     
     # ========================================
     # 辅助方法
@@ -1352,10 +1314,6 @@ class L1AdvisoryEngine:
                     'long': {'imbalance': 0.7, 'oi_change': 0.10},
                     'short': {'imbalance': 0.7, 'oi_change': 0.10}
                 }
-            },
-            'state_machine': {
-                'cool_down_minutes': 60,
-                'signal_timeout_minutes': 30
             },
             'decision_control': {
                 'min_decision_interval_seconds': 300,
