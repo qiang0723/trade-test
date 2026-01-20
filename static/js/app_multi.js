@@ -169,7 +169,6 @@ function updateMarketTypeButtons() {
 function refreshCurrentMarket() {
     loadTicker();
     loadKlines();
-    loadLargeOrders();
     loadMarketAnalysis();
 }
 
@@ -861,7 +860,6 @@ function startAutoRefresh() {
     // 设置定时刷新（每10秒）
     autoRefreshInterval = setInterval(() => {
         loadTicker();
-        loadLargeOrders();
         loadAllMarketsOverview();
     }, 10000);
     
@@ -897,101 +895,6 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('页面加载完成，开始初始化...');
     startAutoRefresh();
 });
-
-// 加载最近成交
-// 加载大单分析
-async function loadLargeOrders() {
-    try {
-        const timeRange = document.getElementById('timeRangeSelect').value;
-        const threshold = document.getElementById('thresholdSelect').value;
-        const response = await fetch(`/api/large-orders/${currentMarketType}/${currentSymbol}?time_range=${timeRange}&threshold=${threshold}`);
-        const result = await response.json();
-        
-        if (result.success) {
-            const analysis = result.analysis;
-            const timeRangeHours = result.time_range_hours;
-            const threshold = document.getElementById('thresholdSelect').value;
-            
-            // 更新标题
-            document.getElementById('largeOrdersSymbol').textContent = currentSymbol + '/USDT';
-            document.getElementById('largeOrdersMarketType').textContent = 
-                currentMarketType === 'spot' ? '现货' : '合约';
-            
-            // 更新金额阈值显示
-            const thresholdDisplay = document.getElementById('thresholdDisplay');
-            thresholdDisplay.textContent = `(金额 ≥ ${formatNumber(parseFloat(threshold), 0)} USDT)`;
-            
-            // 更新时间范围显示
-            const timeRangeDisplay = document.getElementById('timeRangeDisplay');
-            if (timeRangeHours) {
-                timeRangeDisplay.textContent = ` - 近${timeRangeHours}小时`;
-            } else {
-                timeRangeDisplay.textContent = '';
-            }
-            
-            // 更新统计数据
-            document.getElementById('totalTrades').textContent = analysis.total_trades;
-            document.getElementById('largeOrdersCount').textContent = analysis.large_orders_count;
-            
-            document.getElementById('buyRatio').textContent = formatNumber(analysis.buy_ratio, 1) + '%';
-            document.getElementById('buyAmount').textContent = '$' + formatLargeNumber(analysis.buy_amount);
-            
-            document.getElementById('sellRatio').textContent = formatNumber(analysis.sell_ratio, 1) + '%';
-            document.getElementById('sellAmount').textContent = '$' + formatLargeNumber(analysis.sell_amount);
-            
-            document.getElementById('largeBuyCount').textContent = analysis.large_buy_count;
-            document.getElementById('largeSellCount').textContent = analysis.large_sell_count;
-            
-            // 更新买卖力量进度条
-            const buyRatio = analysis.buy_ratio;
-            const sellRatio = analysis.sell_ratio;
-            
-            document.getElementById('powerBuy').style.width = buyRatio + '%';
-            document.getElementById('powerSell').style.width = sellRatio + '%';
-            document.getElementById('powerBuyPercent').textContent = formatNumber(buyRatio, 1) + '%';
-            document.getElementById('powerSellPercent').textContent = formatNumber(sellRatio, 1) + '%';
-            
-            // 更新大单列表
-            const largeOrdersTableBody = document.querySelector('#largeOrdersTable tbody');
-            largeOrdersTableBody.innerHTML = '';
-            
-            analysis.large_orders.forEach(order => {
-                const row = largeOrdersTableBody.insertRow();
-                const isBuy = order.type === 'buy';
-                
-                row.className = isBuy ? 'large-order-buy' : 'large-order-sell';
-                
-                row.insertCell(0).textContent = order.time;
-                row.insertCell(1).textContent = formatNumber(order.price, 4);
-                row.insertCell(2).textContent = formatNumber(order.qty, 6);
-                
-                const amountCell = row.insertCell(3);
-                amountCell.textContent = '$' + formatNumber(order.amount, 0);
-                amountCell.style.fontWeight = 'bold';
-                
-                const typeCell = row.insertCell(4);
-                const typeSpan = document.createElement('span');
-                typeSpan.className = `large-order-type ${order.type}`;
-                typeSpan.textContent = isBuy ? '🟢 大额买入' : '🔴 大额卖出';
-                typeCell.appendChild(typeSpan);
-            });
-            
-            // 如果没有大单
-            if (analysis.large_orders.length === 0) {
-                const row = largeOrdersTableBody.insertRow();
-                const cell = row.insertCell(0);
-                cell.colSpan = 5;
-                const threshold = document.getElementById('thresholdSelect').value;
-                cell.textContent = `暂无大单（金额 ≥ ${formatNumber(parseFloat(threshold), 0)} USDT）`;
-                cell.style.textAlign = 'center';
-                cell.style.color = '#999';
-                cell.style.padding = '20px';
-            }
-        }
-    } catch (error) {
-        console.error('加载大单分析失败:', error);
-    }
-}
 
 // 页面卸载时清理
 window.addEventListener('beforeunload', function() {

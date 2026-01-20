@@ -426,86 +426,6 @@ class MultiMarketAPI:
         except Exception as e:
             return {'success': False, 'error': str(e)}
     
-    def analyze_large_orders(self, trades_data, threshold_usdt=10000, time_range_hours=None):
-        """分析大单买入情况
-        
-        Args:
-            trades_data: 成交数据
-            threshold_usdt: 大单阈值（USDT）
-            time_range_hours: 时间范围（小时），None表示不限制
-        """
-        if not trades_data or 'data' not in trades_data:
-            return {'success': False, 'error': 'No data'}
-        
-        trades = trades_data['data']
-        
-        # 如果指定了时间范围，过滤数据
-        if time_range_hours is not None:
-            current_time = datetime.now().timestamp() * 1000  # 转换为毫秒
-            time_threshold = current_time - (time_range_hours * 60 * 60 * 1000)  # 时间范围（毫秒）
-            trades = [t for t in trades if t['timestamp'] >= time_threshold]
-        
-        large_orders = []
-        
-        buy_volume = 0
-        sell_volume = 0
-        buy_amount = 0
-        sell_amount = 0
-        large_buy_count = 0
-        large_sell_count = 0
-        
-        for trade in trades:
-            quote_qty = trade['quote_qty']
-            is_buy = not trade['is_buyer_maker']
-            
-            # 统计买卖量
-            if is_buy:
-                buy_volume += trade['qty']
-                buy_amount += quote_qty
-            else:
-                sell_volume += trade['qty']
-                sell_amount += quote_qty
-            
-            # 识别大单
-            if quote_qty >= threshold_usdt:
-                large_orders.append({
-                    'time': trade['time'],
-                    'timestamp': trade['timestamp'],
-                    'price': trade['price'],
-                    'qty': trade['qty'],
-                    'amount': quote_qty,
-                    'type': 'buy' if is_buy else 'sell'
-                })
-                
-                if is_buy:
-                    large_buy_count += 1
-                else:
-                    large_sell_count += 1
-        
-        # 计算买卖比
-        total_amount = buy_amount + sell_amount
-        buy_ratio = (buy_amount / total_amount * 100) if total_amount > 0 else 50
-        
-        return {
-            'success': True,
-            'symbol': trades_data['symbol'],
-            'market_type': trades_data['market_type'],
-            'time_range_hours': time_range_hours,
-            'analysis': {
-                'total_trades': len(trades),
-                'buy_volume': buy_volume,
-                'sell_volume': sell_volume,
-                'buy_amount': buy_amount,
-                'sell_amount': sell_amount,
-                'buy_ratio': buy_ratio,
-                'sell_ratio': 100 - buy_ratio,
-                'large_orders_count': len(large_orders),
-                'large_buy_count': large_buy_count,
-                'large_sell_count': large_sell_count,
-                'large_orders': sorted(large_orders, key=lambda x: x['amount'], reverse=True)[:20]
-            }
-        }
-    
     def analyze_futures_market(self, symbol):
         """分析合约市场情况并给出状态判断
         
@@ -584,10 +504,10 @@ class MultiMarketAPI:
                 if trades_data['success'] and trades_data['data']:
                     for trade in trades_data['data']:
                         is_buy = not trade['is_buyer_maker']
-                        if is_buy:
+                if is_buy:
                             buy_amount_1h += trade['quote_qty']
                             buy_trades_1h += 1
-                        else:
+                else:
                             sell_amount_1h += trade['quote_qty']
                             sell_trades_1h += 1
             except Exception as e:
@@ -1128,7 +1048,7 @@ class MultiMarketAPI:
                 'success': False,
                 'error': f'分析失败: {str(e)}',
                 'symbol': symbol
-            }
+        }
     
     def get_available_markets_info(self):
         """获取可用市场信息"""
@@ -1404,41 +1324,6 @@ def api_open_interest_history(symbol):
     limit = int(request.args.get('limit', 288))  # 默认288个5分钟数据点（24小时）
     
     return jsonify(market_api.get_open_interest_history(symbol, period, limit))
-
-
-@app.route('/api/large-orders/<market_type>/<symbol>')
-def api_large_orders(market_type, symbol):
-    """API: 获取大单分析"""
-    # 根据时间范围计算需要获取的成交数量
-    time_range_hours = request.args.get('time_range', type=float)
-    threshold = float(request.args.get('threshold', 10000))
-    
-    # 根据时间范围估算需要的数据量
-    # 加密货币交易频繁，每小时可能有数百笔成交
-    if time_range_hours:
-        # 估算：每小时约200-500笔成交，取较大值以确保数据完整
-        estimated_limit = int(time_range_hours * 400)
-        # 限制在100到1000之间（币安API限制）
-        limit = max(100, min(estimated_limit, 1000))
-        # 将小时转换为分钟传递给trades函数
-        time_range_minutes = time_range_hours * 60
-    else:
-        limit = int(request.args.get('limit', 100))
-        time_range_minutes = None
-    
-    # 先获取成交数据（传递时间范围以提前过滤）
-    if market_type == 'spot':
-        trades_data = market_api.get_spot_trades(symbol, limit, time_range_minutes)
-    elif market_type == 'futures':
-        trades_data = market_api.get_futures_trades(symbol, limit, time_range_minutes)
-    else:
-        return jsonify({'success': False, 'error': 'Invalid market type'})
-    
-    # 分析大单（再次应用时间过滤以确保精确）
-    if trades_data['success']:
-        return jsonify(market_api.analyze_large_orders(trades_data, threshold, time_range_hours))
-    else:
-        return jsonify(trades_data)
 
 
 @app.route('/api/signal-history')
