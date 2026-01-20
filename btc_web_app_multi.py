@@ -550,10 +550,10 @@ class MultiMarketAPI:
             
             # 如果有数据异常，直接返回NO_TRADE
             if data_anomaly_reasons:
-                return {
-                    'success': True,
+        return {
+            'success': True,
                     'symbol': symbol,
-                    'analysis': {
+            'analysis': {
                         'trade_action': 'NO_TRADE',
                         'state_reason': '数据异常保护',
                         'risk_warning': data_anomaly_reasons,
@@ -1493,6 +1493,47 @@ def history_page():
     return render_template('history.html')
 
 
+class SignalCleanupScheduler:
+    """信号清理调度器 - 每6小时清理一次旧信号"""
+    
+    def __init__(self):
+        self.running = False
+        self.cleanup_thread = None
+    
+    def start(self):
+        """启动定时清理"""
+        if DB_ENABLED:
+            self.running = True
+            self.cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
+            self.cleanup_thread.start()
+            logger.info("信号清理调度器已启动（每6小时清理一次48小时前的旧数据）")
+    
+    def stop(self):
+        """停止定时清理"""
+        self.running = False
+        if self.cleanup_thread:
+            self.cleanup_thread.join(timeout=5)
+        logger.info("信号清理调度器已停止")
+    
+    def _cleanup_loop(self):
+        """清理循环"""
+        while self.running:
+            try:
+                # 每6小时执行一次清理
+                time.sleep(6 * 3600)
+                if self.running:
+                    db = get_signal_db()
+                    deleted = db.cleanup_old_signals(hours=48)
+                    if deleted > 0:
+                        logger.info(f"自动清理了{deleted}条旧信号记录")
+            except Exception as e:
+                logger.error(f"信号清理错误: {str(e)}")
+
+
+# 创建信号清理调度器实例
+signal_cleanup_scheduler = SignalCleanupScheduler()
+
+
 if __name__ == '__main__':
     # 简化启动信息
     print("="*70)
@@ -1506,12 +1547,18 @@ if __name__ == '__main__':
     market_api = MultiMarketAPI()
     
     print(f"\n📡 服务地址: http://localhost:5001")
+    if DB_ENABLED:
+        print(f"📊 历史记录: http://localhost:5001/history")
     print("="*70 + "\n")
     
     # 启动价格监控（静默启动）
     price_monitor.start()
     
+    # 启动信号清理调度器
+    signal_cleanup_scheduler.start()
+    
     try:
         app.run(debug=True, host='0.0.0.0', port=5001, use_reloader=False)
     finally:
         price_monitor.stop()
+        signal_cleanup_scheduler.stop()

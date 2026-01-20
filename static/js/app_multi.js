@@ -170,6 +170,7 @@ function refreshCurrentMarket() {
     loadTicker();
     loadKlines();
     loadMarketAnalysis();
+    loadHistorySignals();
 }
 
 // 加载市场分析（仅合约）
@@ -905,3 +906,62 @@ window.addEventListener('beforeunload', function() {
         klineChart.destroy();
     }
 });
+
+// 加载历史交易信号
+async function loadHistorySignals() {
+    const historySection = document.getElementById('historySignalsSection');
+    const historySymbol = document.getElementById('historySymbol');
+    const historyList = document.getElementById('historySignalsList');
+    
+    // 只在合约市场显示历史信号
+    if (currentMarketType !== 'futures') {
+        historySection.style.display = 'none';
+        return;
+    }
+    
+    try {
+        historySection.style.display = 'block';
+        historySymbol.textContent = currentSymbol;
+        
+        const response = await fetch(`/api/signals-48h?symbol=${currentSymbol}`);
+        const data = await response.json();
+        
+        if (!data.success || !data.signals || data.signals.length === 0) {
+            historyList.innerHTML = '<div class="loading-text">暂无历史记录</div>';
+            return;
+        }
+        
+        // 只显示最近10条
+        const recentSignals = data.signals.slice(0, 10);
+        
+        let html = '';
+        recentSignals.forEach(signal => {
+            const actionClass = signal.trade_action.toLowerCase().replace('_', '-');
+            const actionText = {
+                'LONG': '做多',
+                'SHORT': '做空',
+                'NO_TRADE': '观望'
+            }[signal.trade_action] || signal.trade_action;
+            
+            const time = new Date(signal.timestamp).toLocaleString('zh-CN', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            html += `
+                <div class="history-signal-item ${actionClass}">
+                    <div class="history-signal-time">⏰ ${time}</div>
+                    <div class="history-signal-action ${actionClass}">${actionText}</div>
+                </div>
+            `;
+        });
+        
+        historyList.innerHTML = html;
+        
+    } catch (error) {
+        console.error('加载历史信号失败:', error);
+        historyList.innerHTML = '<div class="loading-text">加载失败</div>';
+    }
+}

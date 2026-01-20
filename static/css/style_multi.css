@@ -1239,3 +1239,90 @@ footer p {
 .loading {
     animation: pulse 1.5s ease-in-out infinite;
 }
+
+/* 历史交易信号样式 */
+.view-more-btn {
+    padding: 6px 15px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.view-more-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.history-signals-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.history-signal-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background: #f9fafb;
+    border-radius: 8px;
+    border-left: 4px solid #e5e7eb;
+    transition: all 0.3s;
+}
+
+.history-signal-item:hover {
+    background: #f3f4f6;
+    transform: translateX(3px);
+}
+
+.history-signal-item.long {
+    border-left-color: #10b981;
+}
+
+.history-signal-item.short {
+    border-left-color: #ef4444;
+}
+
+.history-signal-item.no-trade {
+    border-left-color: #6b7280;
+}
+
+.history-signal-time {
+    font-size: 13px;
+    color: #6b7280;
+    flex: 1;
+}
+
+.history-signal-action {
+    padding: 4px 12px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.history-signal-action.long {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+}
+
+.history-signal-action.short {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+}
+
+.history-signal-action.no-trade {
+    background: linear-gradient(135deg, #6b7280, #4b5563);
+    color: white;
+}
+
+.loading-text {
+    text-align: center;
+    padding: 20px;
+    color: #9ca3af;
+    font-size: 14px;
+}
