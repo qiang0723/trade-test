@@ -18,24 +18,29 @@ from email.mime.multipart import MIMEMultipart
 import threading
 import time
 from collections import defaultdict
+import logging
+
+# 配置日志（减少输出）
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 # 导入数据库模块
 try:
     from database import get_signal_db
     DB_ENABLED = True
-    print("✅ 数据库模块已加载，历史信号记录功能已启用")
+    # 只在首次启动时输出，不在每次请求时输出
 except ImportError:
     DB_ENABLED = False
-    print("⚠️ 数据库模块未找到，历史信号记录功能将被禁用")
+    logger.warning("数据库模块未找到，历史信号记录功能将被禁用")
 
 # 导入状态机模块
 try:
     from market_state_machine import get_state_machine
     STATE_MACHINE_ENABLED = True
-    print("✅ 状态机模块已加载，市场分析v3.0（状态机）已启用")
+    # 只在首次启动时输出，不在每次请求时输出
 except ImportError:
     STATE_MACHINE_ENABLED = False
-    print("⚠️ 状态机模块未找到，将使用v2.0分析逻辑")
+    logger.warning("状态机模块未找到，将使用v2.0分析逻辑")
 
 app = Flask(__name__)
 
@@ -63,21 +68,19 @@ class MultiMarketAPI:
                 'futures_symbol': f"{symbol}{self.quote_currency}"
             }
             
-            # 检查现货
+            # 检查现货（静默检测）
             try:
                 self.client.get_symbol_ticker(symbol=f"{symbol}{self.quote_currency}")
                 available[symbol]['spot'] = True
-                print(f"✅ {symbol} 现货交易可用")
-            except Exception as e:
-                print(f"❌ {symbol} 现货交易不可用: {str(e)[:50]}")
+            except Exception:
+                pass  # 静默跳过
             
-            # 检查合约
+            # 检查合约（静默检测）
             try:
                 self.client.futures_symbol_ticker(symbol=f"{symbol}{self.quote_currency}")
                 available[symbol]['futures'] = True
-                print(f"✅ {symbol} 合约交易可用")
-            except Exception as e:
-                print(f"⚠️  {symbol} 合约交易不可用，跳过")
+            except Exception:
+                pass  # 静默跳过
         
         return available
     
@@ -143,7 +146,7 @@ class MultiMarketAPI:
                     funding_rate_data['funding_rate'] = float(mark_price['lastFundingRate'])
                     funding_rate_data['next_funding_time'] = mark_price['nextFundingTime']
             except Exception as e:
-                print(f"获取{symbol}资金费率失败: {str(e)}")
+                logger.debug(f"获取{symbol}资金费率失败: {str(e)}")
             
             # 获取持仓量和持仓量变化
             open_interest = 0
@@ -176,7 +179,7 @@ class MultiMarketAPI:
                 except Exception as e2:
                     pass  # 忽略历史数据获取失败
             except Exception as e:
-                print(f"获取{symbol}持仓量失败: {str(e)}")
+                logger.debug(f"获取{symbol}持仓量失败: {str(e)}")
             
             # 通过K线数据计算成交量和成交额的变化（6小时）
             volume_change_percent = 0
@@ -511,7 +514,7 @@ class MultiMarketAPI:
                             sell_amount_1h += trade['quote_qty']
                             sell_trades_1h += 1
             except Exception as e:
-                print(f"获取{symbol}1小时成交数据失败: {str(e)}")
+                logger.debug(f"获取{symbol}1小时成交数据失败: {str(e)}")
             
             total_amount_1h = buy_amount_1h + sell_amount_1h
             buy_ratio_1h = (buy_amount_1h / total_amount_1h * 100) if total_amount_1h > 0 else 50
@@ -917,15 +920,15 @@ class MultiMarketAPI:
                     db.save_signal(result)
                 except Exception as db_error:
                     # 数据库保存失败不影响主功能，只记录日志
-                    print(f"⚠️ 数据库保存失败: {str(db_error)}")
+                    logger.warning(f"数据库保存失败: {str(db_error)}")
             
             # 返回最终结果
             return result
             
         except Exception as e:
             import traceback
-            print(f"分析{symbol}合约市场失败: {str(e)}")
-            print(traceback.format_exc())
+            logger.error(f"分析{symbol}合约市场失败: {str(e)}")
+            logger.debug(traceback.format_exc())
             return {
                 'success': False,
                 'error': f'分析失败: {str(e)}',
@@ -996,7 +999,7 @@ class MultiMarketAPI:
                         else:
                             sell_amount_1h += trade['quote_qty']
             except Exception as e:
-                print(f"获取{symbol}1小时成交数据失败: {str(e)}")
+                logger.debug(f"获取{symbol}1小时成交数据失败: {str(e)}")
             
             total_amount_1h = buy_amount_1h + sell_amount_1h
             aggressive_buy_ratio = (buy_amount_1h / total_amount_1h) if total_amount_1h > 0 else 0.5
@@ -1036,14 +1039,14 @@ class MultiMarketAPI:
                     db = get_signal_db()
                     db.save_signal(result)
                 except Exception as db_error:
-                    print(f"⚠️ 数据库保存失败: {str(db_error)}")
+                    logger.warning(f"数据库保存失败: {str(db_error)}")
             
             return result
             
         except Exception as e:
             import traceback
-            print(f"状态机分析{symbol}失败: {str(e)}")
-            print(traceback.format_exc())
+            logger.error(f"状态机分析{symbol}失败: {str(e)}")
+            logger.debug(traceback.format_exc())
             return {
                 'success': False,
                 'error': f'分析失败: {str(e)}',
@@ -1099,13 +1102,13 @@ class EmailAlert:
                 if self.sender_password:  # 只在有密码时尝试登录
                     server.login(self.sender_email, self.sender_password)
                     server.send_message(msg)
-                    print(f"✅ 邮件报警已发送: {subject}")
+                    logger.info(f"邮件报警已发送: {subject}")
                     return True
                 else:
-                    print("⚠️ 未配置邮件密码，跳过发送")
+                    logger.debug("未配置邮件密码，跳过发送")
                     return False
         except Exception as e:
-            print(f"❌ 邮件发送失败: {str(e)}")
+            logger.error(f"邮件发送失败: {str(e)}")
             return False
 
 
@@ -1127,14 +1130,14 @@ class PriceMonitor:
         self.running = True
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
-        print("🚀 价格监控已启动")
+        logger.info("价格监控已启动")
     
     def stop(self):
         """停止监控"""
         self.running = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5)
-        print("⏸️ 价格监控已停止")
+        logger.info("价格监控已停止")
     
     def _monitor_loop(self):
         """监控循环"""
@@ -1142,7 +1145,7 @@ class PriceMonitor:
             try:
                 self._check_prices()
             except Exception as e:
-                print(f"❌ 价格监控错误: {str(e)}")
+                logger.error(f"价格监控错误: {str(e)}")
             time.sleep(self.check_interval)
     
     def _check_prices(self):
@@ -1256,13 +1259,8 @@ class PriceMonitor:
 </div>
 """
         
-        # 同时在控制台输出
-        print(f"\n{'='*60}")
-        print(f"⚠️ 价格报警: {symbol} {market_type_cn}")
-        print(f"   1分钟前: ${old_price:,.4f}")
-        print(f"   当前价格: ${new_price:,.4f}")
-        print(f"   涨跌幅: {change_percent:+.2f}%")
-        print(f"{'='*60}\n")
+        # 在控制台输出报警信息（简化版本）
+        logger.warning(f"价格报警: {symbol} {market_type_cn} - 涨跌幅: {change_percent:+.2f}%")
         
         # 发送邮件
         self.email_alert.send_alert(subject, message)
@@ -1409,30 +1407,22 @@ def api_database_info():
 
 
 if __name__ == '__main__':
-    print("\n" + "="*70)
-    print(f"{'🌟 多币种行情数据Web应用（现货+合约）🌟':^70}")
+    # 简化启动信息
     print("="*70)
-    print("\n🚀 服务启动中...")
-    print("\n📊 支持币种: TA, BTR, AT")
-    print("📈 支持类型: 现货 (Spot) + 合约 (Futures)")
-    print("\n🔍 正在检测可用市场...")
-    print("-" * 70)
+    print("  Trade Info - 多币种行情数据Web应用")
+    print("="*70)
+    print("🚀 服务启动中...")
+    print("📊 支持: TA, BTR, AT (现货+合约)")
+    print("="*70)
     
-    # 初始化时会自动检测
+    # 初始化（静默检测可用市场）
+    market_api = MultiMarketAPI()
     
-    print("-" * 70)
-    print(f"\n📡 请在浏览器中访问: http://localhost:5001")
-    print(f"📡 或访问: http://127.0.0.1:5001")
-    print("\n💡 按 Ctrl+C 停止服务\n")
+    print(f"\n📡 服务地址: http://localhost:5001")
     print("="*70 + "\n")
     
-    # 启动价格监控
-    print("🔔 价格监控功能：1分钟内涨跌幅超过5%将发送邮件报警")
-    print(f"📧 报警邮箱: {email_alert.receiver_email}")
-    if not email_alert.sender_password:
-        print("⚠️ 提示: 未配置邮件密码，报警功能将仅在控制台显示")
+    # 启动价格监控（静默启动）
     price_monitor.start()
-    print()
     
     try:
         app.run(debug=True, host='0.0.0.0', port=5001, use_reloader=False)

@@ -7,6 +7,11 @@ import sqlite3
 import json
 from datetime import datetime
 import os
+import logging
+
+# 配置日志（减少输出）
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
 
 class SignalDatabase:
     """市场信号数据库管理类"""
@@ -65,10 +70,10 @@ class SignalDatabase:
             
             conn.commit()
             conn.close()
-            print(f"✅ 数据库初始化成功: {self.db_path}")
+            logger.info(f"数据库初始化成功: {self.db_path}")
             
         except Exception as e:
-            print(f"⚠️ 数据库初始化失败: {str(e)}")
+            logger.error(f"数据库初始化失败: {str(e)}")
     
     def save_signal(self, analysis_result):
         """保存市场分析信号
@@ -141,7 +146,7 @@ class SignalDatabase:
             return True
             
         except Exception as e:
-            print(f"⚠️ 保存信号到数据库失败: {str(e)}")
+            logger.warning(f"保存信号到数据库失败: {str(e)}")
             return False
     
     def get_latest_signals(self, symbol=None, limit=10):
@@ -184,7 +189,7 @@ class SignalDatabase:
             return results
             
         except Exception as e:
-            print(f"⚠️ 查询信号记录失败: {str(e)}")
+            logger.warning(f"查询信号记录失败: {str(e)}")
             return []
     
     def get_signal_stats(self, symbol=None, days=7):
@@ -265,7 +270,7 @@ class SignalDatabase:
                 }
             
         except Exception as e:
-            print(f"⚠️ 统计信号数据失败: {str(e)}")
+            logger.warning(f"统计信号数据失败: {str(e)}")
             return None
     
     def get_database_info(self):
@@ -306,7 +311,7 @@ class SignalDatabase:
             }
             
         except Exception as e:
-            print(f"⚠️ 获取数据库信息失败: {str(e)}")
+            logger.warning(f"获取数据库信息失败: {str(e)}")
             return None
 
 

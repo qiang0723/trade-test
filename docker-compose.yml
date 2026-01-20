@@ -17,6 +17,13 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
+      - LOG_LEVEL=WARNING  # 只输出WARNING及以上级别日志
+      - PYTHONUNBUFFERED=1  # 禁用Python输出缓冲
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"      # 单个日志文件最大10MB
+        max-file: "3"        # 最多保留3个日志文件
     networks:
       - trade-network
     healthcheck:
