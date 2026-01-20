@@ -6,6 +6,21 @@
 [![Python](https://img.shields.io/badge/python-3.12-green)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
+## 🌐 AWS生产环境
+
+**服务器状态**: ✅ 运行中  
+**IP地址**: 43.212.176.169  
+**服务端口**: 8001
+**内网访问**: http://localhost:8001  
+**快速连接**: `./aws-connect.sh`
+
+**🔴 开发原则**: 所有开发工作只在AWS服务器上进行
+
+📖 相关文档：
+- [AWS服务器开发工作流](./doc/AWS服务器开发工作流.md) - **开发必读**
+- [AWS部署完成报告](./doc/AWS部署完成报告.md) - 部署详情
+- [服务器管理指南](./doc/AWS服务器部署指南.md) - 管理手册
+
 ## ✨ 核心特性
 
 - 📊 **实时行情监控** - 多币种、双市场（现货+合约）
@@ -30,7 +45,7 @@ cd trade-test
 ./docker-run.sh
 
 # 访问应用
-open http://localhost:5001
+open http://localhost:8001
 ```
 
 ### Python直接运行
@@ -45,7 +60,7 @@ pip install -r requirements.txt
 python3 btc_web_app_multi.py
 ```
 
-访问：http://localhost:5001
+访问：http://localhost:8001
 
 ## 🔧 Docker管理
 

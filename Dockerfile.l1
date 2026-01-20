@@ -1,0 +1,57 @@
+# L1 Advisory Layer - Dockerfile
+# 使用Python 3.12官方镜像
+FROM python:3.12-slim
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TZ=Asia/Shanghai
+
+# 安装系统依赖
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制requirements.txt并安装Python依赖
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制L1相关文件
+# 核心应用
+COPY btc_web_app_l1.py .
+COPY market_state_machine_l1.py .
+COPY database_l1.py .
+COPY data_cache.py .
+COPY binance_data_fetcher.py .
+COPY logger_config.py .
+COPY metrics_normalizer.py .
+
+# Models模块
+COPY models/ ./models/
+
+# 配置文件
+COPY config/ ./config/
+
+# 静态文件和模板
+COPY static/ ./static/
+COPY templates/ ./templates/
+
+# 创建数据目录
+RUN mkdir -p data/db
+
+# 暴露端口
+EXPOSE 5001
+
+# 设置健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:5001/api/l1/advisory/BTC', timeout=5)" || exit 1
+
+# 启动L1应用
+CMD ["python", "btc_web_app_l1.py"]

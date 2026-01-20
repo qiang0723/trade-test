@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>L1 Advisory Layer - 交易决策咨询系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style_l1.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header>
+            <div class="header-main">
+                <h1>🎯 L1 Advisory Layer</h1>
+                <p class="header-subtitle">交易决策咨询系统 | Safety First</p>
+            </div>
+            <div class="header-info">
+                <div class="update-time">
+                    <span class="label">最后更新</span>
+                    <span id="lastUpdate" class="value">--</span>
+                </div>
+                <button onclick="refreshAdvisory()" class="refresh-btn">🔄 刷新决策</button>
+            </div>
+        </header>
+
+        <!-- 币种选择 -->
+        <div class="selector-panel">
+            <div class="symbol-selector">
+                <span class="selector-label">📊 币种（合约市场）</span>
+                <div class="selector-buttons" id="symbolButtons">
+                    <!-- 动态生成 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 核心决策信号区 -->
+        <div class="decision-panel" id="decisionPanel">
+            <div class="decision-header">
+                <h2>🎯 L1 咨询决策</h2>
+                <span class="symbol-badge" id="currentSymbolBadge">--</span>
+            </div>
+            
+            <div class="decision-main" id="decisionMain">
+                <div class="decision-signal" id="decisionSignal">
+                    <div class="signal-icon" id="signalIcon">⚪</div>
+                    <div class="signal-text" id="signalText">NO_TRADE</div>
+                </div>
+                <div class="decision-confidence" id="decisionConfidence">
+                    <div class="confidence-label">置信度</div>
+                    <div class="confidence-value" id="confidenceValue">--</div>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" id="confidenceFill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="decision-timestamp" id="decisionTimestamp">
+                决策时间: --
+            </div>
+        </div>
+
+        <!-- 安全闸门状态区 -->
+        <div class="safety-gates-panel">
+            <h3>🛡️ 安全闸门状态</h3>
+            <div class="gates-grid">
+                <!-- 风险准入 -->
+                <div class="gate-card" id="riskGateCard">
+                    <div class="gate-icon" id="riskGateIcon">⏳</div>
+                    <div class="gate-info">
+                        <div class="gate-label">风险准入</div>
+                        <div class="gate-value" id="riskGateValue">--</div>
+                    </div>
+                </div>
+
+                <!-- 交易质量 -->
+                <div class="gate-card" id="qualityGateCard">
+                    <div class="gate-icon" id="qualityGateIcon">⏳</div>
+                    <div class="gate-info">
+                        <div class="gate-label">交易质量</div>
+                        <div class="gate-value" id="qualityGateValue">--</div>
+                    </div>
+                </div>
+
+                <!-- 市场环境 -->
+                <div class="gate-card" id="regimeCard">
+                    <div class="gate-icon" id="regimeIcon">⏳</div>
+                    <div class="gate-info">
+                        <div class="gate-label">市场环境</div>
+                        <div class="gate-value" id="regimeValue">--</div>
+                    </div>
+                </div>
+
+                <!-- 系统状态 -->
+                <div class="gate-card" id="stateCard">
+                    <div class="gate-icon" id="stateIcon">⏳</div>
+                    <div class="gate-info">
+                        <div class="gate-label">系统状态</div>
+                        <div class="gate-value" id="stateValue">--</div>
+                    </div>
+                </div>
+
+                <!-- L3执行许可 (P2-1新增) -->
+                <div class="gate-card executable-card" id="executableCard">
+                    <div class="gate-icon" id="executableIcon">⏳</div>
+                    <div class="gate-info">
+                        <div class="gate-label">L3执行许可</div>
+                        <div class="gate-value" id="executableValue">--</div>
+                        <div class="gate-tip">为L3执行层提供明确许可</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 决策追溯区 -->
+        <div class="reasoning-panel">
+            <h3>📋 决策追溯</h3>
+            <div class="reason-tags-container" id="reasonTagsContainer">
+                <div class="reason-tags-placeholder">正在加载决策依据...</div>
+            </div>
+        </div>
+
+        <!-- 决策管道透视区 -->
+        <div class="pipeline-panel">
+            <h3>🔍 决策管道透视</h3>
+            <div class="pipeline-flow" id="pipelineFlow">
+                <div class="pipeline-step pending" data-step="1">
+                    <div class="step-icon">📥</div>
+                    <div class="step-label">数据验证</div>
+                    <div class="step-status">⏳</div>
+                    <div class="step-result"></div>
+                </div>
+                <div class="pipeline-arrow">→</div>
+                
+                <div class="pipeline-step pending" data-step="2">
+                    <div class="step-icon">🌡️</div>
+                    <div class="step-label">环境识别</div>
+                    <div class="step-status">⏳</div>
+                    <div class="step-result"></div>
+                </div>
+                <div class="pipeline-arrow">→</div>
+                
+                <div class="pipeline-step pending" data-step="3">
+                    <div class="step-icon">🛡️</div>
+                    <div class="step-label">风险评估</div>
+                    <div class="step-status">⏳</div>
+                    <div class="step-result"></div>
+                </div>
+                <div class="pipeline-arrow">→</div>
+                
+                <div class="pipeline-step pending" data-step="4">
+                    <div class="step-icon">✨</div>
+                    <div class="step-label">质量评估</div>
+                    <div class="step-status">⏳</div>
+                    <div class="step-result"></div>
+                </div>
+                <div class="pipeline-arrow">→</div>
+                
+                <div class="pipeline-step pending" data-step="5">
+                    <div class="step-icon">🎯</div>
+                    <div class="step-label">方向判断</div>
+                    <div class="step-status">⏳</div>
+                    <div class="step-result"></div>
+                </div>
+                <div class="pipeline-arrow">→</div>
+                
+                <div class="pipeline-step pending" data-step="6">
+                    <div class="step-icon">📊</div>
+                    <div class="step-label">决策优先级</div>
+                    <div class="step-status">⏳</div>
+                    <div class="step-result"></div>
+                </div>
+                <div class="pipeline-arrow">→</div>
+                
+                <div class="pipeline-step pending" data-step="7">
+                    <div class="step-icon">🔀</div>
+                    <div class="step-label">状态检查</div>
+                    <div class="step-status">⏳</div>
+                    <div class="step-result"></div>
+                </div>
+                <div class="pipeline-arrow">→</div>
+                
+                <div class="pipeline-step pending" data-step="8">
+                    <div class="step-icon">✅</div>
+                    <div class="step-label">置信度计算</div>
+                    <div class="step-status">⏳</div>
+                    <div class="step-result"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 历史决策时间轴 -->
+        <div class="history-panel">
+            <div class="history-header">
+                <h3>⏱️ 历史决策时间轴（最近24小时）</h3>
+                <div class="history-legend">
+                    <span class="legend-item long">🟢 LONG</span>
+                    <span class="legend-item short">🔴 SHORT</span>
+                    <span class="legend-item notrade">⚪ NO_TRADE</span>
+                </div>
+            </div>
+            <div class="history-timeline" id="historyTimeline">
+                <div class="timeline-loading">正在加载历史决策...</div>
+            </div>
+            <div class="history-toggle" id="historyToggle" style="display: none;">
+                <button onclick="toggleHistoryExpand()" id="historyToggleBtn">
+                    展开更多历史记录 (<span id="hiddenCount">0</span>)
+                </button>
+            </div>
+        </div>
+
+        <!-- 市场数据概览（可折叠） -->
+        <div class="market-data-panel">
+            <div class="panel-toggle" onclick="toggleMarketData()">
+                <h3>💹 市场数据概览</h3>
+                <span class="toggle-icon" id="marketDataToggle">▼</span>
+            </div>
+            <div class="market-data-content" id="marketDataContent">
+                <div class="data-grid">
+                    <!-- 价格 -->
+                    <div class="data-card">
+                        <div class="data-label">当前价格</div>
+                        <div class="data-value" id="currentPrice">--</div>
+                    </div>
+
+                    <!-- 24h涨跌 -->
+                    <div class="data-card">
+                        <div class="data-label">24h涨跌</div>
+                        <div class="data-value" id="priceChange">--</div>
+                    </div>
+
+                    <!-- 成交量 -->
+                    <div class="data-card">
+                        <div class="data-label">24h成交量</div>
+                        <div class="data-value" id="volume">--</div>
+                    </div>
+
+                    <!-- 持仓量（仅合约） -->
+                    <div class="data-card futures-only" id="openInterestCard" style="display: none;">
+                        <div class="data-label">持仓量</div>
+                        <div class="data-value" id="openInterest">--</div>
+                    </div>
+
+                    <!-- 资金费率（仅合约） -->
+                    <div class="data-card futures-only" id="fundingRateCard" style="display: none;">
+                        <div class="data-label">资金费率</div>
+                        <div class="data-value" id="fundingRate">--</div>
+                    </div>
+
+                    <!-- 买卖失衡 -->
+                    <div class="data-card">
+                        <div class="data-label">1h买卖失衡</div>
+                        <div class="data-value" id="buyImbalance">--</div>
+                    </div>
+
+                    <!-- 1h价格变化 -->
+                    <div class="data-card">
+                        <div class="data-label">1h价格变化</div>
+                        <div class="data-value" id="priceChange1h">--</div>
+                    </div>
+
+                    <!-- 1h持仓量变化（仅合约） -->
+                    <div class="data-card futures-only" id="oiChange1hCard" style="display: none;">
+                        <div class="data-label">1h持仓量变化</div>
+                        <div class="data-value" id="oiChange1h">--</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 页脚信息 -->
+        <footer>
+            <div class="footer-info">
+                <p>💡 <strong>L1 Advisory Layer</strong>: 仅提供决策建议，不包含执行逻辑</p>
+                <p>🛡️ <strong>Safety First</strong>: 风险准入 → 交易质量 → 方向判断</p>
+                <p>📊 数据来源: 币安合约市场 (Binance Futures) | 🔄 自动刷新: 60秒 | 📅 数据保留: 24小时</p>
+            </div>
+            <div class="footer-warning">
+                ⚠️ 本系统仅供参考，不构成投资建议。投资有风险，决策需谨慎。
+            </div>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app_l1.js') }}"></script>
+</body>
+</html>

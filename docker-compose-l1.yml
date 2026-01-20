@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  l1-advisory:
+    build:
+      context: .
+      dockerfile: Dockerfile.l1
+    image: trade-info-l1:latest
+    container_name: l1-advisory-layer
+    ports:
+      - "8001:5001"
+    volumes:
+      # 挂载数据库目录，实现持久化存储
+      - ./data/db:/app/data/db
+      # 挂载配置文件，支持热更新
+      - ./config:/app/config
+      # 挂载日志目录（可选）
+      - ./logs:/app/logs
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"      # 单个日志文件最大10MB
+        max-file: "3"        # 最多保留3个日志文件
+    networks:
+      - l1-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/l1/advisory/BTC"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  l1-network:
+    driver: bridge

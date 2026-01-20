@@ -1,0 +1,103 @@
+# L1 Advisory Layer - 阈值配置文件
+# 所有阈值都是保守起点，需要通过回测优化
+
+# ==================
+# PR-010: Symbol Universe（币种宇宙）
+# ==================
+symbol_universe:
+  # 支持的币种列表（合约市场）
+  enabled_symbols:
+    - BTC    # 比特币
+    - ETH    # 以太坊
+    - BNB    # 币安币
+    - SOL    # Solana
+    - XRP    # 瑞波币
+  
+  # 默认币种（前端初始化）
+  default_symbol: BTC
+
+# ==================
+# 数据质量阈值
+# ==================
+data_quality:
+  max_staleness_seconds: 120      # 数据最大过期时间（秒），超过视为过期
+
+# ==================
+# 市场环境识别阈值
+# ==================
+market_regime:
+  extreme_price_change_1h: 5.0    # 1小时价格变化 > 5% → EXTREME
+  trend_price_change_6h: 3.0      # 6小时价格变化 > 3% → TREND
+
+# ==================
+# 风险准入阈值
+# ==================
+risk_exposure:
+  # 清算阶段检测
+  liquidation:
+    price_change: 5.0             # 价格变化阈值(%)
+    oi_drop: -15.0                # OI下降阈值(%)
+  
+  # 拥挤风险检测
+  crowding:
+    funding_abs: 0.001            # 费率绝对值阈值（0.1%）
+    oi_growth: 30.0               # 6h OI增长阈值(%)
+  
+  # 极端成交量检测
+  extreme_volume:
+    multiplier: 10.0              # 1h成交量超过24h均值的倍数
+
+# ==================
+# 交易质量阈值
+# ==================
+trade_quality:
+  # 吸纳风险
+  absorption:
+    imbalance: 0.7                # 买卖失衡阈值
+    volume_ratio: 0.5             # 成交量比例（相对于24h均值）
+  
+  # 噪音市场
+  noise:
+    funding_volatility: 0.0005    # 费率波动阈值（0.05%）
+    funding_abs: 0.0001           # 当前费率阈值（0.01%）
+  
+  # 轮动风险
+  rotation:
+    price_threshold: 2.0          # 价格变化阈值(%)
+    oi_threshold: 5.0             # OI变化阈值(%)
+  
+  # 震荡市弱信号
+  range_weak:
+    imbalance: 0.6                # 失衡阈值
+    oi: 10.0                      # OI变化阈值(%)
+
+# ==================
+# 方向评估阈值
+# ==================
+direction:
+  # 趋势市
+  trend:
+    long:
+      imbalance: 0.6              # 买卖失衡阈值（多方）
+      oi_change: 5.0              # 1h OI增长阈值(%)
+      price_change: 1.0           # 1h价格上涨阈值(%)
+    short:
+      imbalance: 0.6              # 买卖失衡阈值（空方，绝对值）
+      oi_change: 5.0              # 1h OI增长阈值(%)
+      price_change: 1.0           # 1h价格下跌阈值(%)（绝对值）
+  
+  # 震荡市（需要更强信号）
+  range:
+    long:
+      imbalance: 0.7              # 更高的失衡要求
+      oi_change: 10.0             # 更高的OI增长要求
+    short:
+      imbalance: 0.7
+      oi_change: 10.0
+
+# ==================
+# 状态机配置
+# ==================
+state_machine:
+  cool_down_minutes: 60           # 冷却期时长（分钟）
+  signal_timeout_minutes: 30      # 信号超时时间（分钟）
