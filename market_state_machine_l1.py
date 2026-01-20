@@ -100,10 +100,11 @@ class L1AdvisoryEngine:
         
         self.config = self._load_config(config_path)
         
-        # ⚠️ 启动时校验：防止配置错误（P1-3）
+        # ⚠️ 启动时校验：防止配置错误（P1-3, PR-H）
         self._validate_decimal_calibration(self.config)        # 1. 口径校验：百分比必须用小数
         self._validate_threshold_consistency(self.config)      # 2. 门槛一致性校验（P1-3）
         self._validate_reason_tag_spelling(self.config)        # 3. ReasonTag拼写校验（P1-3）
+        self._validate_confidence_values(self.config)          # 4. Confidence值拼写校验（PR-H）
         
         self.thresholds = self._flatten_thresholds(self.config)
         
@@ -1447,6 +1448,90 @@ class L1AdvisoryEngine:
             raise ValueError(error_message)
         
         logger.info("✅ ReasonTag拼写校验通过：所有标签名有效")
+    
+    def _validate_confidence_values(self, config: dict):
+        """
+        启动时校验：Confidence值拼写有效性检查（PR-H）
+        
+        目标：所有 Confidence 字符串配置必须是合法枚举；拼写错误直接拒绝启动，
+             而不是运行中降级为 LOW
+        
+        检查范围：
+        1. execution.min_confidence_normal
+        2. execution.min_confidence_reduced
+        3. confidence_scoring.caps.uncertain_quality_max
+        4. confidence_scoring.caps.tag_caps.* (所有值)
+        
+        Args:
+            config: 配置字典
+        
+        Raises:
+            ValueError: 如果发现无效的Confidence值
+        """
+        # 有效的Confidence值（大小写不敏感）
+        valid_confidence_values = {'LOW', 'MEDIUM', 'HIGH', 'ULTRA'}
+        
+        errors = []
+        
+        # 检查 execution.min_confidence_normal
+        exec_config = config.get('execution', {})
+        min_conf_normal = exec_config.get('min_confidence_normal', 'HIGH')
+        if min_conf_normal.upper() not in valid_confidence_values:
+            errors.append(
+                f"execution.min_confidence_normal: '{min_conf_normal}' 不是有效的Confidence值\n"
+                f"  → 有效值: LOW, MEDIUM, HIGH, ULTRA（大小写不敏感）"
+            )
+        
+        # 检查 execution.min_confidence_reduced
+        min_conf_reduced = exec_config.get('min_confidence_reduced', 'MEDIUM')
+        if min_conf_reduced.upper() not in valid_confidence_values:
+            errors.append(
+                f"execution.min_confidence_reduced: '{min_conf_reduced}' 不是有效的Confidence值\n"
+                f"  → 有效值: LOW, MEDIUM, HIGH, ULTRA（大小写不敏感）"
+            )
+        
+        # 检查 confidence_scoring.caps.uncertain_quality_max
+        scoring_config = config.get('confidence_scoring', {})
+        caps_config = scoring_config.get('caps', {})
+        uncertain_max = caps_config.get('uncertain_quality_max', 'MEDIUM')
+        if uncertain_max.upper() not in valid_confidence_values:
+            errors.append(
+                f"confidence_scoring.caps.uncertain_quality_max: '{uncertain_max}' 不是有效的Confidence值\n"
+                f"  → 有效值: LOW, MEDIUM, HIGH, ULTRA（大小写不敏感）"
+            )
+        
+        # 检查 confidence_scoring.caps.tag_caps.* (所有值)
+        tag_caps = caps_config.get('tag_caps', {})
+        for tag_name, cap_value in tag_caps.items():
+            if cap_value.upper() not in valid_confidence_values:
+                errors.append(
+                    f"confidence_scoring.caps.tag_caps.{tag_name}: '{cap_value}' 不是有效的Confidence值\n"
+                    f"  → 有效值: LOW, MEDIUM, HIGH, ULTRA（大小写不敏感）"
+                )
+        
+        if errors:
+            error_message = (
+                "\n" + "="*80 + "\n"
+                "⚠️  Confidence值拼写错误检测（Confidence Value Validation Failed）\n"
+                "="*80 + "\n"
+                "发现无效的Confidence配置值，系统拒绝启动（fail-fast）！\n\n"
+                "错误项：\n" + "\n".join(f"  {i+1}. {err}\n" for i, err in enumerate(errors)) + "\n"
+                "有效的Confidence值：\n"
+                "  LOW, MEDIUM, HIGH, ULTRA（大小写不敏感）\n\n"
+                "修复方法：\n"
+                "  1. 检查配置文件: config/l1_thresholds.yaml\n"
+                "  2. 修正拼写错误的Confidence值\n"
+                "  3. 常见错误: HGIH → HIGH, MEDUIM → MEDIUM\n"
+                "  4. 确保所有置信度配置使用正确的枚举值\n\n"
+                "设计原理（PR-H）：\n"
+                "  - 采用fail-fast原则，配置错误直接拒绝启动\n"
+                "  - 避免运行时静默回退到LOW导致意外行为\n"
+                "  - 保持与ReasonTag拼写校验的一致性\n"
+                "="*80 + "\n"
+            )
+            raise ValueError(error_message)
+        
+        logger.info("✅ Confidence值拼写校验通过：所有置信度配置有效")
     
     
     def _flatten_thresholds(self, config: dict) -> dict:
