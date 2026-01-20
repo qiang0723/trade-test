@@ -840,14 +840,21 @@ class L1AdvisoryEngine:
                 confidence = max_level
                 has_cap = True
         
-        # 3. reduce_tags上限
+        # 3. reduce_tags上限（PR-I：使用配置化默认值）
         reduce_tags = tag_rules.get('reduce_tags', [])
         tag_caps = caps_config.get('tag_caps', {})
+        
+        # PR-I：reduce_tags 的默认cap配置化
+        # 如果 reduce_tag 未在 tag_caps 中配置，使用 reduce_default_max 作为默认值
+        # 建议默认值等于 uncertain_quality_max，保持逻辑一致性
+        reduce_default_max_str = caps_config.get('reduce_default_max', 
+                                                  caps_config.get('uncertain_quality_max', 'MEDIUM'))
         
         for tag in reason_tags:
             tag_value = tag.value
             if tag_value in reduce_tags or tag_value in tag_caps:
-                max_level_str = tag_caps.get(tag_value, 'MEDIUM')
+                # PR-I修复：使用配置化默认值，而非硬编码 'MEDIUM'
+                max_level_str = tag_caps.get(tag_value, reduce_default_max_str)
                 max_level = self._string_to_confidence(max_level_str)
                 if self._confidence_level(confidence) > self._confidence_level(max_level):
                     logger.debug(f"[Cap] Tag {tag_value}: {confidence.value} → {max_level.value}")

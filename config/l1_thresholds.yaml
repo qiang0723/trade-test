@@ -132,7 +132,13 @@ confidence_scoring:
     # UNCERTAIN质量的上限（修订：MEDIUM → HIGH，使ALLOW_REDUCED可执行）
     uncertain_quality_max: "HIGH"  # HIGH 允许降级执行
     
+    # PR-I: reduce_tags 的默认cap（避免忘配 tag_caps 导致过严）
+    # 建议设置为 uncertain_quality_max 以保持一致性
+    # 如果未配置，会自动回退到 uncertain_quality_max
+    reduce_default_max: "HIGH"     # 默认值（可选，未配置时等于 uncertain_quality_max）
+    
     # 特定ReasonTag的上限（修订：MEDIUM → HIGH，使ALLOW_REDUCED可执行）
+    # 注意：显式配置的 tag_caps 会覆盖 reduce_default_max
     tag_caps:
       noisy_market: "HIGH"           # HIGH 允许降级执行
       weak_signal_in_range: "HIGH"   # HIGH 允许降级执行
