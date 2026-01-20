@@ -5,6 +5,20 @@ L1 Advisory Layer - 决策原因标签
 """
 
 from enum import Enum
+from typing import Dict
+
+
+class ExecutabilityLevel(Enum):
+    """
+    ReasonTag的执行阻断等级（PR-B）
+    
+    - ALLOW: 不影响执行
+    - DEGRADE: 降级但允许执行（如NOISY_MARKET）
+    - BLOCK: 阻断执行（如LIQUIDATION_PHASE）
+    """
+    ALLOW = "allow"
+    DEGRADE = "degrade"
+    BLOCK = "block"
 
 
 class ReasonTag(Enum):
@@ -98,6 +112,79 @@ def get_reason_tag_explanation(tag: ReasonTag) -> str:
         中文解释字符串
     """
     return REASON_TAG_EXPLANATIONS.get(tag.value, tag.value)
+
+
+# ==========================================
+# PR-B: ReasonTag的执行阻断等级映射
+# ==========================================
+
+REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
+    # 数据验证 - 阻断
+    ReasonTag.INVALID_DATA: ExecutabilityLevel.BLOCK,
+    ReasonTag.DATA_STALE: ExecutabilityLevel.BLOCK,
+    
+    # 风险否决类 - 全部阻断
+    ReasonTag.EXTREME_REGIME: ExecutabilityLevel.BLOCK,
+    ReasonTag.LIQUIDATION_PHASE: ExecutabilityLevel.BLOCK,
+    ReasonTag.CROWDING_RISK: ExecutabilityLevel.BLOCK,
+    ReasonTag.EXTREME_VOLUME: ExecutabilityLevel.BLOCK,
+    
+    # 质量否决类 - POOR阻断，UNCERTAIN降级
+    ReasonTag.ABSORPTION_RISK: ExecutabilityLevel.BLOCK,
+    ReasonTag.ROTATION_RISK: ExecutabilityLevel.BLOCK,
+    ReasonTag.NOISY_MARKET: ExecutabilityLevel.DEGRADE,      # 可降级
+    ReasonTag.WEAK_SIGNAL_IN_RANGE: ExecutabilityLevel.DEGRADE,  # 可降级
+    
+    # 方向冲突类 - 阻断
+    ReasonTag.CONFLICTING_SIGNALS: ExecutabilityLevel.BLOCK,
+    ReasonTag.NO_CLEAR_DIRECTION: ExecutabilityLevel.BLOCK,
+    
+    # 状态机约束类 - 阻断
+    ReasonTag.COOL_DOWN_ACTIVE: ExecutabilityLevel.BLOCK,
+    ReasonTag.STATE_TRANSITION_DENIED: ExecutabilityLevel.BLOCK,
+    ReasonTag.MIN_INTERVAL_BLOCK: ExecutabilityLevel.BLOCK,
+    ReasonTag.FLIP_COOLDOWN_BLOCK: ExecutabilityLevel.BLOCK,
+    
+    # 辅助信息类 - 不影响
+    ReasonTag.HIGH_FUNDING_RATE: ExecutabilityLevel.ALLOW,
+    ReasonTag.LOW_FUNDING_RATE: ExecutabilityLevel.ALLOW,
+    ReasonTag.STRONG_BUY_PRESSURE: ExecutabilityLevel.ALLOW,
+    ReasonTag.STRONG_SELL_PRESSURE: ExecutabilityLevel.ALLOW,
+    ReasonTag.OI_GROWING: ExecutabilityLevel.ALLOW,
+    ReasonTag.OI_DECLINING: ExecutabilityLevel.ALLOW,
+}
+
+
+def has_blocking_tags(reason_tags: list) -> bool:
+    """
+    检查是否有阻断性标签（PR-B）
+    
+    Args:
+        reason_tags: ReasonTag列表
+    
+    Returns:
+        bool: 是否存在BLOCK级别的标签
+    """
+    return any(
+        REASON_TAG_EXECUTABILITY.get(tag, ExecutabilityLevel.ALLOW) == ExecutabilityLevel.BLOCK
+        for tag in reason_tags
+    )
+
+
+def has_degrading_tags(reason_tags: list) -> bool:
+    """
+    检查是否有降级标签（PR-B）
+    
+    Args:
+        reason_tags: ReasonTag列表
+    
+    Returns:
+        bool: 是否存在DEGRADE级别的标签
+    """
+    return any(
+        REASON_TAG_EXECUTABILITY.get(tag, ExecutabilityLevel.ALLOW) == ExecutabilityLevel.DEGRADE
+        for tag in reason_tags
+    )
 
 
 def get_reason_tag_category(tag: ReasonTag) -> str:

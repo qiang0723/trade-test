@@ -725,6 +725,10 @@ class L1AdvisoryEngine:
         # 2. 交易质量 (0-2分)
         if quality == TradeQuality.GOOD:
             score += 2
+        elif quality == TradeQuality.UNCERTAIN:
+            # PR-B: UNCERTAIN质量降级，只给1分
+            score += 1
+        # POOR: 0分（但POOR已在Step 4短路，不应该到这里）
         
         # 3. 系统状态 (0-1分)
         if self.current_state in [SystemState.LONG_ACTIVE, SystemState.SHORT_ACTIVE]:
@@ -737,18 +741,34 @@ class L1AdvisoryEngine:
             score += 2
         
         # PR-005: 映射到4层置信度（8分满分）
+        initial_confidence = None
         if score >= 7:
             # 7-8分：TREND(3) + GOOD(2) + 强信号(2) = 7+
-            return Confidence.ULTRA
+            initial_confidence = Confidence.ULTRA
         elif score >= 5:
             # 5-6分：TREND(3) + GOOD(2) = 5，或 RANGE(2) + GOOD(2) + 强信号(2) = 6
-            return Confidence.HIGH
+            initial_confidence = Confidence.HIGH
         elif score >= 3:
             # 3-4分：TREND(3) + POOR(0) = 3，或 RANGE(2) + GOOD(2) = 4
-            return Confidence.MEDIUM
+            initial_confidence = Confidence.MEDIUM
         else:
             # <3分：其他情况
-            return Confidence.LOW
+            initial_confidence = Confidence.LOW
+        
+        # PR-B: 检查降级标签，限制置信度上限
+        from models.reason_tags import has_degrading_tags
+        if has_degrading_tags(reason_tags):
+            # 有降级标签（如NOISY_MARKET），置信度最高MEDIUM
+            confidence_order = [Confidence.LOW, Confidence.MEDIUM, Confidence.HIGH, Confidence.ULTRA]
+            max_level = Confidence.MEDIUM
+            max_idx = confidence_order.index(max_level)
+            initial_idx = confidence_order.index(initial_confidence)
+            
+            if initial_idx > max_idx:
+                logger.debug(f"Confidence degraded by tags: {initial_confidence.value} → {max_level.value}")
+                return max_level
+        
+        return initial_confidence
     
     # ========================================
     # 状态机更新

@@ -107,35 +107,45 @@ class AdvisoryResult:
     
     def compute_executable(self) -> bool:
         """
-        计算是否可执行 - 为L3提供明确的执行许可
+        计算是否可执行 - 为L3提供明确的执行许可（PR-B综合判定）
         
-        规则（PR-006收紧 + PR-005升级 + PR-004噪声优化）：
-        - NO_TRADE → False
-        - ULTRA/HIGH confidence → True （PR-005: 支持ULTRA）
-        - MEDIUM/LOW confidence → False
-        - risk_exposure_allowed=False → False
-        - trade_quality=POOR → False （PR-004: 只有POOR阻止，UNCERTAIN允许）
+        规则（PR-B修订）：
+        1. 风险必须通过：risk_exposure_allowed=True
+        2. 无阻断性标签：has_blocking_tags(reason_tags)=False
+        3. 置信度达标：ULTRA或HIGH
+        4. 决策方向明确：LONG或SHORT
+        
+        注意：
+        - POOR质量对应的标签（ABSORPTION_RISK/ROTATION_RISK）会被阻断
+        - UNCERTAIN质量对应的标签（NOISY_MARKET）为降级，不阻断
         
         Returns:
             bool: 是否允许L3执行
         """
-        # NO_TRADE 不可执行
+        from .reason_tags import has_blocking_tags
+        
+        # 1. 决策必须是LONG或SHORT
         if self.decision == Decision.NO_TRADE:
             return False
         
-        # 风险被拒绝，不可执行
+        # 2. 风险必须通过
         if not self.risk_exposure_allowed:
             return False
         
-        # PR-004: 只有明确的POOR（风险）阻止执行，UNCERTAIN（噪声）不阻止
+        # 3. PR-B: 检查阻断性标签（包括POOR对应的标签）
+        if has_blocking_tags(self.reason_tags):
+            return False
+        
+        # 4. 置信度必须达标（ULTRA或HIGH）
+        if self.confidence not in [Confidence.ULTRA, Confidence.HIGH]:
+            return False
+        
+        # 5. 质量不能是POOR（理论上POOR已在阻断标签中排除，这里是双重保险）
         if self.trade_quality == TradeQuality.POOR:
             return False
         
-        # PR-006 + PR-005: 只有 ULTRA 或 HIGH 置信度才可执行
-        if self.confidence in [Confidence.ULTRA, Confidence.HIGH]:
-            return True
-        
-        return False
+        # 通过所有检查
+        return True
     
     def __str__(self) -> str:
         """字符串表示（用于日志）"""
