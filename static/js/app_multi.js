@@ -931,8 +931,8 @@ async function loadHistorySignals() {
             return;
         }
         
-        // 只显示最近10条
-        const recentSignals = data.signals.slice(0, 10);
+        // 只显示最近100条
+        const recentSignals = data.signals.slice(0, 100);
         
         let html = '';
         recentSignals.forEach(signal => {
