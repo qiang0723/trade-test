@@ -187,6 +187,10 @@ class SignalDatabase:
                 results.append(dict(row))
             
             return results
+        
+        except Exception as e:
+            logger.warning(f"查询最新信号失败: {str(e)}")
+            return []
     
     def get_signals_last_48h(self, symbol=None):
         """获取最近48小时的信号记录

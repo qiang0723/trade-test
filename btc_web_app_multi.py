@@ -550,10 +550,10 @@ class MultiMarketAPI:
             
             # 如果有数据异常，直接返回NO_TRADE
             if data_anomaly_reasons:
-        return {
+                return {
             'success': True,
                     'symbol': symbol,
-            'analysis': {
+                    'analysis': {
                         'trade_action': 'NO_TRADE',
                         'state_reason': '数据异常保护',
                         'risk_warning': data_anomaly_reasons,
