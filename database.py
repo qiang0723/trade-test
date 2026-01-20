@@ -187,6 +187,131 @@ class SignalDatabase:
                 results.append(dict(row))
             
             return results
+    
+    def get_signals_last_48h(self, symbol=None):
+        """获取最近48小时的信号记录
+        
+        Args:
+            symbol: 币种符号，None表示所有币种
+            
+        Returns:
+            list: 信号记录列表
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 计算48小时前的时间
+            from datetime import datetime, timedelta
+            time_48h_ago = (datetime.now() - timedelta(hours=48)).strftime('%Y-%m-%d %H:%M:%S')
+            
+            if symbol:
+                cursor.execute("""
+                    SELECT * FROM market_signals 
+                    WHERE symbol = ? AND timestamp >= ?
+                    ORDER BY timestamp DESC
+                """, (symbol, time_48h_ago))
+            else:
+                cursor.execute("""
+                    SELECT * FROM market_signals 
+                    WHERE timestamp >= ?
+                    ORDER BY timestamp DESC
+                """, (time_48h_ago,))
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            results = []
+            for row in rows:
+                results.append(dict(row))
+            
+            return results
+        
+        except Exception as e:
+            logger.warning(f"查询48小时信号失败: {str(e)}")
+            return []
+    
+    def cleanup_old_signals(self, hours=48):
+        """清理超过指定小时数的旧信号
+        
+        Args:
+            hours: 保留小时数，默认48小时
+            
+        Returns:
+            int: 删除的记录数
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            from datetime import datetime, timedelta
+            time_threshold = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+            
+            cursor.execute("""
+                DELETE FROM market_signals 
+                WHERE timestamp < ?
+            """, (time_threshold,))
+            
+            deleted_count = cursor.rowcount
+            conn.commit()
+            conn.close()
+            
+            if deleted_count > 0:
+                logger.info(f"清理了{deleted_count}条旧信号记录（超过{hours}小时）")
+            
+            return deleted_count
+        
+        except Exception as e:
+            logger.warning(f"清理旧信号失败: {str(e)}")
+            return 0
+    
+    def get_signal_accuracy_analysis(self, symbol=None, hours=48):
+        """分析信号准确性（简化版本）
+        
+        Args:
+            symbol: 币种符号
+            hours: 分析时间范围
+            
+        Returns:
+            dict: 准确性分析结果
+        """
+        try:
+            signals = self.get_signals_last_48h(symbol)
+            
+            if not signals:
+                return {
+                    'total_signals': 0,
+                    'long_count': 0,
+                    'short_count': 0,
+                    'no_trade_count': 0,
+                    'long_percentage': 0,
+                    'short_percentage': 0,
+                    'no_trade_percentage': 0
+                }
+            
+            # 统计各类型信号
+            total = len(signals)
+            long_count = sum(1 for s in signals if s['trade_action'] == 'LONG')
+            short_count = sum(1 for s in signals if s['trade_action'] == 'SHORT')
+            no_trade_count = sum(1 for s in signals if s['trade_action'] == 'NO_TRADE')
+            
+            return {
+                'total_signals': total,
+                'long_count': long_count,
+                'short_count': short_count,
+                'no_trade_count': no_trade_count,
+                'long_percentage': round(long_count / total * 100, 2) if total > 0 else 0,
+                'short_percentage': round(short_count / total * 100, 2) if total > 0 else 0,
+                'no_trade_percentage': round(no_trade_count / total * 100, 2) if total > 0 else 0,
+                'time_range_hours': hours,
+                'oldest_signal': signals[-1]['timestamp'] if signals else None,
+                'newest_signal': signals[0]['timestamp'] if signals else None
+            }
+        
+        except Exception as e:
+            logger.warning(f"分析信号准确性失败: {str(e)}")
+            return {}
             
         except Exception as e:
             logger.warning(f"查询信号记录失败: {str(e)}")

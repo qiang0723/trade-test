@@ -1406,6 +1406,93 @@ def api_database_info():
         })
 
 
+@app.route('/api/signals-48h')
+def api_signals_48h():
+    """API: 获取48小时内的信号记录"""
+    if not DB_ENABLED:
+        return jsonify({
+            'success': False,
+            'error': '数据库功能未启用'
+        })
+    
+    try:
+        symbol = request.args.get('symbol', None)
+        db = get_signal_db()
+        signals = db.get_signals_last_48h(symbol)
+        
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'count': len(signals),
+            'signals': signals
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+
+@app.route('/api/signal-accuracy')
+def api_signal_accuracy():
+    """API: 获取信号准确性分析"""
+    if not DB_ENABLED:
+        return jsonify({
+            'success': False,
+            'error': '数据库功能未启用'
+        })
+    
+    try:
+        symbol = request.args.get('symbol', None)
+        hours = int(request.args.get('hours', 48))
+        
+        db = get_signal_db()
+        analysis = db.get_signal_accuracy_analysis(symbol, hours)
+        
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'analysis': analysis
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+
+@app.route('/api/cleanup-old-signals')
+def api_cleanup_old_signals():
+    """API: 清理旧信号（手动触发）"""
+    if not DB_ENABLED:
+        return jsonify({
+            'success': False,
+            'error': '数据库功能未启用'
+        })
+    
+    try:
+        hours = int(request.args.get('hours', 48))
+        db = get_signal_db()
+        deleted_count = db.cleanup_old_signals(hours)
+        
+        return jsonify({
+            'success': True,
+            'deleted_count': deleted_count,
+            'message': f'清理了{deleted_count}条超过{hours}小时的旧信号'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+
+@app.route('/history')
+def history_page():
+    """历史信号查看页面"""
+    return render_template('history.html')
+
+
 if __name__ == '__main__':
     # 简化启动信息
     print("="*70)
