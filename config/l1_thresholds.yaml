@@ -7,14 +7,12 @@
 symbol_universe:
   # 支持的币种列表（合约市场）
   enabled_symbols:
-    - BTC    # 比特币
+    - AIA    # AIA
+    - GPS    # GPS
     - ETH    # 以太坊
-    - BNB    # 币安币
-    - SOL    # Solana
-    - XRP    # 瑞波币
   
   # 默认币种（前端初始化）
-  default_symbol: BTC
+  default_symbol: AIA
 
 # ==================
 # 数据质量阈值
