@@ -183,3 +183,14 @@ executable_control:
   #
   # 配合 caps 上限：
   # - noisy_market → cap to HIGH → ALLOW_REDUCED + MEDIUM门槛 → executable=True ✓
+
+# ==================
+# 辅助标签阈值
+# ==================
+auxiliary_tags:
+  # OI 变化阈值（辅助信息标签）- P0-3修复：使用DECIMAL格式
+  oi_growing_threshold: 0.05     # 1h OI 增长 > 5% → OI_GROWING（小数格式：0.05=5%）
+  oi_declining_threshold: -0.05  # 1h OI 下降 < -5% → OI_DECLINING（小数格式：-0.05=-5%）
+  
+  # 资金费率阈值（辅助信息标签）
+  funding_rate_threshold: 0.0005  # 费率绝对值 > 0.05% → HIGH/LOW_FUNDING_RATE

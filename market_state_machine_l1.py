@@ -201,7 +201,7 @@ class L1AdvisoryEngine:
             )
         
         # ===== Step 4: 交易质量评估（第二道闸门）=====
-        quality, quality_tags = self._eval_trade_quality(data, regime)
+        quality, quality_tags = self._eval_trade_quality(symbol, data, regime)
         reason_tags.extend(quality_tags)
         
         self.last_pipeline_steps.append({
@@ -492,6 +492,7 @@ class L1AdvisoryEngine:
     
     def _eval_trade_quality(
         self, 
+        symbol: str,
         data: Dict, 
         regime: MarketRegime
     ) -> Tuple[TradeQuality, List[ReasonTag]]:
@@ -526,17 +527,18 @@ class L1AdvisoryEngine:
         
         # 2. 噪音市（需要历史数据）- PR-004: 返回UNCERTAIN而非POOR
         funding_rate = data.get('funding_rate', 0)
-        funding_rate_prev = self.history_data.get('funding_rate_prev', funding_rate)
+        funding_rate_prev = self.history_data.get(f'{symbol}_funding_rate_prev', funding_rate)
         funding_volatility = abs(funding_rate - funding_rate_prev)
+        
+        # P0-2修复: 先保存当前数据供下次使用（确保每次tick都更新，避免NOISY分支return导致不可达）
+        # 同时使用 symbol 前缀避免多币种串扰
+        self.history_data[f'{symbol}_funding_rate_prev'] = funding_rate
         
         if (funding_volatility > self.thresholds['noisy_funding_volatility'] and 
             abs(funding_rate) < self.thresholds['noisy_funding_abs']):
             tags.append(ReasonTag.NOISY_MARKET)
             # PR-004: 噪声市场 → UNCERTAIN（不确定性），而非POOR（明确风险）
             return TradeQuality.UNCERTAIN, tags
-        
-        # 保存当前数据供下次使用
-        self.history_data['funding_rate_prev'] = funding_rate
         
         # 3. 轮动风险
         price_change_1h = data.get('price_change_1h', 0)
@@ -554,7 +556,9 @@ class L1AdvisoryEngine:
             if (imbalance < self.thresholds['range_weak_imbalance'] and 
                 abs(oi_change_1h) < self.thresholds['range_weak_oi']):
                 tags.append(ReasonTag.WEAK_SIGNAL_IN_RANGE)
-                return TradeQuality.POOR, tags
+                # P0-1修复: 震荡弱信号 → UNCERTAIN（可降级执行），而非POOR（直接阻断）
+                # 与NOISY_MARKET保持一致，支持ExecutionPermission.ALLOW_REDUCED + 双门槛机制
+                return TradeQuality.UNCERTAIN, tags
         
         # 通过所有质量检查
         return TradeQuality.GOOD, []
@@ -987,17 +991,21 @@ class L1AdvisoryEngine:
         """
         # 资金费率标签
         funding_rate = data.get('funding_rate', 0)
-        if abs(funding_rate) > 0.0005:
+        funding_threshold = self.thresholds.get('aux_funding_rate_threshold', 0.0005)
+        if abs(funding_rate) > funding_threshold:
             if funding_rate > 0:
                 reason_tags.append(ReasonTag.HIGH_FUNDING_RATE)
             else:
                 reason_tags.append(ReasonTag.LOW_FUNDING_RATE)
         
-        # 持仓量变化标签
+        # 持仓量变化标签（P0-3修复：使用DECIMAL格式阈值，与系统口径一致）
         oi_change_1h = data.get('oi_change_1h', 0)
-        if oi_change_1h > 5.0:
+        oi_growing_threshold = self.thresholds.get('aux_oi_growing_threshold', 0.05)
+        oi_declining_threshold = self.thresholds.get('aux_oi_declining_threshold', -0.05)
+        
+        if oi_change_1h > oi_growing_threshold:
             reason_tags.append(ReasonTag.OI_GROWING)
-        elif oi_change_1h < -5.0:
+        elif oi_change_1h < oi_declining_threshold:
             reason_tags.append(ReasonTag.OI_DECLINING)
     
     def _apply_decision_control(
@@ -1272,6 +1280,12 @@ class L1AdvisoryEngine:
         flat['long_oi_change_range'] = d.get('range', {}).get('long', {}).get('oi_change', 0.10)
         flat['short_imbalance_range'] = d.get('range', {}).get('short', {}).get('imbalance', 0.7)
         flat['short_oi_change_range'] = d.get('range', {}).get('short', {}).get('oi_change', 0.10)
+        
+        # 辅助标签阈值（P0-3）
+        aux = config.get('auxiliary_tags', {})
+        flat['aux_oi_growing_threshold'] = aux.get('oi_growing_threshold', 0.05)
+        flat['aux_oi_declining_threshold'] = aux.get('oi_declining_threshold', -0.05)
+        flat['aux_funding_rate_threshold'] = aux.get('funding_rate_threshold', 0.0005)
         
         return flat
     
