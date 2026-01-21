@@ -7,12 +7,14 @@
 symbol_universe:
   # 支持的币种列表（合约市场）
   enabled_symbols:
-    - AIA    # AIA
+    - TA     # TA
+    - AT     # AT
+    - HANA   # HANA
+    - BTR    # BTR
     - GPS    # GPS
-    - ETH    # 以太坊
   
   # 默认币种（前端初始化）
-  default_symbol: AIA
+  default_symbol: TA
 
 # ==================
 # 数据质量阈值
