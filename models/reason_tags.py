@@ -27,6 +27,7 @@ class ReasonTag(Enum):
     # ===== 数据验证 =====
     INVALID_DATA = "invalid_data"
     DATA_STALE = "data_stale"
+    DATA_INCOMPLETE = "data_incomplete"  # PR-003: 数据不完整（启动期或历史不足）
     
     # ===== 风险否决类 =====
     EXTREME_REGIME = "extreme_regime"
@@ -70,6 +71,7 @@ REASON_TAG_EXPLANATIONS = {
     # 数据验证
     "invalid_data": "❌ 数据无效：输入数据缺失或异常",
     "data_stale": "⏰ 数据过期：市场数据不够新鲜，可能缓存过期或API异常",
+    "data_incomplete": "📊 数据不完整：历史数据不足（启动初期或缓存清空），无法准确计算",
     
     # 风险否决类
     "extreme_regime": "🚨 极端行情：市场波动超过安全阈值，暂停交易",

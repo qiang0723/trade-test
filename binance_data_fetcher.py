@@ -111,12 +111,25 @@ class BinanceDataFetcher:
                 'taker_imbalance_1h': imbalance_data.get('taker_imbalance_1h'),
             }
             
-            logger.info(f"Fetched futures data for {symbol}: price={current_data['price']:.2f}, "
-                       f"volume_1h={current_data.get('volume_1h', 0):.2f}, "
-                       f"funding_rate={funding_rate:.6f}, OI={open_interest:.0f}")
+            # PR-003: 检查数据完整性
+            data_complete = all([
+                current_data.get('volume_5m') is not None,
+                current_data.get('volume_1h') is not None,
+                current_data.get('taker_imbalance_5m') is not None
+            ])
+            
+            if data_complete:
+                logger.info(f"Fetched futures data for {symbol}: price={current_data['price']:.2f}, "
+                           f"volume_1h={current_data.get('volume_1h', 0):.2f}, "
+                           f"funding_rate={funding_rate:.6f}, OI={open_interest:.0f}")
+            else:
+                logger.warning(f"Incomplete klines data for {symbol}, some fields may be None")
             
             # 5. 使用缓存计算历史变化率
             enhanced_data = self.cache.get_enhanced_market_data(symbol, current_data)
+            
+            # PR-003: 标注数据完整性
+            enhanced_data['_data_complete'] = data_complete
             
             return enhanced_data
         
