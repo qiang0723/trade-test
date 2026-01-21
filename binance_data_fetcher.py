@@ -56,12 +56,18 @@ class BinanceDataFetcher:
         获取合约市场数据
         
         Args:
-            symbol: 币种符号（如 "BTC"，会自动转换为 "BTCUSDT"）
+            symbol: 币种符号
+                - 基础币种格式：如 "BTC" → 自动转换为 "BTCUSDT"
+                - 完整交易对格式：如 "BTCUSDT" → 直接使用
         
         Returns:
             市场数据字典或None
         """
-        trading_symbol = f"{symbol}USDT"
+        # 智能识别：避免重复拼接 USDT
+        if symbol.endswith('USDT'):
+            trading_symbol = symbol  # 已经是完整交易对，直接使用
+        else:
+            trading_symbol = f"{symbol}USDT"  # 基础币种，拼接 USDT
         
         try:
             # 1. 获取24h ticker
@@ -114,12 +120,18 @@ class BinanceDataFetcher:
         获取现货市场数据
         
         Args:
-            symbol: 币种符号（如 "BTC"）
+            symbol: 币种符号
+                - 基础币种格式：如 "BTC" → 自动转换为 "BTCUSDT"
+                - 完整交易对格式：如 "BTCUSDT" → 直接使用
         
         Returns:
             市场数据字典或None
         """
-        trading_symbol = f"{symbol}USDT"
+        # 智能识别：避免重复拼接 USDT
+        if symbol.endswith('USDT'):
+            trading_symbol = symbol  # 已经是完整交易对，直接使用
+        else:
+            trading_symbol = f"{symbol}USDT"  # 基础币种，拼接 USDT
         
         try:
             # 1. 获取24h ticker
