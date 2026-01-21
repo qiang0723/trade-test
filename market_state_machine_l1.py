@@ -263,8 +263,10 @@ class L1AdvisoryEngine:
             'result': decision.value
         })
         
-        # ===== Step 7: 决策频率控制（PR-C）=====
-        original_decision_for_control = decision
+        # ===== Step 7: 决策频率控制（PR-004重构）=====
+        # PR-004: 保存原始信号（频控前的方向）
+        signal_decision = decision
+        
         decision, control_tags = self._apply_decision_control(
             symbol=symbol,
             decision=decision,
@@ -273,12 +275,14 @@ class L1AdvisoryEngine:
         )
         reason_tags.extend(control_tags)
         
-        control_blocked = (decision != original_decision_for_control)
+        # PR-004: decision不再被改写，检查是否有频控标签
+        control_blocked = len(control_tags) > 0
+        
         self.last_pipeline_steps.append({
             'step': 7, 'name': 'decision_control',
-            'status': 'success' if not control_blocked else 'failed',
-            'message': '频率控制通过' if not control_blocked else f'频率控制阻断：{control_tags[0].value if control_tags else ""}',
-            'result': 'Allowed' if not control_blocked else 'Blocked'
+            'status': 'success' if not control_blocked else 'warning',
+            'message': '频率控制通过' if not control_blocked else f'频率控制标记：{control_tags[0].value if control_tags else ""}（信号保留，执行阻断）',
+            'result': 'Allowed' if not control_blocked else f'Signal:{signal_decision.value}, Blocked'
         })
         
         # ===== Step 8: 计算执行许可级别（方案D）=====
@@ -1165,7 +1169,13 @@ class L1AdvisoryEngine:
         timestamp: datetime
     ) -> Tuple[Decision, List[ReasonTag]]:
         """
-        Step 7: 决策频率控制（PR-C）
+        Step 7: 决策频率控制（PR-004重构：不改写decision）
+        
+        PR-004改进：
+        - 频控触发时只添加控制标签（MIN_INTERVAL_BLOCK/FLIP_COOLDOWN_BLOCK）
+        - 不再改写decision为NO_TRADE
+        - 通过reason_tags让execution_permission=DENY，从而设置executable=False
+        - 保持信号透明：用户可看到原始方向但被频控阻断
         
         规则：
         1. 最小决策间隔：防止短时间内重复输出
@@ -1173,12 +1183,12 @@ class L1AdvisoryEngine:
         
         Args:
             symbol: 币种符号
-            decision: 当前决策
+            decision: 当前决策（原始信号，不会被改写）
             reason_tags: 现有标签列表
             timestamp: 当前时间
         
         Returns:
-            (可能被修改的decision, 新增的控制标签列表)
+            (decision保持不变, 新增的控制标签列表)
         """
         control_tags = []
         
@@ -1208,10 +1218,11 @@ class L1AdvisoryEngine:
         # 检查1: 最小决策间隔
         if enable_min_interval and elapsed < min_interval:
             logger.info(
-                f"[{symbol}] MIN_INTERVAL_BLOCK: elapsed={elapsed:.0f}s < {min_interval}s"
+                f"[{symbol}] MIN_INTERVAL_BLOCK: signal={decision.value}, elapsed={elapsed:.0f}s < {min_interval}s "
+                f"(PR-004: 保留信号，通过DENY阻断执行)"
             )
             control_tags.append(ReasonTag.MIN_INTERVAL_BLOCK)
-            return Decision.NO_TRADE, control_tags
+            # PR-004: 不改写decision，只添加标签
         
         # 检查2: 翻转冷却
         if enable_flip_cooldown:
@@ -1220,14 +1231,18 @@ class L1AdvisoryEngine:
             
             if is_flip and elapsed < flip_cooldown:
                 logger.info(
-                    f"[{symbol}] FLIP_COOLDOWN_BLOCK: {last_side.value}→{decision.value}, "
-                    f"elapsed={elapsed:.0f}s < {flip_cooldown}s"
+                    f"[{symbol}] FLIP_COOLDOWN_BLOCK: signal={last_side.value}→{decision.value}, "
+                    f"elapsed={elapsed:.0f}s < {flip_cooldown}s "
+                    f"(PR-004: 保留信号，通过DENY阻断执行)"
                 )
                 control_tags.append(ReasonTag.FLIP_COOLDOWN_BLOCK)
-                return Decision.NO_TRADE, control_tags
+                # PR-004: 不改写decision，只添加标签
         
-        # 通过所有检查
-        logger.debug(f"[{symbol}] Decision control passed")
+        # PR-004: 始终返回原始decision（不改写）
+        # 频控标签会在Step 8被识别为DENY
+        if control_tags:
+            logger.debug(f"[{symbol}] Decision control: signal preserved, will be blocked by execution_permission")
+        
         return decision, control_tags
     
     def _build_no_trade_result(
