@@ -842,6 +842,21 @@ header {
 }
 
 /* 表格列样式 */
+.col-symbol {
+    text-align: center;
+    font-weight: 600;
+}
+
+.symbol-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    background: #e0e7ff;
+    color: #4338ca;
+    border-radius: 8px;
+    font-size: 0.9em;
+    font-weight: 700;
+}
+
 .col-time {
     font-family: 'Monaco', 'Courier New', monospace;
     font-size: 0.85em;

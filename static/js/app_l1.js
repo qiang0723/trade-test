@@ -19,6 +19,7 @@ let currentMarketType = 'futures'; // 固定为合约市场
 let autoRefreshInterval = null;
 let refreshCountdown = 60;
 let reasonTagExplanations = {};
+let availableSymbols = []; // 可用币种列表
 
 // 历史记录列表分页状态
 let allHistoryData = []; // 所有历史数据
@@ -114,11 +115,19 @@ async function loadAvailableMarkets() {
         const result = await response.json();
         
         if (result.success && result.data) {
+            // 保存可用币种列表
+            availableSymbols = result.data.symbols || [];
+            
             // 使用default_symbol作为初始币种
             if (result.data.default_symbol) {
                 currentSymbol = result.data.default_symbol;
             }
+            
+            // 创建币种按钮
             createSymbolButtons(result.data.markets);
+            
+            // 初始化历史记录的币种筛选下拉框
+            initHistorySymbolFilter(availableSymbols);
         }
     } catch (error) {
         console.error('Error loading markets:', error);
@@ -363,15 +372,67 @@ function updateReasonTags(advisory) {
 // ==========================================
 
 /**
+ * 初始化历史记录的币种筛选下拉框
+ */
+function initHistorySymbolFilter(symbols) {
+    const filterSymbol = document.getElementById('filterSymbol');
+    
+    if (!filterSymbol) {
+        console.error('filterSymbol element not found');
+        return;
+    }
+    
+    // 清空现有选项（保留"全部币种"）
+    filterSymbol.innerHTML = '<option value="all">全部币种</option>';
+    
+    // 添加每个币种选项
+    symbols.forEach(symbol => {
+        const option = document.createElement('option');
+        option.value = symbol;
+        option.textContent = symbol;
+        filterSymbol.appendChild(option);
+    });
+    
+    console.log(`Initialized symbol filter with ${symbols.length} symbols`);
+}
+
+/**
  * 加载历史记录（列表模式）
  */
 async function loadHistoryList() {
     try {
         const hours = parseInt(document.getElementById('filterHours').value) || 24;
-        const history = await fetchHistory(currentSymbol, hours, 2000);
+        const filterSymbol = document.getElementById('filterSymbol').value;
         
-        if (history && history.length > 0) {
-            allHistoryData = history;
+        // 如果选择"全部币种"，需要查询所有币种的历史
+        if (filterSymbol === 'all') {
+            allHistoryData = [];
+            
+            // 并行查询所有币种的历史数据
+            const promises = availableSymbols.map(symbol => 
+                fetchHistory(symbol, hours, 2000).then(history => {
+                    // 为每条记录添加币种字段
+                    return history.map(item => ({...item, symbol: symbol}));
+                })
+            );
+            
+            const results = await Promise.all(promises);
+            
+            // 合并所有币种的历史数据
+            results.forEach(symbolHistory => {
+                allHistoryData = allHistoryData.concat(symbolHistory);
+            });
+            
+            // 按时间倒序排序
+            allHistoryData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+        } else {
+            // 查询单一币种
+            const history = await fetchHistory(filterSymbol, hours, 2000);
+            allHistoryData = history.map(item => ({...item, symbol: filterSymbol}));
+        }
+        
+        if (allHistoryData && allHistoryData.length > 0) {
             applyHistoryFilters();
         } else {
             allHistoryData = [];
@@ -388,12 +449,27 @@ async function loadHistoryList() {
  * 应用筛选条件
  */
 function applyHistoryFilters() {
+    const symbol = document.getElementById('filterSymbol').value;
     const decision = document.getElementById('filterDecision').value;
     const confidence = document.getElementById('filterConfidence').value;
     const executable = document.getElementById('filterExecutable').value;
+    const hours = parseInt(document.getElementById('filterHours').value);
     
-    // 筛选数据
+    // 如果时间范围或币种改变，需要重新加载数据
+    const prevHours = parseInt(document.getElementById('filterHours').dataset.prevValue || '24');
+    const prevSymbol = document.getElementById('filterSymbol').dataset.prevValue || 'all';
+    
+    if (hours !== prevHours || symbol !== prevSymbol) {
+        document.getElementById('filterHours').dataset.prevValue = hours;
+        document.getElementById('filterSymbol').dataset.prevValue = symbol;
+        loadHistoryList();
+        return;
+    }
+    
+    // 筛选数据（不需要重新加载）
     filteredHistoryData = allHistoryData.filter(item => {
+        // 币种筛选（如果已在loadHistoryList中处理，这里可以跳过，但为了一致性保留）
+        if (symbol !== 'all' && item.symbol !== symbol) return false;
         if (decision !== 'all' && item.decision !== decision) return false;
         if (confidence !== 'all' && item.confidence !== confidence) return false;
         if (executable !== 'all') {
@@ -417,10 +493,13 @@ function applyHistoryFilters() {
  * 重置筛选条件
  */
 function resetHistoryFilters() {
+    document.getElementById('filterSymbol').value = 'all';
     document.getElementById('filterDecision').value = 'all';
     document.getElementById('filterConfidence').value = 'all';
     document.getElementById('filterExecutable').value = 'all';
     document.getElementById('filterHours').value = '24';
+    document.getElementById('filterSymbol').dataset.prevValue = 'all';
+    document.getElementById('filterHours').dataset.prevValue = '24';
     loadHistoryList();
 }
 
@@ -443,7 +522,7 @@ function renderHistoryTable(data) {
     const tbody = document.getElementById('historyTableBody');
     
     if (!data || data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="table-empty">暂无符合条件的历史记录</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="table-empty">暂无符合条件的历史记录</td></tr>';
         return;
     }
     
@@ -514,6 +593,9 @@ function renderHistoryTable(data) {
         const reasonText = formatReasonTags(item.reason_tags);
         
         row.innerHTML = `
+            <td class="col-symbol">
+                <span class="symbol-badge">${item.symbol || currentSymbol}</span>
+            </td>
             <td class="col-time">${timeStr}</td>
             <td class="col-decision">
                 <span class="decision-badge ${decisionClass}">${decisionIcon} ${decisionLabel}</span>

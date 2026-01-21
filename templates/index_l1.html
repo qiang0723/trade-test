@@ -206,6 +206,14 @@
                 <!-- 查询筛选条件 -->
                 <div class="history-filters">
                     <div class="filter-group">
+                        <label>币种</label>
+                        <select id="filterSymbol" onchange="applyHistoryFilters()">
+                            <option value="all">全部币种</option>
+                            <!-- 动态生成币种选项 -->
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
                         <label>决策类型</label>
                         <select id="filterDecision" onchange="applyHistoryFilters()">
                             <option value="all">全部</option>
@@ -279,18 +287,19 @@
                 <table class="history-table" id="historyTable">
                     <thead>
                         <tr>
+                            <th width="8%">币种</th>
                             <th width="12%">时间</th>
                             <th width="10%">决策</th>
                             <th width="10%">置信度</th>
                             <th width="8%">可执行</th>
                             <th width="10%">市场环境</th>
                             <th width="10%">交易质量</th>
-                            <th width="40%">决策说明</th>
+                            <th width="32%">决策说明</th>
                         </tr>
                     </thead>
                     <tbody id="historyTableBody">
                         <tr>
-                            <td colspan="7" class="table-loading">正在加载历史记录...</td>
+                            <td colspan="8" class="table-loading">正在加载历史记录...</td>
                         </tr>
                     </tbody>
                 </table>
