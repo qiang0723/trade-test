@@ -19,6 +19,13 @@ from datetime import datetime
 import yaml
 import os
 
+# ⚠️  修复：先配置日志，再使用logger（PR-M 建议A相关）
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # 可选：Watchdog文件监控（如果安装了）
 try:
     from watchdog.observers import Observer
@@ -35,13 +42,6 @@ try:
 except ImportError:
     APSCHEDULER_AVAILABLE = False
     logger.warning("apscheduler not installed, auto cleanup disabled. Install: pip install apscheduler")
-
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # 创建Flask应用
 app = Flask(__name__)
