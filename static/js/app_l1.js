@@ -118,16 +118,13 @@ async function loadAvailableMarkets() {
             // 保存可用币种列表
             availableSymbols = result.data.symbols || [];
             
-            // 使用default_symbol作为初始币种
-            if (result.data.default_symbol) {
-                currentSymbol = result.data.default_symbol;
-            }
-            
-            // 创建币种按钮
-            createSymbolButtons(result.data.markets);
+            console.log('Available symbols:', availableSymbols);
             
             // 初始化历史记录的币种筛选下拉框
             initHistorySymbolFilter(availableSymbols);
+            
+            // 立即刷新所有币种决策
+            refreshAdvisory();
         }
     } catch (error) {
         console.error('Error loading markets:', error);
