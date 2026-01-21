@@ -139,36 +139,45 @@ async function loadAvailableMarkets() {
 // ==========================================
 
 /**
- * 刷新所有数据
+ * 刷新所有币种的决策数据
  */
 async function refreshAdvisory() {
-    console.log(`Refreshing advisory for ${currentSymbol}...`);
+    console.log(`Refreshing advisory for all symbols...`);
     
     // 显示加载状态
     showLoading();
     
-    // 获取决策
-    const advisory = await fetchAdvisory(currentSymbol);
-    
-    if (advisory) {
-        // 更新决策信号面板
-        updateDecisionPanel(advisory);
-        
-        // 更新安全闸门
-        updateSafetyGates(advisory);
-        
-        // 更新决策追溯
-        updateReasonTags(advisory);
-        
-        // 更新最后更新时间
-        updateLastUpdateTime();
+    if (!availableSymbols || availableSymbols.length === 0) {
+        console.error('No available symbols');
+        return;
     }
+    
+    // 并行获取所有币种的决策
+    const promises = availableSymbols.map(symbol => 
+        fetchAdvisory(symbol).then(advisory => ({
+            symbol: symbol,
+            advisory: advisory
+        })).catch(err => {
+            console.error(`Failed to fetch advisory for ${symbol}:`, err);
+            return { symbol: symbol, advisory: null };
+        })
+    );
+    
+    const results = await Promise.all(promises);
+    
+    // 更新决策缓存
+    allDecisions = {};
+    results.forEach(({symbol, advisory}) => {
+        if (advisory) {
+            allDecisions[symbol] = advisory;
+        }
+    });
+    
+    // 更新所有币种的决策面板
+    updateAllDecisionsPanel(allDecisions);
     
     // 加载历史决策列表
     await loadHistoryList();
-    
-    // 更新决策管道可视化
-    await updatePipelineVisualization(currentSymbol);
     
     // 更新最后更新时间
     updateLastUpdateTime();
