@@ -172,29 +172,65 @@ def periodic_advisory_update():
     定时更新任务：每分钟自动获取市场数据并生成决策
     
     这确保即使前端关闭，历史决策记录也会持续更新，不会出现数据缺失
+    
+    包含重试机制：利用配置中的 error_handling.max_retries 和 retry_delay_seconds
     """
     try:
         logger.info("⏰ Running periodic advisory update...")
         
-        # 从配置文件加载监控的交易对
+        # 从配置文件加载监控的交易对和错误处理策略
         config = load_monitored_symbols()
         symbols = config.get('symbols', ['BTCUSDT'])
         market_type = config.get('periodic_update', {}).get('market_type', 'futures')
+        
+        # 读取重试配置
+        error_config = config.get('error_handling', {})
+        max_retries = error_config.get('max_retries', 3)
+        retry_delay = error_config.get('retry_delay_seconds', 5)
+        continue_on_error = error_config.get('continue_on_error', True)
         
         if not symbols:
             logger.warning("No symbols configured for monitoring")
             return
         
         for symbol in symbols:
+            market_data = None
+            last_error = None
+            
+            # 重试逻辑
+            for attempt in range(max_retries):
+                try:
+                    # 1. 获取市场数据（带重试）
+                    market_data = binance_fetcher.fetch_market_data(symbol, market_type=market_type)
+                    
+                    if market_data:
+                        break  # 成功获取，跳出重试循环
+                    else:
+                        last_error = f"No market data returned for {symbol}"
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {symbol}, retrying in {retry_delay}s...")
+                            import time
+                            time.sleep(retry_delay)
+                        
+                except Exception as e:
+                    last_error = str(e)
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Attempt {attempt + 1}/{max_retries} failed for {symbol}: {e}, retrying in {retry_delay}s...")
+                        import time
+                        time.sleep(retry_delay)
+                    else:
+                        logger.error(f"All {max_retries} attempts failed for {symbol}: {e}", exc_info=True)
+            
+            # 检查是否成功获取数据
+            if not market_data:
+                logger.error(f"❌ Failed to fetch {symbol} after {max_retries} attempts: {last_error}")
+                if continue_on_error:
+                    continue  # 继续处理下一个symbol
+                else:
+                    break  # 中断整个任务
+            
+            # 2. 生成L1决策
             try:
-                # 1. 获取市场数据
-                market_data = binance_fetcher.fetch_market_data(symbol, market_type=market_type)
-                
-                if not market_data:
-                    logger.warning(f"No market data for {symbol}, skipping")
-                    continue
-                
-                # 2. 生成L1决策
                 result = advisory_engine.on_new_tick(symbol, market_data)
                 
                 # 3. 保存到数据库
@@ -210,9 +246,11 @@ def periodic_advisory_update():
                 )
             
             except Exception as e:
-                logger.error(f"Error updating {symbol}: {e}", exc_info=True)
-                # 继续处理下一个symbol，不中断整个任务
-                continue
+                logger.error(f"Error processing decision for {symbol}: {e}", exc_info=True)
+                if continue_on_error:
+                    continue
+                else:
+                    break
         
     except Exception as e:
         logger.error(f"Error in periodic_advisory_update: {e}", exc_info=True)
