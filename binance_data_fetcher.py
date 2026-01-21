@@ -23,13 +23,14 @@ class BinanceDataFetcher:
     负责从Binance API获取数据并格式化为L1所需格式
     """
     
-    def __init__(self, api_key: str = None, api_secret: str = None):
+    def __init__(self, api_key: str = None, api_secret: str = None, test_connection: bool = False):
         """
         初始化Binance客户端
         
         Args:
             api_key: API Key（可选，公开数据不需要）
             api_secret: API Secret（可选）
+            test_connection: 是否在初始化时测试连接（默认False，延迟到实际使用）
         """
         if api_key and api_secret:
             self.client = Client(api_key, api_secret)
@@ -40,7 +41,15 @@ class BinanceDataFetcher:
         # 获取全局缓存实例
         self.cache = get_cache()
         
-        logger.info("BinanceDataFetcher initialized")
+        # 可选：测试连接
+        if test_connection:
+            try:
+                self.client.ping()
+                logger.info("BinanceDataFetcher initialized (connection tested)")
+            except Exception as e:
+                logger.warning(f"BinanceDataFetcher initialized (connection test failed: {e})")
+        else:
+            logger.info("BinanceDataFetcher initialized (connection will be tested on first use)")
     
     def fetch_futures_data(self, symbol: str) -> Optional[dict]:
         """
