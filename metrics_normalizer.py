@@ -52,57 +52,91 @@ class MetricsNormalizer:
             (规范化后的数据, 是否有效, 错误信息)
         
         重要：
-        - MarketDataCache.calculate_price_change/calculate_oi_change 返回百分比点格式（已乘100）
-        - 例如：0.5 表示 0.5%，3.0 表示 3%
-        - 本方法统一转换为小数格式（除以100）
+        - PR-M (方案B): 支持元数据标注的格式声明
+        - 读取 _metadata.percentage_format 来决定是否需要转换
+        - 向后兼容：无元数据时默认为 percent_point 格式
         """
         normalized = data.copy()
         
+        # PR-M: 读取元数据中的格式声明
+        metadata = data.get('_metadata', {})
+        input_format = metadata.get('percentage_format', 'percent_point')  # 默认 percent_point（向后兼容）
+        
+        # 验证格式声明
+        if input_format not in ['percent_point', 'decimal']:
+            error_msg = f"未知的百分比格式声明: {input_format}（应为 'percent_point' 或 'decimal'）"
+            logger.error(error_msg)
+            return normalized, False, error_msg
+        
         # 检测口径异常（极端异常值，如 >1000 表示100000%）
-        is_valid, error_msg = cls._detect_scale_anomaly(data)
+        # 注意：异常检测需要考虑当前格式
+        is_valid, error_msg = cls._detect_scale_anomaly(data, input_format)
         if not is_valid:
             return normalized, False, error_msg
         
-        # 转换百分比字段
-        # P0-BugFix: 修复小幅变化(<1%)被放大100倍的问题
-        # 来自 MarketDataCache 的值统一为百分比点格式（已乘100）
-        # 必须无条件除以100转为小数格式
-        for field in cls.PERCENTAGE_FIELDS:
-            if field in normalized and normalized[field] is not None:
-                value = normalized[field]
-                
-                # 统一转换：百分比点 → 小数
-                # 0.5 (0.5%) → 0.005
-                # 3.0 (3%) → 0.03
-                # 50.0 (50%) → 0.50
-                normalized[field] = value / 100.0
-                logger.debug(f"Converted {field} from {value}% to {normalized[field]:.6f} (decimal)")
+        # 根据输入格式决定是否转换
+        if input_format == 'percent_point':
+            # 百分比点格式：需要转换为小数格式（除以100）
+            for field in cls.PERCENTAGE_FIELDS:
+                if field in normalized and normalized[field] is not None:
+                    value = normalized[field]
+                    # 统一转换：百分比点 → 小数
+                    # 0.5 (0.5%) → 0.005
+                    # 3.0 (3%) → 0.03
+                    # 50.0 (50%) → 0.50
+                    normalized[field] = value / 100.0
+                    logger.debug(f"Converted {field} from {value}% to {normalized[field]:.6f} (decimal)")
+            
+            logger.debug(f"Normalized metrics from percent_point to decimal format")
+        
+        elif input_format == 'decimal':
+            # 小数格式：无需转换，直接使用
+            logger.debug(f"Input already in decimal format, no conversion needed")
+        
+        # 移除元数据字段（不传递给下游）
+        normalized.pop('_metadata', None)
         
         return normalized, True, ""
     
     @classmethod
-    def _detect_scale_anomaly(cls, data: Dict) -> Tuple[bool, str]:
+    def _detect_scale_anomaly(cls, data: Dict, input_format: str = 'percent_point') -> Tuple[bool, str]:
         """
         检测尺度异常（极端异常值）
         
-        P0-BugFix: 所有输入都是百分比点格式（已乘100），只检测极端异常值
+        PR-M: 根据输入格式调整异常检测阈值
         
         Args:
             data: 市场数据字典
+            input_format: 输入格式 ('percent_point' 或 'decimal')
         
         Returns:
             (是否有效, 错误信息)
         """
-        # 检测极端异常值（如 >1000 表示100000%，显然不合理）
+        # 根据输入格式设置不同的阈值
+        if input_format == 'percent_point':
+            # 百分比点格式：3.0 表示 3%，1000.0 表示 1000%
+            threshold = cls.SUSPICIOUS_HIGH_THRESHOLD  # 1000.0 (1000%)
+            threshold_display = f"{threshold}%"
+        else:  # decimal
+            # 小数格式：0.03 表示 3%，10.0 表示 1000%
+            threshold = cls.SUSPICIOUS_HIGH_THRESHOLD / 100.0  # 10.0 (1000%)
+            threshold_display = f"{threshold*100}%"
+        
+        # 检测极端异常值
         for field in cls.PERCENTAGE_FIELDS:
             if field in data and data[field] is not None:
                 value = abs(data[field])
                 
-                # 检测异常大的值（如 >1000%）
-                if value > cls.SUSPICIOUS_HIGH_THRESHOLD:
+                # 检测异常大的值
+                if value > threshold:
+                    if input_format == 'percent_point':
+                        display_value = f"{value:.2f}%"
+                    else:
+                        display_value = f"{value*100:.2f}%"
+                    
                     error_msg = (
-                        f"指标值异常：{field}={value:.2f}% 超出合理范围 "
-                        f"(>{cls.SUSPICIOUS_HIGH_THRESHOLD}%)。"
+                        f"指标值异常：{field}={display_value} 超出合理范围 "
+                        f"(>{threshold_display})。"
                         f"这可能是数据错误或API异常。"
                     )
                     logger.error(error_msg)

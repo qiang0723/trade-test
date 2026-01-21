@@ -337,7 +337,13 @@ class MarketDataCache:
             'oi_change_6h': oi_change_6h if oi_change_6h is not None else 0.0,
             # PR-002: 添加时间戳信息（用于新鲜度检查）
             'source_timestamp': source_timestamp,
-            'computed_at': datetime.now()
+            'computed_at': datetime.now(),
+            # PR-M (方案B): 元数据标注 - 声明百分比字段的输出格式
+            '_metadata': {
+                'percentage_format': 'percent_point',  # 百分比字段为 percent-point 格式（已乘100）
+                'source': 'market_data_cache',
+                'version': '1.0'
+            }
         }
         
         logger.info(f"Enhanced data for {symbol}: "
