@@ -48,6 +48,9 @@ class AdvisoryResult:
     execution_permission: ExecutionPermission = ExecutionPermission.ALLOW  # 执行许可级别
     executable: bool = False        # 是否可执行（基于execution_permission和置信度的双门槛判断）
     
+    # ===== (PR-004) 信号透明化 =====
+    signal_decision: Optional[Decision] = None  # 原始信号方向（频控前的方向判断结果）
+    
     def to_dict(self) -> dict:
         """
         转换为字典，用于JSON序列化
@@ -66,6 +69,7 @@ class AdvisoryResult:
             'timestamp': self.timestamp.isoformat(),
             'execution_permission': self.execution_permission.value,  # 方案D新增
             'executable': self.executable,
+            'signal_decision': self.signal_decision.value if self.signal_decision else None,  # PR-004新增
         }
     
     @classmethod
