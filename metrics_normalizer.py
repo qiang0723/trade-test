@@ -36,7 +36,8 @@ class MetricsNormalizer:
     ]
     
     # 异常检测阈值
-    SUSPICIOUS_HIGH_THRESHOLD = 10.0  # 超过10视为可疑（可能是百分比点）
+    # P0-BugFix: 调整阈值，因为所有输入都是百分比点格式（已乘100）
+    SUSPICIOUS_HIGH_THRESHOLD = 1000.0  # 超过1000视为异常（表示100000%）
     SUSPICIOUS_LOW_THRESHOLD = 0.0001  # 小于0.0001视为可疑（可能是误差）
     
     @classmethod
@@ -49,33 +50,42 @@ class MetricsNormalizer:
         
         Returns:
             (规范化后的数据, 是否有效, 错误信息)
+        
+        重要：
+        - MarketDataCache.calculate_price_change/calculate_oi_change 返回百分比点格式（已乘100）
+        - 例如：0.5 表示 0.5%，3.0 表示 3%
+        - 本方法统一转换为小数格式（除以100）
         """
         normalized = data.copy()
         
-        # 检测口径异常
+        # 检测口径异常（极端异常值，如 >1000 表示100000%）
         is_valid, error_msg = cls._detect_scale_anomaly(data)
         if not is_valid:
             return normalized, False, error_msg
         
         # 转换百分比字段
+        # P0-BugFix: 修复小幅变化(<1%)被放大100倍的问题
+        # 来自 MarketDataCache 的值统一为百分比点格式（已乘100）
+        # 必须无条件除以100转为小数格式
         for field in cls.PERCENTAGE_FIELDS:
             if field in normalized and normalized[field] is not None:
                 value = normalized[field]
                 
-                # 如果值 > 1，可能是百分比点格式（如 5.0 表示 5%）
-                # 自动转换为小数格式
-                if abs(value) > 1.0:
-                    normalized[field] = value / 100.0
-                    logger.debug(f"Converted {field} from {value} to {normalized[field]} (percent to decimal)")
+                # 统一转换：百分比点 → 小数
+                # 0.5 (0.5%) → 0.005
+                # 3.0 (3%) → 0.03
+                # 50.0 (50%) → 0.50
+                normalized[field] = value / 100.0
+                logger.debug(f"Converted {field} from {value}% to {normalized[field]:.6f} (decimal)")
         
         return normalized, True, ""
     
     @classmethod
     def _detect_scale_anomaly(cls, data: Dict) -> Tuple[bool, str]:
         """
-        检测尺度异常（混用风险）
+        检测尺度异常（极端异常值）
         
-        检查同一批数据中是否存在明显的尺度不一致
+        P0-BugFix: 所有输入都是百分比点格式（已乘100），只检测极端异常值
         
         Args:
             data: 市场数据字典
@@ -83,36 +93,20 @@ class MetricsNormalizer:
         Returns:
             (是否有效, 错误信息)
         """
-        percentage_values = []
-        
-        # 收集所有百分比字段的值
+        # 检测极端异常值（如 >1000 表示100000%，显然不合理）
         for field in cls.PERCENTAGE_FIELDS:
             if field in data and data[field] is not None:
                 value = abs(data[field])
-                if value > cls.SUSPICIOUS_LOW_THRESHOLD:  # 忽略接近0的值
-                    percentage_values.append((field, value))
-        
-        if len(percentage_values) < 2:
-            # 只有一个值，无法检测混用
-            return True, ""
-        
-        # 检测是否同时存在 "很大" 和 "很小" 的值
-        # 例如：price_change_1h=0.05（5%），oi_change_1h=50（误用百分比点）
-        has_large = any(v > cls.SUSPICIOUS_HIGH_THRESHOLD for _, v in percentage_values)
-        has_small = any(v < 1.0 for _, v in percentage_values)
-        
-        if has_large and has_small:
-            # 可能存在混用
-            large_fields = [f for f, v in percentage_values if v > cls.SUSPICIOUS_HIGH_THRESHOLD]
-            small_fields = [f for f, v in percentage_values if v < 1.0]
-            
-            error_msg = (
-                f"指标尺度异常：检测到可能的百分比格式混用。"
-                f"大值字段: {large_fields}，小值字段: {small_fields}。"
-                f"请确保所有百分比指标使用统一格式（推荐小数格式，如 0.05 表示 5%）"
-            )
-            logger.error(error_msg)
-            return False, error_msg
+                
+                # 检测异常大的值（如 >1000%）
+                if value > cls.SUSPICIOUS_HIGH_THRESHOLD:
+                    error_msg = (
+                        f"指标值异常：{field}={value:.2f}% 超出合理范围 "
+                        f"(>{cls.SUSPICIOUS_HIGH_THRESHOLD}%)。"
+                        f"这可能是数据错误或API异常。"
+                    )
+                    logger.error(error_msg)
+                    return False, error_msg
         
         return True, ""
     

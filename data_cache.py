@@ -228,7 +228,10 @@ class MarketDataCache:
     
     def calculate_volume_1h(self, symbol: str) -> Optional[float]:
         """
-        计算1小时成交量（累加最近1小时的volume）
+        计算1小时成交量（取最新累计量与1小时前累计量的差值）
+        
+        重要：Binance ticker['volume'] 是24h累计成交量，不是单tick量
+        因此必须取差值，而不是累加
         
         Args:
             symbol: 币种符号
@@ -236,16 +239,29 @@ class MarketDataCache:
         Returns:
             1小时总成交量或None
         """
-        ticks_1h = self.get_historical_ticks(symbol, hours=1.0)
-        
-        if len(ticks_1h) == 0:
-            return None
-        
-        # 累加成交量（注意：如果tick的volume是累计值，需要取差值）
-        # 这里假设volume是单个tick的成交量
-        total_volume = sum(tick.volume for tick in ticks_1h)
-        
-        return total_volume
+        with self.lock:
+            if symbol not in self.cache or len(self.cache[symbol]) < 2:
+                return None
+            
+            # 获取最新tick和1小时前的tick
+            current_tick = self.cache[symbol][-1]
+            target_time = current_tick.timestamp - timedelta(hours=1.0)
+            past_tick = self._find_closest_tick(symbol, target_time)
+            
+            if past_tick is None:
+                return None
+            
+            # P0-BugFix-2: volume是24h累计量，必须取差值
+            # 不能累加，否则会高估几十倍
+            volume_1h = current_tick.volume - past_tick.volume
+            
+            # 如果差值为负（可能是24h窗口滚动导致），返回None
+            if volume_1h < 0:
+                logger.warning(f"Negative volume_1h for {symbol}: {volume_1h}. "
+                             f"Current: {current_tick.volume}, Past: {past_tick.volume}")
+                return None
+            
+            return volume_1h
     
     def calculate_buy_sell_imbalance(self, symbol: str, hours: float = 1.0) -> Optional[float]:
         """

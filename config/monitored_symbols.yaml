@@ -1,0 +1,24 @@
+# 监控的交易对配置
+
+# 定时更新配置
+periodic_update:
+  enabled: true          # 是否启用定时更新
+  interval_minutes: 1    # 更新间隔（分钟）
+  market_type: futures   # 市场类型: futures 或 spot
+
+# 监控的交易对列表
+symbols:
+  - BTCUSDT    # 比特币
+  # - ETHUSDT    # 以太坊（按需启用）
+  # - BNBUSDT    # BNB（按需启用）
+
+# 数据保留策略
+data_retention:
+  keep_hours: 24         # 保留最近24小时的数据
+  cleanup_interval_hours: 6  # 每6小时清理一次
+
+# 错误处理
+error_handling:
+  max_retries: 3         # API调用失败时最大重试次数
+  retry_delay_seconds: 5 # 重试延迟（秒）
+  continue_on_error: true  # 单个symbol失败时继续处理其他symbol

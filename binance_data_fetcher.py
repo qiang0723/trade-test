@@ -77,7 +77,11 @@ class BinanceDataFetcher:
             current_data = {
                 'price': float(ticker['lastPrice']),
                 'volume': float(ticker['volume']),
-                'volume_24h': float(ticker['quoteVolume']),  # 24h成交额（USDT）
+                # P0-BugFix-3: 统一单位为基础币数量（BTC）
+                # volume_1h 来自 volume 差值（BTC数量）
+                # volume_24h 也必须使用 volume（BTC数量），而非 quoteVolume（USDT金额）
+                # 否则单位不一致，volume_1h vs volume_24h 的比较完全失效
+                'volume_24h': float(ticker['volume']),  # 24h成交量（BTC数量）
                 'open_interest': open_interest,
                 'funding_rate': funding_rate,
                 'buy_volume': buy_volume,
@@ -123,7 +127,8 @@ class BinanceDataFetcher:
             current_data = {
                 'price': float(ticker['lastPrice']),
                 'volume': float(ticker['volume']),
-                'volume_24h': float(ticker['quoteVolume']),
+                # P0-BugFix-3: 统一单位为基础币数量
+                'volume_24h': float(ticker['volume']),  # 24h成交量（基础币数量）
                 'open_interest': 0.0,  # 现货无持仓量
                 'funding_rate': 0.0,   # 现货无资金费率
                 'buy_volume': buy_volume,

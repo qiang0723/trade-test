@@ -198,23 +198,128 @@
             </div>
         </div>
 
-        <!-- 历史决策时间轴 -->
+        <!-- 历史决策列表 -->
         <div class="history-panel">
             <div class="history-header">
-                <h3>⏱️ 历史决策时间轴（最近24小时）</h3>
-                <div class="history-legend">
-                    <span class="legend-item long">🟢 LONG</span>
-                    <span class="legend-item short">🔴 SHORT</span>
-                    <span class="legend-item notrade">⚪ NO_TRADE</span>
+                <h3>📋 历史决策记录</h3>
+                
+                <!-- 查询筛选条件 -->
+                <div class="history-filters">
+                    <div class="filter-group">
+                        <label>决策类型</label>
+                        <select id="filterDecision" onchange="applyHistoryFilters()">
+                            <option value="all">全部</option>
+                            <option value="long">LONG (做多)</option>
+                            <option value="short">SHORT (做空)</option>
+                            <option value="no_trade">NO_TRADE (观望)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>置信度</label>
+                        <select id="filterConfidence" onchange="applyHistoryFilters()">
+                            <option value="all">全部</option>
+                            <option value="high">HIGH (高)</option>
+                            <option value="medium">MEDIUM (中)</option>
+                            <option value="low">LOW (低)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>可执行</label>
+                        <select id="filterExecutable" onchange="applyHistoryFilters()">
+                            <option value="all">全部</option>
+                            <option value="true">可执行</option>
+                            <option value="false">不可执行</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>时间范围</label>
+                        <select id="filterHours" onchange="applyHistoryFilters()">
+                            <option value="1">最近1小时</option>
+                            <option value="6">最近6小时</option>
+                            <option value="24" selected>最近24小时</option>
+                            <option value="48">最近48小时</option>
+                        </select>
+                    </div>
+                    
+                    <button class="filter-reset-btn" onclick="resetHistoryFilters()">
+                        🔄 重置筛选
+                    </button>
                 </div>
             </div>
-            <div class="history-timeline" id="historyTimeline">
-                <div class="timeline-loading">正在加载历史决策...</div>
+            
+            <!-- 统计信息 -->
+            <div class="history-stats" id="historyStats">
+                <div class="stat-item">
+                    <span class="stat-label">总记录数</span>
+                    <span class="stat-value" id="statTotal">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">LONG</span>
+                    <span class="stat-value long" id="statLong">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">SHORT</span>
+                    <span class="stat-value short" id="statShort">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">NO_TRADE</span>
+                    <span class="stat-value notrade" id="statNoTrade">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">可执行</span>
+                    <span class="stat-value executable" id="statExecutable">0</span>
+                </div>
             </div>
-            <div class="history-toggle" id="historyToggle" style="display: none;">
-                <button onclick="toggleHistoryExpand()" id="historyToggleBtn">
-                    展开更多历史记录 (<span id="hiddenCount">0</span>)
-                </button>
+            
+            <!-- 历史记录表格 -->
+            <div class="history-table-container">
+                <table class="history-table" id="historyTable">
+                    <thead>
+                        <tr>
+                            <th width="12%">时间</th>
+                            <th width="10%">决策</th>
+                            <th width="10%">置信度</th>
+                            <th width="8%">可执行</th>
+                            <th width="10%">市场环境</th>
+                            <th width="10%">交易质量</th>
+                            <th width="40%">决策说明</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody">
+                        <tr>
+                            <td colspan="7" class="table-loading">正在加载历史记录...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 分页控制 -->
+            <div class="history-pagination">
+                <div class="pagination-info" id="paginationInfo">
+                    显示 <span id="pageStart">0</span>-<span id="pageEnd">0</span> / 总共 <span id="pageTotal">0</span> 条
+                </div>
+                <div class="pagination-controls">
+                    <button id="btnFirstPage" onclick="goToPage(1)" disabled>首页</button>
+                    <button id="btnPrevPage" onclick="previousPage()" disabled>上一页</button>
+                    <span class="page-number">
+                        第 <input type="number" id="currentPageInput" value="1" min="1" onchange="goToPageInput()"> / 
+                        <span id="totalPages">1</span> 页
+                    </span>
+                    <button id="btnNextPage" onclick="nextPage()" disabled>下一页</button>
+                    <button id="btnLastPage" onclick="goToLastPage()" disabled>末页</button>
+                </div>
+                <div class="pagination-size">
+                    <label>每页显示</label>
+                    <select id="pageSizeSelect" onchange="changePageSize()">
+                        <option value="10">10条</option>
+                        <option value="20" selected>20条</option>
+                        <option value="50">50条</option>
+                        <option value="100">100条</option>
+                    </select>
+                </div>
             </div>
         </div>
 

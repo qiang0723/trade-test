@@ -137,27 +137,134 @@ def cleanup_old_records_job():
         logger.error(f"Error in auto cleanup job: {e}", exc_info=True)
 
 
+def load_monitored_symbols():
+    """加载监控的交易对配置"""
+    try:
+        config_path = os.path.join(
+            os.path.dirname(__file__), 
+            'config', 
+            'monitored_symbols.yaml'
+        )
+        
+        if not os.path.exists(config_path):
+            logger.warning(f"Monitored symbols config not found: {config_path}, using default [BTCUSDT]")
+            return {
+                'periodic_update': {'enabled': True, 'interval_minutes': 1, 'market_type': 'futures'},
+                'symbols': ['BTCUSDT']
+            }
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        logger.info(f"Loaded monitored symbols config: {len(config.get('symbols', []))} symbols")
+        return config
+    
+    except Exception as e:
+        logger.error(f"Error loading monitored symbols config: {e}")
+        return {
+            'periodic_update': {'enabled': True, 'interval_minutes': 1, 'market_type': 'futures'},
+            'symbols': ['BTCUSDT']
+        }
+
+
+def periodic_advisory_update():
+    """
+    定时更新任务：每分钟自动获取市场数据并生成决策
+    
+    这确保即使前端关闭，历史决策记录也会持续更新，不会出现数据缺失
+    """
+    try:
+        logger.info("⏰ Running periodic advisory update...")
+        
+        # 从配置文件加载监控的交易对
+        config = load_monitored_symbols()
+        symbols = config.get('symbols', ['BTCUSDT'])
+        market_type = config.get('periodic_update', {}).get('market_type', 'futures')
+        
+        if not symbols:
+            logger.warning("No symbols configured for monitoring")
+            return
+        
+        for symbol in symbols:
+            try:
+                # 1. 获取市场数据
+                market_data = binance_fetcher.fetch_market_data(symbol, market_type=market_type)
+                
+                if not market_data:
+                    logger.warning(f"No market data for {symbol}, skipping")
+                    continue
+                
+                # 2. 生成L1决策
+                result = advisory_engine.on_new_tick(symbol, market_data)
+                
+                # 3. 保存到数据库
+                advisory_id = l1_db.save_advisory_result(symbol, result)
+                
+                # 4. 保存管道步骤
+                if hasattr(advisory_engine, 'last_pipeline_steps'):
+                    l1_db.save_pipeline_steps(advisory_id, symbol, advisory_engine.last_pipeline_steps)
+                
+                logger.info(
+                    f"✅ Periodic update saved: {symbol} → {result.decision.value} "
+                    f"(confidence: {result.confidence.value}, executable: {result.executable})"
+                )
+            
+            except Exception as e:
+                logger.error(f"Error updating {symbol}: {e}", exc_info=True)
+                # 继续处理下一个symbol，不中断整个任务
+                continue
+        
+    except Exception as e:
+        logger.error(f"Error in periodic_advisory_update: {e}", exc_info=True)
+
+
 def start_scheduler():
     """启动定时任务调度器"""
     if not APSCHEDULER_AVAILABLE:
-        logger.warning("APScheduler not available, skipping auto cleanup")
+        logger.warning("APScheduler not available, skipping auto cleanup and periodic updates")
         return None
     
     try:
+        # 加载配置
+        config = load_monitored_symbols()
+        periodic_config = config.get('periodic_update', {})
+        
+        # 检查是否启用定时更新
+        if not periodic_config.get('enabled', True):
+            logger.warning("Periodic advisory update is disabled in config")
+            return None
+        
         scheduler = BackgroundScheduler()
         
-        # 每6小时清理24小时前的旧数据
+        # 任务1: 定时自动获取决策并保存（核心功能）
+        interval_minutes = periodic_config.get('interval_minutes', 1)
+        scheduler.add_job(
+            func=periodic_advisory_update,
+            trigger='interval',
+            minutes=interval_minutes,
+            id='periodic_advisory',
+            name=f'Periodic L1 advisory update (every {interval_minutes} minute(s))',
+            max_instances=1,  # 防止并发执行
+            next_run_time=None  # 立即执行第一次
+        )
+        
+        # 任务2: 定期清理旧数据
+        retention_config = config.get('data_retention', {})
+        cleanup_interval = retention_config.get('cleanup_interval_hours', 6)
         scheduler.add_job(
             func=cleanup_old_records_job,
             trigger='cron',
-            hour='*/6',  # 每6小时执行一次
+            hour=f'*/{cleanup_interval}',
             minute=0,
             id='cleanup_old_records',
-            name='Cleanup old L1 advisory records (keep 24h only)'
+            name=f'Cleanup old L1 advisory records (every {cleanup_interval}h)'
         )
         
         scheduler.start()
-        logger.info("⏰ Scheduler started: Daily cleanup at 03:00")
+        logger.info("⏰ Scheduler started:")
+        logger.info(f"  - Periodic advisory update: Every {interval_minutes} minute(s)")
+        logger.info(f"  - Cleanup old records: Every {cleanup_interval} hours")
+        logger.info(f"  - Monitored symbols: {config.get('symbols', [])}")
         
         return scheduler
     

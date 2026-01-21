@@ -19,8 +19,13 @@ let currentMarketType = 'futures'; // 固定为合约市场
 let autoRefreshInterval = null;
 let refreshCountdown = 60;
 let reasonTagExplanations = {};
-let historyExpanded = false; // 历史记录是否展开
-const MAX_VISIBLE_HISTORY = 30; // 默认显示的历史记录数
+
+// 历史记录列表分页状态
+let allHistoryData = []; // 所有历史数据
+let filteredHistoryData = []; // 筛选后的数据
+let currentPage = 1;
+let pageSize = 20;
+let totalPages = 1;
 
 // ==========================================
 // 初始化
@@ -150,12 +155,14 @@ async function refreshAdvisory() {
         updateLastUpdateTime();
     }
     
-    // 加载历史
-    const history = await fetchHistory(currentSymbol);
-    updateHistoryTimeline(history);
+    // 加载历史决策列表
+    await loadHistoryList();
     
     // 更新决策管道可视化
     await updatePipelineVisualization(currentSymbol);
+    
+    // 更新最后更新时间
+    updateLastUpdateTime();
     
     // 重置倒计时
     refreshCountdown = 60;
@@ -351,33 +358,100 @@ function updateReasonTags(advisory) {
     });
 }
 
+// ==========================================
+// 历史记录列表 - 查询、筛选、分页
+// ==========================================
+
 /**
- * 更新历史决策时间轴（最多显示30个，剩余可展开）
+ * 加载历史记录（列表模式）
  */
-function updateHistoryTimeline(history) {
-    const timeline = document.getElementById('historyTimeline');
-    const toggleDiv = document.getElementById('historyToggle');
-    const toggleBtn = document.getElementById('historyToggleBtn');
-    const hiddenCountSpan = document.getElementById('hiddenCount');
+async function loadHistoryList() {
+    try {
+        const hours = parseInt(document.getElementById('filterHours').value) || 24;
+        const history = await fetchHistory(currentSymbol, hours, 2000);
+        
+        if (history && history.length > 0) {
+            allHistoryData = history;
+            applyHistoryFilters();
+        } else {
+            allHistoryData = [];
+            filteredHistoryData = [];
+            renderHistoryTable([]);
+            updateHistoryStats([]);
+        }
+    } catch (error) {
+        console.error('Error loading history list:', error);
+    }
+}
+
+/**
+ * 应用筛选条件
+ */
+function applyHistoryFilters() {
+    const decision = document.getElementById('filterDecision').value;
+    const confidence = document.getElementById('filterConfidence').value;
+    const executable = document.getElementById('filterExecutable').value;
     
-    if (!history || history.length === 0) {
-        timeline.innerHTML = '<div class="timeline-loading">暂无历史记录</div>';
-        toggleDiv.style.display = 'none';
+    // 筛选数据
+    filteredHistoryData = allHistoryData.filter(item => {
+        if (decision !== 'all' && item.decision !== decision) return false;
+        if (confidence !== 'all' && item.confidence !== confidence) return false;
+        if (executable !== 'all') {
+            const isExecutable = item.executable === true || item.executable === 'true';
+            if (executable === 'true' && !isExecutable) return false;
+            if (executable === 'false' && isExecutable) return false;
+        }
+        return true;
+    });
+    
+    // 重置到第一页
+    currentPage = 1;
+    totalPages = Math.ceil(filteredHistoryData.length / pageSize);
+    
+    // 更新显示
+    renderCurrentPage();
+    updateHistoryStats(filteredHistoryData);
+}
+
+/**
+ * 重置筛选条件
+ */
+function resetHistoryFilters() {
+    document.getElementById('filterDecision').value = 'all';
+    document.getElementById('filterConfidence').value = 'all';
+    document.getElementById('filterExecutable').value = 'all';
+    document.getElementById('filterHours').value = '24';
+    loadHistoryList();
+}
+
+/**
+ * 渲染当前页数据
+ */
+function renderCurrentPage() {
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, filteredHistoryData.length);
+    const pageData = filteredHistoryData.slice(startIndex, endIndex);
+    
+    renderHistoryTable(pageData);
+    updatePaginationControls();
+}
+
+/**
+ * 渲染历史记录表格
+ */
+function renderHistoryTable(data) {
+    const tbody = document.getElementById('historyTableBody');
+    
+    if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="table-empty">暂无符合条件的历史记录</td></tr>';
         return;
     }
     
-    timeline.innerHTML = '';
+    tbody.innerHTML = '';
     
-    // 判断是否需要折叠
-    const needCollapse = history.length > MAX_VISIBLE_HISTORY;
-    const displayCount = historyExpanded ? history.length : Math.min(history.length, MAX_VISIBLE_HISTORY);
-    
-    // 显示历史记录
-    for (let i = 0; i < displayCount; i++) {
-        const item = history[i];
-        const timelineItem = document.createElement('div');
-        const decision = item.decision;
-        timelineItem.className = `timeline-item ${decision}`;
+    data.forEach(item => {
+        const row = document.createElement('tr');
+        row.className = `history-row ${item.decision}`;
         
         // 时间
         const dt = new Date(item.timestamp);
@@ -385,74 +459,258 @@ function updateHistoryTimeline(history) {
             month: '2-digit',
             day: '2-digit',
             hour: '2-digit',
-            minute: '2-digit'
+            minute: '2-digit',
+            second: '2-digit'
         });
         
-        // 图标
-        let icon = '⚪';
-        let label = 'NO_TRADE';
-        if (decision === 'long') {
-            icon = '🟢';
-            label = 'LONG';
-        } else if (decision === 'short') {
-            icon = '🔴';
-            label = 'SHORT';
+        // 决策标签
+        let decisionIcon = '⚪';
+        let decisionLabel = 'NO_TRADE';
+        let decisionClass = 'notrade';
+        if (item.decision === 'long') {
+            decisionIcon = '🟢';
+            decisionLabel = 'LONG';
+            decisionClass = 'long';
+        } else if (item.decision === 'short') {
+            decisionIcon = '🔴';
+            decisionLabel = 'SHORT';
+            decisionClass = 'short';
         }
         
-        timelineItem.innerHTML = `
-            <div class="item-time">${timeStr}</div>
-            <div class="item-decision">${icon}</div>
-            <div class="item-label">${label}</div>
+        // 置信度
+        const confidenceLabel = {
+            'high': '高',
+            'medium': '中',
+            'low': '低',
+            'ultra': '极高'
+        }[item.confidence] || item.confidence;
+        
+        // 可执行
+        const executableBadge = item.executable 
+            ? '<span class="badge badge-success">✓ 可执行</span>'
+            : '<span class="badge badge-danger">✗ 不可执行</span>';
+        
+        // 市场环境
+        const regimeLabel = {
+            'trend': '趋势市',
+            'range': '震荡市',
+            'extreme': '极端市'
+        }[item.market_regime] || item.market_regime;
+        
+        // 交易质量
+        const qualityLabel = {
+            'good': '优',
+            'uncertain': '中',
+            'poor': '差'
+        }[item.trade_quality] || item.trade_quality;
+        
+        const qualityClass = {
+            'good': 'quality-good',
+            'uncertain': 'quality-uncertain',
+            'poor': 'quality-poor'
+        }[item.trade_quality] || '';
+        
+        // 决策说明（reason tags）
+        const reasonText = formatReasonTags(item.reason_tags);
+        
+        row.innerHTML = `
+            <td class="col-time">${timeStr}</td>
+            <td class="col-decision">
+                <span class="decision-badge ${decisionClass}">${decisionIcon} ${decisionLabel}</span>
+            </td>
+            <td class="col-confidence">
+                <span class="confidence-badge confidence-${item.confidence}">${confidenceLabel}</span>
+            </td>
+            <td class="col-executable">${executableBadge}</td>
+            <td class="col-regime">${regimeLabel}</td>
+            <td class="col-quality">
+                <span class="quality-badge ${qualityClass}">${qualityLabel}</span>
+            </td>
+            <td class="col-reason">${reasonText}</td>
         `;
         
-        // 点击显示详情
-        timelineItem.onclick = () => showHistoryDetail(item);
+        // 点击行显示详情
+        row.onclick = () => showHistoryDetailModal(item);
+        row.style.cursor = 'pointer';
         
-        timeline.appendChild(timelineItem);
-    }
-    
-    // 更新折叠按钮
-    if (needCollapse) {
-        toggleDiv.style.display = 'block';
-        const hiddenCount = history.length - MAX_VISIBLE_HISTORY;
-        hiddenCountSpan.textContent = hiddenCount;
-        toggleBtn.textContent = historyExpanded 
-            ? '收起历史记录' 
-            : `展开更多历史记录 (${hiddenCount})`;
-    } else {
-        toggleDiv.style.display = 'none';
-    }
-}
-
-/**
- * 切换历史记录展开/收起
- */
-function toggleHistoryExpand() {
-    historyExpanded = !historyExpanded;
-    // 重新获取历史数据并更新显示
-    fetchHistory(currentSymbol).then(history => {
-        updateHistoryTimeline(history);
+        tbody.appendChild(row);
     });
 }
 
 /**
- * 显示历史决策详情（简单弹窗）
+ * 格式化reason tags为可读文本
  */
-function showHistoryDetail(item) {
-    const tags = item.reason_tags.map(tag => {
+function formatReasonTags(tags) {
+    if (!tags || tags.length === 0) {
+        return '<span class="text-muted">无</span>';
+    }
+    
+    const tagTexts = tags.slice(0, 3).map(tag => {
         const tagData = reasonTagExplanations[tag];
-        return tagData ? tagData.explanation : tag;
-    }).join(', ');
+        if (tagData) {
+            return `<span class="reason-badge reason-${tagData.category}" title="${tag}">${tagData.explanation}</span>`;
+        }
+        return `<span class="reason-badge" title="${tag}">${tag}</span>`;
+    });
+    
+    if (tags.length > 3) {
+        tagTexts.push(`<span class="text-muted">+${tags.length - 3}个</span>`);
+    }
+    
+    return tagTexts.join(' ');
+}
+
+/**
+ * 显示历史记录详情（模态框）
+ */
+function showHistoryDetailModal(item) {
+    const allTags = item.reason_tags.map(tag => {
+        const tagData = reasonTagExplanations[tag];
+        return tagData ? `• ${tagData.explanation} (${tag})` : `• ${tag}`;
+    }).join('\n');
+    
+    const execPermission = {
+        'allow': '正常执行',
+        'allow_reduced': '降级执行',
+        'deny': '拒绝执行'
+    }[item.execution_permission] || item.execution_permission;
     
     const detail = `
+📊 决策详情
+
+时间: ${new Date(item.timestamp).toLocaleString('zh-CN')}
+
+【核心决策】
 决策: ${item.decision.toUpperCase()}
 置信度: ${item.confidence.toUpperCase()}
+可执行: ${item.executable ? '是' : '否'}
+执行许可: ${execPermission}
+
+【市场状态】
 市场环境: ${item.market_regime.toUpperCase()}
-决策依据: ${tags || '无'}
-时间: ${new Date(item.timestamp).toLocaleString('zh-CN')}
-    `;
+系统状态: ${item.system_state || 'N/A'}
+风险准入: ${item.risk_exposure_allowed ? '通过' : '拒绝'}
+交易质量: ${item.trade_quality.toUpperCase()}
+
+【决策依据】
+${allTags || '无'}
+    `.trim();
     
     alert(detail);
+}
+
+/**
+ * 更新统计信息
+ */
+function updateHistoryStats(data) {
+    const stats = {
+        total: data.length,
+        long: 0,
+        short: 0,
+        no_trade: 0,
+        executable: 0
+    };
+    
+    data.forEach(item => {
+        if (item.decision === 'long') stats.long++;
+        else if (item.decision === 'short') stats.short++;
+        else stats.no_trade++;
+        
+        if (item.executable) stats.executable++;
+    });
+    
+    document.getElementById('statTotal').textContent = stats.total;
+    document.getElementById('statLong').textContent = stats.long;
+    document.getElementById('statShort').textContent = stats.short;
+    document.getElementById('statNoTrade').textContent = stats.no_trade;
+    document.getElementById('statExecutable').textContent = stats.executable;
+}
+
+// ==========================================
+// 分页控制
+// ==========================================
+
+/**
+ * 更新分页控件状态
+ */
+function updatePaginationControls() {
+    const totalItems = filteredHistoryData.length;
+    const startIndex = (currentPage - 1) * pageSize + 1;
+    const endIndex = Math.min(currentPage * pageSize, totalItems);
+    
+    document.getElementById('pageStart').textContent = totalItems > 0 ? startIndex : 0;
+    document.getElementById('pageEnd').textContent = endIndex;
+    document.getElementById('pageTotal').textContent = totalItems;
+    document.getElementById('currentPageInput').value = currentPage;
+    document.getElementById('totalPages').textContent = totalPages;
+    
+    // 启用/禁用按钮
+    document.getElementById('btnFirstPage').disabled = currentPage === 1;
+    document.getElementById('btnPrevPage').disabled = currentPage === 1;
+    document.getElementById('btnNextPage').disabled = currentPage === totalPages;
+    document.getElementById('btnLastPage').disabled = currentPage === totalPages;
+}
+
+/**
+ * 跳转到指定页
+ */
+function goToPage(page) {
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    renderCurrentPage();
+}
+
+/**
+ * 上一页
+ */
+function previousPage() {
+    if (currentPage > 1) {
+        currentPage--;
+        renderCurrentPage();
+    }
+}
+
+/**
+ * 下一页
+ */
+function nextPage() {
+    if (currentPage < totalPages) {
+        currentPage++;
+        renderCurrentPage();
+    }
+}
+
+/**
+ * 跳转到末页
+ */
+function goToLastPage() {
+    currentPage = totalPages;
+    renderCurrentPage();
+}
+
+/**
+ * 从输入框跳转
+ */
+function goToPageInput() {
+    const input = document.getElementById('currentPageInput');
+    const page = parseInt(input.value);
+    
+    if (isNaN(page) || page < 1 || page > totalPages) {
+        input.value = currentPage;
+        return;
+    }
+    
+    goToPage(page);
+}
+
+/**
+ * 改变每页显示数量
+ */
+function changePageSize() {
+    pageSize = parseInt(document.getElementById('pageSizeSelect').value) || 20;
+    currentPage = 1;
+    totalPages = Math.ceil(filteredHistoryData.length / pageSize);
+    renderCurrentPage();
 }
 
 /**

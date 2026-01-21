@@ -354,9 +354,15 @@ class L1AdvisoryEngine:
         Returns:
             (是否有效, 规范化后的数据, 失败原因tag)
         """
+        # P0-BugFix-4: 添加 6h 变化率字段到必填列表
+        # price_change_6h 用于 TREND 市场环境识别
+        # oi_change_6h 用于拥挤风险检测
+        # 缺失这两个字段会导致相关逻辑静默失败（默认为0）
         required_fields = [
-            'price', 'price_change_1h', 'volume_1h', 'volume_24h',
-            'buy_sell_imbalance', 'funding_rate', 'oi_change_1h'
+            'price', 'price_change_1h', 'price_change_6h',
+            'volume_1h', 'volume_24h',
+            'buy_sell_imbalance', 'funding_rate', 
+            'oi_change_1h', 'oi_change_6h'
         ]
         
         # 检查必需字段
