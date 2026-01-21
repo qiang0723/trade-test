@@ -175,8 +175,12 @@ class L1AdvisoryEngine:
         })
         
         # ===== Step 2: 市场环境识别 =====
-        regime = self._detect_market_regime(data)
+        regime, regime_tags = self._detect_market_regime(data)
+        reason_tags.extend(regime_tags)  # ✅ 添加市场环境标签（如SHORT_TERM_TREND）
+        
         logger.info(f"[{symbol}] Market regime: {regime.value}")
+        if regime_tags:
+            logger.info(f"[{symbol}] Regime tags: {[tag.value for tag in regime_tags]}")
         
         self.last_pipeline_steps.append({
             'step': 2, 'name': 'detect_regime', 'status': 'success',
@@ -224,8 +228,14 @@ class L1AdvisoryEngine:
             )
         
         # ===== Step 5: 方向评估（SHORT优先）=====
-        allow_short = self._eval_short_direction(data, regime)
-        allow_long = self._eval_long_direction(data, regime)
+        allow_short, short_tags = self._eval_short_direction(data, regime)
+        allow_long, long_tags = self._eval_long_direction(data, regime)
+        
+        # ✅ 添加方向评估产生的标签（包括短期信号标签）
+        if allow_short:
+            reason_tags.extend(short_tags)
+        if allow_long:
+            reason_tags.extend(long_tags)
         
         logger.info(f"[{symbol}] Direction: allow_short={allow_short}, allow_long={allow_long}")
         
@@ -418,38 +428,41 @@ class L1AdvisoryEngine:
     # Step 2: 市场环境识别
     # ========================================
     
-    def _detect_market_regime(self, data: Dict) -> MarketRegime:
+    def _detect_market_regime(self, data: Dict) -> Tuple[MarketRegime, List[ReasonTag]]:
         """
         识别市场环境：TREND（趋势）/ RANGE（震荡）/ EXTREME（极端）
         
         方案1+4组合：
         - 添加短期TREND判断（1小时 > 2%）
         - 为RANGE短期机会识别奠定基础
+        - 返回regime_tags以在前端展示
         
         Args:
             data: 市场数据
         
         Returns:
-            MarketRegime: 市场环境类型
+            (MarketRegime, 标识标签列表)
         """
         price_change_1h = abs(data.get('price_change_1h', 0))
         price_change_6h = abs(data.get('price_change_6h', 0))
+        regime_tags = []
         
         # 1. EXTREME: 极端波动（优先级最高）
         if price_change_1h > self.thresholds['extreme_price_change_1h']:
-            return MarketRegime.EXTREME
+            return MarketRegime.EXTREME, regime_tags
         
         # 2. TREND: 趋势市
         # 2.1 中期趋势（6小时）
         if price_change_6h > self.thresholds['trend_price_change_6h']:
-            return MarketRegime.TREND
+            return MarketRegime.TREND, regime_tags
         
         # 2.2 短期趋势（1小时）- 方案1: 捕获短期机会
         if price_change_1h > self.thresholds.get('short_term_trend_1h', 0.02):
-            return MarketRegime.TREND
+            regime_tags.append(ReasonTag.SHORT_TERM_TREND)  # ✅ 标识短期趋势
+            return MarketRegime.TREND, regime_tags
         
         # 3. RANGE: 震荡市（默认）
-        return MarketRegime.RANGE
+        return MarketRegime.RANGE, regime_tags
     
     # ========================================
     # Step 3: 风险准入评估（第一道闸门）
@@ -599,7 +612,7 @@ class L1AdvisoryEngine:
     # Step 5: 方向评估
     # ========================================
     
-    def _eval_long_direction(self, data: Dict, regime: MarketRegime) -> bool:
+    def _eval_long_direction(self, data: Dict, regime: MarketRegime) -> Tuple[bool, List[ReasonTag]]:
         """
         做多方向评估（方案1+4组合：短期机会识别）
         
@@ -608,50 +621,57 @@ class L1AdvisoryEngine:
             regime: 市场环境
         
         Returns:
-            bool: 是否允许做多
+            (是否允许做多, 标签列表)
         """
         imbalance = data.get('buy_sell_imbalance', 0)
         oi_change = data.get('oi_change_1h', 0)
         price_change = data.get('price_change_1h', 0)
+        direction_tags = []
         
         if regime == MarketRegime.TREND:
             # 趋势市：多方强势
             if (imbalance > self.thresholds['long_imbalance_trend'] and 
                 oi_change > self.thresholds['long_oi_change_trend'] and 
                 price_change > self.thresholds['long_price_change_trend']):
-                return True
+                return True, direction_tags
         
         elif regime == MarketRegime.RANGE:
             # 震荡市：原有强信号逻辑
             if (imbalance > self.thresholds['long_imbalance_range'] and 
                 oi_change > self.thresholds['long_oi_change_range']):
-                return True
+                return True, direction_tags
             
             # 方案4：短期机会识别（综合指标，3选2确认）
             short_term_config = self.config.get('direction', {}).get('range', {}).get('short_term_opportunity', {}).get('long', {})
             if short_term_config:
                 signals = []
+                signal_tags = []
                 
                 # 信号1: 价格短期上涨
                 if price_change > short_term_config.get('min_price_change_1h', 0.015):
                     signals.append('price_surge')
+                    signal_tags.append(ReasonTag.SHORT_TERM_PRICE_SURGE)
                 
                 # 信号2: OI增长
                 if oi_change > short_term_config.get('min_oi_change_1h', 0.15):
                     signals.append('oi_growing')
+                    # oi_growing标签在辅助信息中已有
                 
                 # 信号3: 强买压
                 if imbalance > short_term_config.get('min_buy_sell_imbalance', 0.65):
                     signals.append('strong_buy_pressure')
+                    signal_tags.append(ReasonTag.SHORT_TERM_STRONG_BUY)
                 
                 # 至少满足required_signals个信号
                 required = short_term_config.get('required_signals', 2)
                 if len(signals) >= required:
-                    return True
+                    direction_tags.append(ReasonTag.RANGE_SHORT_TERM_LONG)  # ✅ 主标签
+                    direction_tags.extend(signal_tags)  # ✅ 具体信号
+                    return True, direction_tags
         
-        return False
+        return False, direction_tags
     
-    def _eval_short_direction(self, data: Dict, regime: MarketRegime) -> bool:
+    def _eval_short_direction(self, data: Dict, regime: MarketRegime) -> Tuple[bool, List[ReasonTag]]:
         """
         做空方向评估（方案1+4组合：短期机会识别）
         
@@ -660,48 +680,55 @@ class L1AdvisoryEngine:
             regime: 市场环境
         
         Returns:
-            bool: 是否允许做空
+            (是否允许做空, 标签列表)
         """
         imbalance = data.get('buy_sell_imbalance', 0)
         oi_change = data.get('oi_change_1h', 0)
         price_change = data.get('price_change_1h', 0)
+        direction_tags = []
         
         if regime == MarketRegime.TREND:
             # 趋势市：空方强势
             if (imbalance < -self.thresholds['short_imbalance_trend'] and 
                 oi_change > self.thresholds['short_oi_change_trend'] and 
                 price_change < -self.thresholds['short_price_change_trend']):
-                return True
+                return True, direction_tags
         
         elif regime == MarketRegime.RANGE:
             # 震荡市：原有强信号逻辑
             if (imbalance < -self.thresholds['short_imbalance_range'] and 
                 oi_change > self.thresholds['short_oi_change_range']):
-                return True
+                return True, direction_tags
             
             # 方案4：短期机会识别（综合指标，3选2确认）
             short_term_config = self.config.get('direction', {}).get('range', {}).get('short_term_opportunity', {}).get('short', {})
             if short_term_config:
                 signals = []
+                signal_tags = []
                 
                 # 信号1: 价格短期下跌
                 if price_change < short_term_config.get('max_price_change_1h', -0.015):
                     signals.append('price_drop')
+                    signal_tags.append(ReasonTag.SHORT_TERM_PRICE_SURGE)  # 使用price_surge，值为负
                 
                 # 信号2: OI增长
                 if oi_change > short_term_config.get('min_oi_change_1h', 0.15):
                     signals.append('oi_growing')
+                    # oi_growing标签在辅助信息中已有
                 
                 # 信号3: 强卖压
                 if imbalance < short_term_config.get('max_buy_sell_imbalance', -0.65):
                     signals.append('strong_sell_pressure')
+                    signal_tags.append(ReasonTag.SHORT_TERM_STRONG_SELL)
                 
                 # 至少满足required_signals个信号
                 required = short_term_config.get('required_signals', 2)
                 if len(signals) >= required:
-                    return True
+                    direction_tags.append(ReasonTag.RANGE_SHORT_TERM_SHORT)  # ✅ 主标签
+                    direction_tags.extend(signal_tags)  # ✅ 具体信号
+                    return True, direction_tags
         
-        return False
+        return False, direction_tags
     
     # ========================================
     # Step 6: 决策优先级

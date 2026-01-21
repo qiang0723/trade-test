@@ -55,6 +55,14 @@ class ReasonTag(Enum):
     STRONG_SELL_PRESSURE = "strong_sell_pressure"
     OI_GROWING = "oi_growing"
     OI_DECLINING = "oi_declining"
+    
+    # ===== 短期机会识别类（v3.2新增）=====
+    SHORT_TERM_TREND = "short_term_trend"                # 短期趋势（1h>2%）
+    RANGE_SHORT_TERM_LONG = "range_short_term_long"      # RANGE短期做多机会
+    RANGE_SHORT_TERM_SHORT = "range_short_term_short"    # RANGE短期做空机会
+    SHORT_TERM_PRICE_SURGE = "short_term_price_surge"    # 短期价格爆发
+    SHORT_TERM_STRONG_BUY = "short_term_strong_buy"      # 短期强买压
+    SHORT_TERM_STRONG_SELL = "short_term_strong_sell"    # 短期强卖压
 
 
 # 中文解释映射
@@ -90,6 +98,14 @@ REASON_TAG_EXPLANATIONS = {
     "strong_sell_pressure": "🔴 强卖压：检测到强烈的卖方力量",
     "oi_growing": "📈 持仓增长：持仓量持续增长",
     "oi_declining": "📉 持仓下降：持仓量持续下降",
+    
+    # 短期机会识别类（v3.2新增）
+    "short_term_trend": "⚡ 短期趋势：1小时快速走势（>2%），捕获短期机会",
+    "range_short_term_long": "🎯 震荡短期做多：综合信号强势做多机会（3选2确认）",
+    "range_short_term_short": "🎯 震荡短期做空：综合信号强势做空机会（3选2确认）",
+    "short_term_price_surge": "💨 短期价格爆发：1小时涨幅>1.5%",
+    "short_term_strong_buy": "🔥 短期强买压：买卖失衡>65%",
+    "short_term_strong_sell": "🔥 短期强卖压：买卖失衡<-65%",
 }
 
 
