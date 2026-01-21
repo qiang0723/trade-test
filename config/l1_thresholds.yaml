@@ -43,6 +43,7 @@ decision_control:
 market_regime:
   extreme_price_change_1h: 0.05   # 1小时价格变化 > 5% → EXTREME（小数格式：0.05=5%）
   trend_price_change_6h: 0.03     # 6小时价格变化 > 3% → TREND（小数格式：0.03=3%）
+  short_term_trend_1h: 0.02       # 1小时价格变化 > 2% → 短期TREND（新增，捕获短期机会）
 
 # ==================
 # 风险准入阈值
@@ -109,6 +110,19 @@ direction:
     short:
       imbalance: 0.7              # 更高的失衡要求（-1到1范围）
       oi_change: 0.10             # 更高的OI增长要求（小数格式：0.10=10%）
+    
+    # 短期机会识别（方案4：综合指标）
+    short_term_opportunity:
+      long:
+        min_price_change_1h: 0.015      # 1小时涨幅 > 1.5%
+        min_oi_change_1h: 0.15          # OI增长 > 15%
+        min_buy_sell_imbalance: 0.65    # 买压 > 65%
+        required_signals: 2             # 至少满足2个信号（3选2）
+      short:
+        max_price_change_1h: -0.015     # 1小时跌幅 < -1.5%
+        min_oi_change_1h: 0.15          # OI增长 > 15%
+        max_buy_sell_imbalance: -0.65   # 卖压 < -65%
+        required_signals: 2             # 至少满足2个信号（3选2）
 
 # ==================
 # 置信度配置（PR-D混合模式）

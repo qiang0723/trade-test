@@ -422,6 +422,10 @@ class L1AdvisoryEngine:
         """
         识别市场环境：TREND（趋势）/ RANGE（震荡）/ EXTREME（极端）
         
+        方案1+4组合：
+        - 添加短期TREND判断（1小时 > 2%）
+        - 为RANGE短期机会识别奠定基础
+        
         Args:
             data: 市场数据
         
@@ -431,15 +435,20 @@ class L1AdvisoryEngine:
         price_change_1h = abs(data.get('price_change_1h', 0))
         price_change_6h = abs(data.get('price_change_6h', 0))
         
-        # EXTREME: 极端波动
+        # 1. EXTREME: 极端波动（优先级最高）
         if price_change_1h > self.thresholds['extreme_price_change_1h']:
             return MarketRegime.EXTREME
         
-        # TREND: 趋势市（持续单边）
+        # 2. TREND: 趋势市
+        # 2.1 中期趋势（6小时）
         if price_change_6h > self.thresholds['trend_price_change_6h']:
             return MarketRegime.TREND
         
-        # RANGE: 震荡市（默认）
+        # 2.2 短期趋势（1小时）- 方案1: 捕获短期机会
+        if price_change_1h > self.thresholds.get('short_term_trend_1h', 0.02):
+            return MarketRegime.TREND
+        
+        # 3. RANGE: 震荡市（默认）
         return MarketRegime.RANGE
     
     # ========================================
@@ -592,7 +601,7 @@ class L1AdvisoryEngine:
     
     def _eval_long_direction(self, data: Dict, regime: MarketRegime) -> bool:
         """
-        做多方向评估（资金费率不再作为主要触发条件）
+        做多方向评估（方案1+4组合：短期机会识别）
         
         Args:
             data: 市场数据
@@ -613,16 +622,38 @@ class L1AdvisoryEngine:
                 return True
         
         elif regime == MarketRegime.RANGE:
-            # 震荡市：需要更强信号
+            # 震荡市：原有强信号逻辑
             if (imbalance > self.thresholds['long_imbalance_range'] and 
                 oi_change > self.thresholds['long_oi_change_range']):
                 return True
+            
+            # 方案4：短期机会识别（综合指标，3选2确认）
+            short_term_config = self.config.get('direction', {}).get('range', {}).get('short_term_opportunity', {}).get('long', {})
+            if short_term_config:
+                signals = []
+                
+                # 信号1: 价格短期上涨
+                if price_change > short_term_config.get('min_price_change_1h', 0.015):
+                    signals.append('price_surge')
+                
+                # 信号2: OI增长
+                if oi_change > short_term_config.get('min_oi_change_1h', 0.15):
+                    signals.append('oi_growing')
+                
+                # 信号3: 强买压
+                if imbalance > short_term_config.get('min_buy_sell_imbalance', 0.65):
+                    signals.append('strong_buy_pressure')
+                
+                # 至少满足required_signals个信号
+                required = short_term_config.get('required_signals', 2)
+                if len(signals) >= required:
+                    return True
         
         return False
     
     def _eval_short_direction(self, data: Dict, regime: MarketRegime) -> bool:
         """
-        做空方向评估（资金费率不再作为主要触发条件）
+        做空方向评估（方案1+4组合：短期机会识别）
         
         Args:
             data: 市场数据
@@ -643,10 +674,32 @@ class L1AdvisoryEngine:
                 return True
         
         elif regime == MarketRegime.RANGE:
-            # 震荡市：需要更强信号
+            # 震荡市：原有强信号逻辑
             if (imbalance < -self.thresholds['short_imbalance_range'] and 
                 oi_change > self.thresholds['short_oi_change_range']):
                 return True
+            
+            # 方案4：短期机会识别（综合指标，3选2确认）
+            short_term_config = self.config.get('direction', {}).get('range', {}).get('short_term_opportunity', {}).get('short', {})
+            if short_term_config:
+                signals = []
+                
+                # 信号1: 价格短期下跌
+                if price_change < short_term_config.get('max_price_change_1h', -0.015):
+                    signals.append('price_drop')
+                
+                # 信号2: OI增长
+                if oi_change > short_term_config.get('min_oi_change_1h', 0.15):
+                    signals.append('oi_growing')
+                
+                # 信号3: 强卖压
+                if imbalance < short_term_config.get('max_buy_sell_imbalance', -0.65):
+                    signals.append('strong_sell_pressure')
+                
+                # 至少满足required_signals个信号
+                required = short_term_config.get('required_signals', 2)
+                if len(signals) >= required:
+                    return True
         
         return False
     
