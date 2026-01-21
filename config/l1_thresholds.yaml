@@ -218,3 +218,74 @@ auxiliary_tags:
   
   # 资金费率阈值（辅助信息标签）
   funding_rate_threshold: 0.0005  # 费率绝对值 > 0.05% → HIGH/LOW_FUNDING_RATE
+
+# ==================
+# PR-005: 多周期三层触发（1h/15m/5m）
+# ==================
+multi_tf:
+  # 功能开关
+  enabled: true
+  
+  # Layer 1: Context（1小时方向偏置）
+  context_1h:
+    # LONG方向Context
+    long:
+      min_price_change: 0.01      # 1h涨幅 > 1%
+      min_taker_imbalance: 0.40   # taker失衡 > 40%
+      min_oi_change: 0.05         # OI增长 > 5%
+      required_signals: 2         # 3选2
+    
+    # SHORT方向Context
+    short:
+      max_price_change: -0.01     # 1h跌幅 < -1%
+      max_taker_imbalance: -0.40  # taker失衡 < -40%
+      min_oi_change: 0.05         # OI增长 > 5%
+      required_signals: 2         # 3选2
+  
+  # Layer 2: Confirm（15分钟确认，4选2）
+  confirm_15m:
+    # LONG方向Confirm
+    long:
+      min_price_change: 0.005     # 15m涨幅 > 0.5%
+      min_taker_imbalance: 0.50   # taker失衡 > 50%
+      min_volume_ratio: 1.5       # 放量比率 > 1.5x
+      min_oi_change: 0.03         # OI增长 > 3%
+      required_confirmed: 2       # 4选2确认
+      required_partial: 1         # 至少1个为部分
+    
+    # SHORT方向Confirm
+    short:
+      max_price_change: -0.005    # 15m跌幅 < -0.5%
+      max_taker_imbalance: -0.50  # taker失衡 < -50%
+      min_volume_ratio: 1.5       # 放量比率 > 1.5x
+      min_oi_change: 0.03         # OI增长 > 3%
+      required_confirmed: 2       # 4选2确认
+      required_partial: 1         # 至少1个为部分
+  
+  # Layer 3: Trigger（5分钟触发，3选2）
+  trigger_5m:
+    # LONG方向Trigger
+    long:
+      min_price_change: 0.002     # 5m涨幅 > 0.2%
+      min_taker_imbalance: 0.60   # taker失衡 > 60%
+      min_volume_ratio: 2.0       # 放量比率 > 2.0x
+      required_signals: 2         # 3选2触发
+    
+    # SHORT方向Trigger
+    short:
+      max_price_change: -0.002    # 5m跌幅 < -0.2%
+      max_taker_imbalance: -0.60  # taker失衡 < -60%
+      min_volume_ratio: 2.0       # 放量比率 > 2.0x
+      required_signals: 2         # 3选2触发
+  
+  # 绑定策略
+  binding_policy:
+    # 短期机会是否要求CONFIRMED
+    short_term_opportunity_requires_confirmed: true
+    
+    # PARTIAL的处理
+    partial_action: "degrade"     # degrade/allow/deny
+    
+    # FAILED的处理
+    failed_short_term_action: "cancel"    # 短期机会取消
+    failed_long_term_action: "degrade"    # 长期信号降级保留
