@@ -62,6 +62,13 @@ class MetricsNormalizer:
         metadata = data.get('_metadata', {})
         input_format = metadata.get('percentage_format', 'percent_point')  # 默认 percent_point（向后兼容）
         
+        # PR-M 建议A：上游注入点唯一性检查
+        if not metadata:
+            logger.warning(
+                "数据缺失 _metadata 标注，使用默认格式 'percent_point'。"
+                "建议：确保数据源层（MarketDataCache）正确注入元数据。"
+            )
+        
         # 验证格式声明
         if input_format not in ['percent_point', 'decimal']:
             error_msg = f"未知的百分比格式声明: {input_format}（应为 'percent_point' 或 'decimal'）"

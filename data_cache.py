@@ -300,12 +300,27 @@ class MarketDataCache:
         """
         基于当前数据和历史缓存，生成增强的市场数据（包含所有L1需要的字段）
         
+        ⚠️  重要规范（PR-M 建议A）：
+        ====================================
+        本方法是系统中 **唯一** 注入 _metadata 的地方！
+        
+        职责边界：
+        - MarketDataCache：负责计算百分比变化率，并标注输出格式（percent_point）
+        - BinanceDataFetcher：只负责调用API和调用cache，不注入元数据
+        - L1Engine：只负责消费数据，不修改元数据
+        
+        如果需要支持新的数据源：
+        1. 新数据源必须通过 MarketDataCache 或等价的"格式标注层"
+        2. 禁止在业务逻辑层（L1Engine）注入或修改_metadata
+        3. 保持"数据源层注入、业务层消费"的清晰边界
+        ====================================
+        
         Args:
             symbol: 币种符号
             current_data: 当前tick数据（来自Binance API）
         
         Returns:
-            增强的市场数据字典（包含price_change_1h等计算字段）
+            增强的市场数据字典（包含price_change_1h等计算字段 + _metadata）
         """
         # 先存储当前数据
         self.store_tick(symbol, current_data)
