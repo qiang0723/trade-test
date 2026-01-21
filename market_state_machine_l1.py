@@ -1110,6 +1110,22 @@ class L1AdvisoryEngine:
             logger.debug(f"[ExecPerm] DENY: FLIP_COOLDOWN_BLOCK (PR-004频控)")
             return ExecutionPermission.DENY
         
+        # PR-007优先级0.5: EXTREME_VOLUME联立否决检查
+        # EXTREME_VOLUME单独出现时只是DEGRADE
+        # 但与LIQUIDATION_PHASE或EXTREME_REGIME联立时升级为DENY
+        if ReasonTag.EXTREME_VOLUME in reason_tags:
+            has_liquidation = ReasonTag.LIQUIDATION_PHASE in reason_tags
+            has_extreme_regime = ReasonTag.EXTREME_REGIME in reason_tags
+            
+            if has_liquidation or has_extreme_regime:
+                logger.debug(
+                    f"[ExecPerm] DENY: EXTREME_VOLUME + "
+                    f"{'LIQUIDATION_PHASE' if has_liquidation else 'EXTREME_REGIME'} "
+                    f"(PR-007联立否决)"
+                )
+                return ExecutionPermission.DENY
+            # else: EXTREME_VOLUME单独，继续后续检查（会被映射为DEGRADE）
+        
         # 优先级1: 检查是否有 BLOCK 级别标签
         for tag in reason_tags:
             exec_level = REASON_TAG_EXECUTABILITY.get(tag, ExecutabilityLevel.ALLOW)

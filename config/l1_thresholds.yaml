@@ -178,12 +178,13 @@ reason_tag_rules:
   reduce_tags:
     - noisy_market
     - weak_signal_in_range
+    - extreme_volume  # PR-007: 单独时降级（联立时仍DENY）
   
   # 否决标签（强制LOW）
   deny_tags:
     - liquidation_phase
     - crowding_risk
-    - extreme_volume
+    # extreme_volume已移至reduce_tags（PR-007）
     - data_stale
     - extreme_regime
     - absorption_risk

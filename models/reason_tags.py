@@ -137,7 +137,7 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.EXTREME_REGIME: ExecutabilityLevel.BLOCK,
     ReasonTag.LIQUIDATION_PHASE: ExecutabilityLevel.BLOCK,
     ReasonTag.CROWDING_RISK: ExecutabilityLevel.BLOCK,
-    ReasonTag.EXTREME_VOLUME: ExecutabilityLevel.BLOCK,
+    ReasonTag.EXTREME_VOLUME: ExecutabilityLevel.DEGRADE,  # PR-007: 改为DEGRADE，联立时才DENY
     
     # 质量否决类 - POOR阻断，UNCERTAIN降级
     # 注意：ABSORPTION_RISK 和 ROTATION_RISK 被设置为 BLOCK（更保守，等价于风险否决类）
