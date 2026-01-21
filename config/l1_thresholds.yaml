@@ -12,6 +12,7 @@ symbol_universe:
     - HANA   # HANA
     - BTR    # BTR
     - GPS    # GPS
+    - RIVER  # RIVER
   
   # 默认币种（前端初始化）
   default_symbol: TA
