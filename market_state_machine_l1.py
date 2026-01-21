@@ -314,7 +314,7 @@ class L1AdvisoryEngine:
         
         result_timestamp = datetime.now()
         
-        # ===== Step 10: 构造结果 =====
+        # ===== Step 10: 构造结果（PR-004: 包含signal_decision）=====
         result = AdvisoryResult(
             decision=decision,
             confidence=confidence,
@@ -325,7 +325,8 @@ class L1AdvisoryEngine:
             reason_tags=reason_tags,
             timestamp=result_timestamp,
             execution_permission=execution_permission,  # 方案D新增
-            executable=False  # 先初始化为False
+            executable=False,  # 先初始化为False
+            signal_decision=signal_decision  # PR-004: 原始信号方向（频控前）
         )
         
         # 计算executable标志位（方案D双门槛）
@@ -1065,12 +1066,15 @@ class L1AdvisoryEngine:
     
     def _compute_execution_permission(self, reason_tags: List[ReasonTag]) -> 'ExecutionPermission':
         """
-        计算执行许可级别（方案D：三级执行许可）
+        计算执行许可级别（PR-004增强：频控标签映射为DENY）
         
         映射规则：
-        1. 任何 BLOCK 级别标签 → DENY（拒绝执行）
-        2. 任何 DEGRADE 级别标签 → ALLOW_REDUCED（降级执行，使用更严格门槛）
-        3. 仅 ALLOW 级别标签 → ALLOW（正常执行）
+        1. 频控标签（PR-004新增）→ DENY
+           - MIN_INTERVAL_BLOCK
+           - FLIP_COOLDOWN_BLOCK
+        2. 任何 BLOCK 级别标签 → DENY（拒绝执行）
+        3. 任何 DEGRADE 级别标签 → ALLOW_REDUCED（降级执行）
+        4. 仅 ALLOW 级别标签 → ALLOW（正常执行）
         
         ExecutabilityLevel → ExecutionPermission 映射：
         - BLOCK (EXTREME_VOLUME, ABSORPTION_RISK, ROTATION_RISK, ...) → DENY
@@ -1083,6 +1087,11 @@ class L1AdvisoryEngine:
         - 双重保护：POOR硬短路 + BLOCK标签 → 即使强信号也无法绕过
         - 执行顺序保证：Step 8（执行许可）在 Step 9（置信度+强信号boost）之前
         
+        PR-004改进：
+        - 频控标签在最高优先级检查（优先于BLOCK标签）
+        - 确保频控触发时execution_permission=DENY
+        - 配合signal_decision实现信号透明化
+        
         Args:
             reason_tags: 原因标签列表
         
@@ -1092,7 +1101,16 @@ class L1AdvisoryEngine:
         from models.reason_tags import REASON_TAG_EXECUTABILITY, ExecutabilityLevel
         from models.enums import ExecutionPermission
         
-        # 优先级1: 检查是否有 BLOCK 级别标签（最高优先级）
+        # PR-004优先级0: 频控标签（最高优先级，确保阻断）
+        if ReasonTag.MIN_INTERVAL_BLOCK in reason_tags:
+            logger.debug(f"[ExecPerm] DENY: MIN_INTERVAL_BLOCK (PR-004频控)")
+            return ExecutionPermission.DENY
+        
+        if ReasonTag.FLIP_COOLDOWN_BLOCK in reason_tags:
+            logger.debug(f"[ExecPerm] DENY: FLIP_COOLDOWN_BLOCK (PR-004频控)")
+            return ExecutionPermission.DENY
+        
+        # 优先级1: 检查是否有 BLOCK 级别标签
         for tag in reason_tags:
             exec_level = REASON_TAG_EXECUTABILITY.get(tag, ExecutabilityLevel.ALLOW)
             
@@ -1276,7 +1294,8 @@ class L1AdvisoryEngine:
             reason_tags=reason_tags,
             timestamp=datetime.now(),
             execution_permission=ExecutionPermission.DENY,  # NO_TRADE → DENY
-            executable=False
+            executable=False,
+            signal_decision=None  # PR-004: NO_TRADE场景无原始信号
         )
         # NO_TRADE的executable永远是False，无需重新计算
         return result
