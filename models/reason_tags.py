@@ -64,6 +64,12 @@ class ReasonTag(Enum):
     SHORT_TERM_PRICE_SURGE = "short_term_price_surge"    # 短期价格爆发
     SHORT_TERM_STRONG_BUY = "short_term_strong_buy"      # 短期强买压
     SHORT_TERM_STRONG_SELL = "short_term_strong_sell"    # 短期强卖压
+    
+    # ===== 三层触发状态类（PR-005新增）=====
+    LTF_CONFIRMED = "ltf_confirmed"                      # 低时间框架确认（1h+15m+5m）
+    LTF_PARTIAL_CONFIRM = "ltf_partial_confirm"          # 部分确认（Confirm弱）
+    LTF_FAILED_CONFIRM = "ltf_failed_confirm"            # 确认失败
+    LTF_CONTEXT_DENIED = "ltf_context_denied"            # Context层不允许该方向
 
 
 # 中文解释映射
@@ -108,6 +114,12 @@ REASON_TAG_EXPLANATIONS = {
     "short_term_price_surge": "💨 短期价格爆发：1小时涨幅>1.5%",
     "short_term_strong_buy": "🔥 短期强买压：买卖失衡>65%",
     "short_term_strong_sell": "🔥 短期强卖压：买卖失衡<-65%",
+    
+    # 三层触发状态类（PR-005新增）
+    "ltf_confirmed": "✅ 三层确认：1h方向+15m确认+5m触发全部满足（高质量信号）",
+    "ltf_partial_confirm": "⚠️ 部分确认：Context满足但Confirm信号较弱（降级执行）",
+    "ltf_failed_confirm": "❌ 确认失败：Context满足但15m/5m信号不足（短期机会取消）",
+    "ltf_context_denied": "🚫 Context拒绝：1h方向与信号不符（方向冲突）",
 }
 
 

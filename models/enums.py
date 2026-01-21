@@ -65,3 +65,21 @@ class ExecutionPermission(Enum):
     ALLOW = "allow"                    # 正常执行
     ALLOW_REDUCED = "allow_reduced"    # 降级执行（更严格门槛）
     DENY = "deny"                      # 拒绝执行
+
+
+class LTFStatus(Enum):
+    """
+    低时间框架（LTF）多周期触发状态（PR-005）
+    
+    三层触发（1h Context → 15m Confirm → 5m Trigger）的综合状态：
+    - CONFIRMED: 三层全部满足，高质量信号
+    - PARTIAL: Context满足，Confirm部分满足，降级执行
+    - FAILED: Context满足，但Confirm或Trigger失败
+    - MISSING: 数据不完整（klines历史不足）
+    - NOT_APPLICABLE: Context层方向不允许
+    """
+    CONFIRMED = "confirmed"              # 全部确认
+    PARTIAL = "partial"                  # 部分确认（降级）
+    FAILED = "failed"                    # 确认失败
+    MISSING = "missing"                  # 数据缺失
+    NOT_APPLICABLE = "not_applicable"    # Context不允许
