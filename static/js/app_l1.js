@@ -20,6 +20,7 @@ let refreshCountdown = 60;
 let reasonTagExplanations = {};
 let availableSymbols = []; // 可用币种列表
 let allDecisions = {};  // 所有币种的决策缓存
+let expandedSymbols = new Set();  // 已展开的币种
 
 // 历史记录列表分页状态
 let allHistoryData = []; // 所有历史数据
@@ -245,48 +246,195 @@ function updateAllDecisionsPanel(decisions) {
             </div>
         `;
         
-        // 点击查看详情
-        card.onclick = () => showSymbolDetail(symbol, advisory);
+        // 设置卡片ID
+        card.id = `card-${symbol}`;
+        
+        // 点击展开/折叠详情
+        card.onclick = () => toggleSymbolDetail(symbol, advisory);
         
         grid.appendChild(card);
+        
+        // 如果该币种已展开，重新显示详情
+        if (expandedSymbols.has(symbol)) {
+            const detailDiv = createSymbolDetailDiv(symbol, advisory);
+            grid.appendChild(detailDiv);
+        }
     }
 }
 
 /**
- * 显示币种决策详情
+ * 切换币种详情展开/折叠
  */
-function showSymbolDetail(symbol, advisory) {
-    const tags = advisory.reason_tags.map(tag => {
-        const tagData = reasonTagExplanations[tag];
-        return tagData ? tagData.explanation : tag;
-    }).join('\n• ');
+function toggleSymbolDetail(symbol, advisory) {
+    const detailId = `detail-${symbol}`;
+    const existingDetail = document.getElementById(detailId);
     
+    if (existingDetail) {
+        // 已展开，折叠
+        existingDetail.remove();
+        expandedSymbols.delete(symbol);
+        document.getElementById(`card-${symbol}`).classList.remove('expanded');
+    } else {
+        // 未展开，展开
+        const detailDiv = createSymbolDetailDiv(symbol, advisory);
+        
+        // 插入到卡片后面
+        const card = document.getElementById(`card-${symbol}`);
+        const grid = document.getElementById('decisionsGrid');
+        
+        // 找到卡片在grid中的位置
+        const cardIndex = Array.from(grid.children).indexOf(card);
+        
+        // 插入到卡片后面
+        if (cardIndex < grid.children.length - 1) {
+            grid.insertBefore(detailDiv, grid.children[cardIndex + 1]);
+        } else {
+            grid.appendChild(detailDiv);
+        }
+        
+        expandedSymbols.add(symbol);
+        card.classList.add('expanded');
+        
+        // 加载管道数据
+        loadPipelineForSymbol(symbol);
+    }
+}
+
+/**
+ * 创建币种详情区域
+ */
+function createSymbolDetailDiv(symbol, advisory) {
+    const detailDiv = document.createElement('div');
+    detailDiv.className = 'symbol-detail';
+    detailDiv.id = `detail-${symbol}`;
+    
+    const { 
+        decision, confidence, executable, execution_permission,
+        market_regime, system_state, risk_exposure_allowed, trade_quality,
+        reason_tags, timestamp 
+    } = advisory;
+    
+    // 格式化标签
+    const tagsHtml = reason_tags.map(tag => {
+        const tagData = reasonTagExplanations[tag];
+        const explanation = tagData ? tagData.explanation : tag;
+        const category = tagData ? tagData.category : 'info';
+        return `<span class="reason-tag ${category}" title="${tag}">${explanation}</span>`;
+    }).join('');
+    
+    // 执行许可标签
     const execPermLabel = {
         'allow': '正常执行',
         'allow_reduced': '降级执行',
         'deny': '拒绝执行'
-    }[advisory.execution_permission] || advisory.execution_permission;
+    }[execution_permission] || execution_permission;
     
-    alert(`
-📊 ${symbol} 决策详情
+    const execPermClass = {
+        'allow': 'success',
+        'allow_reduced': 'warning',
+        'deny': 'danger'
+    }[execution_permission] || 'neutral';
+    
+    detailDiv.innerHTML = `
+        <div class="detail-header">
+            <h3>📊 ${symbol} 决策详情</h3>
+            <button class="detail-close" onclick="toggleSymbolDetail('${symbol}', allDecisions['${symbol}'])">✕ 关闭</button>
+        </div>
+        
+        <div class="detail-body">
+            <!-- 安全闸门 -->
+            <div class="detail-section">
+                <h4>🛡️ 安全闸门状态</h4>
+                <div class="gates-mini">
+                    <div class="gate-mini ${risk_exposure_allowed ? 'success' : 'danger'}">
+                        <span class="gate-label">风险准入</span>
+                        <span class="gate-value">${risk_exposure_allowed ? '✓ 通过' : '✗ 拒绝'}</span>
+                    </div>
+                    <div class="gate-mini">
+                        <span class="gate-label">交易质量</span>
+                        <span class="gate-value">${trade_quality.toUpperCase()}</span>
+                    </div>
+                    <div class="gate-mini">
+                        <span class="gate-label">市场环境</span>
+                        <span class="gate-value">${market_regime.toUpperCase()}</span>
+                    </div>
+                    <div class="gate-mini">
+                        <span class="gate-label">系统状态</span>
+                        <span class="gate-value">${system_state || 'N/A'}</span>
+                    </div>
+                    <div class="gate-mini ${execPermClass}">
+                        <span class="gate-label">执行许可</span>
+                        <span class="gate-value">${execPermLabel}</span>
+                    </div>
+                    <div class="gate-mini ${executable ? 'success' : 'danger'}">
+                        <span class="gate-label">L3执行</span>
+                        <span class="gate-value">${executable ? '✓ 可执行' : '✗ 不可执行'}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 决策依据 -->
+            <div class="detail-section">
+                <h4>📋 决策依据</h4>
+                <div class="reason-tags-mini">
+                    ${tagsHtml || '<span class="text-muted">无</span>'}
+                </div>
+            </div>
+            
+            <!-- 决策管道 -->
+            <div class="detail-section">
+                <h4>🔍 决策管道（10步）</h4>
+                <div class="pipeline-mini" id="pipeline-${symbol}">
+                    <div class="pipeline-loading">正在加载...</div>
+                </div>
+            </div>
+            
+            <div class="detail-timestamp">
+                决策时间: ${new Date(timestamp).toLocaleString('zh-CN')}
+            </div>
+        </div>
+    `;
+    
+    return detailDiv;
+}
 
-【核心决策】
-决策: ${advisory.decision.toUpperCase()}
-置信度: ${advisory.confidence.toUpperCase()}
-可执行: ${advisory.executable ? '是' : '否'}
-执行许可: ${execPermLabel}
-
-【市场状态】
-市场环境: ${advisory.market_regime.toUpperCase()}
-系统状态: ${advisory.system_state || 'N/A'}
-风险准入: ${advisory.risk_exposure_allowed ? '通过' : '拒绝'}
-交易质量: ${advisory.trade_quality.toUpperCase()}
-
-【决策依据】
-• ${tags || '无'}
-
-时间: ${new Date(advisory.timestamp).toLocaleString('zh-CN')}
-    `.trim());
+/**
+ * 加载币种的管道数据
+ */
+async function loadPipelineForSymbol(symbol) {
+    try {
+        const response = await fetch(`/api/l1/pipeline/${symbol}`);
+        const result = await response.json();
+        
+        const pipelineContainer = document.getElementById(`pipeline-${symbol}`);
+        if (!pipelineContainer) return;
+        
+        if (result.success && result.data && result.data.length > 0) {
+            pipelineContainer.innerHTML = result.data.map(step => {
+                const statusIcon = step.status === 'success' ? '✓' : 
+                                  step.status === 'failed' ? '✗' : '⏳';
+                const statusClass = step.status === 'success' ? 'success' : 
+                                   step.status === 'failed' ? 'failed' : 'pending';
+                
+                return `
+                    <div class="pipeline-step-mini ${statusClass}">
+                        <span class="step-num">Step${step.step}</span>
+                        <span class="step-name">${step.name}</span>
+                        <span class="step-icon">${statusIcon}</span>
+                        <span class="step-message">${step.message || ''}</span>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            pipelineContainer.innerHTML = '<div class="text-muted">暂无管道数据</div>';
+        }
+    } catch (error) {
+        console.error(`Error loading pipeline for ${symbol}:`, error);
+        const pipelineContainer = document.getElementById(`pipeline-${symbol}`);
+        if (pipelineContainer) {
+            pipelineContainer.innerHTML = '<div class="text-muted">加载失败</div>';
+        }
+    }
 }
 
 /**

@@ -23,19 +23,19 @@
             </div>
         </header>
 
-        <!-- 所有币种决策并排显示 -->
+        <!-- 所有币种决策并排显示 + 展开详情 -->
         <div class="all-decisions-panel">
             <div class="decisions-header">
-                <h2>🎯 L1 咨询决策（实时）</h2>
+                <h2>🎯 L1 咨询决策（实时）<span class="tip-text">点击卡片查看详情</span></h2>
             </div>
             <div class="decisions-grid" id="decisionsGrid">
-                <!-- 动态生成所有币种的决策卡片 -->
+                <!-- 动态生成所有币种的决策卡片 + 展开详情区域 -->
                 <div class="loading-placeholder">正在加载决策...</div>
             </div>
         </div>
 
-        <!-- 安全闸门状态区 -->
-        <div class="safety-gates-panel">
+        <!-- 旧版安全闸门和决策追溯（隐藏，改为在卡片详情中显示） -->
+        <div class="safety-gates-panel" style="display:none;">
             <h3>🛡️ 安全闸门状态</h3>
             <div class="gates-grid">
                 <!-- 风险准入 -->
@@ -96,16 +96,16 @@
             </div>
         </div>
 
-        <!-- 决策追溯区 -->
-        <div class="reasoning-panel">
+        <!-- 旧版决策追溯（隐藏） -->
+        <div class="reasoning-panel" style="display:none;">
             <h3>📋 决策追溯</h3>
             <div class="reason-tags-container" id="reasonTagsContainer">
                 <div class="reason-tags-placeholder">正在加载决策依据...</div>
             </div>
         </div>
 
-        <!-- 决策管道透视区 -->
-        <div class="pipeline-panel">
+        <!-- 旧版决策管道（隐藏） -->
+        <div class="pipeline-panel" style="display:none;">
             <h3>🔍 决策管道透视</h3>
             <div class="pipeline-flow" id="pipelineFlow">
                 <div class="pipeline-step pending" data-step="1">
