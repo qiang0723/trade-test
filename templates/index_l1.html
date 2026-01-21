@@ -23,14 +23,22 @@
             </div>
         </header>
 
-        <!-- 所有币种决策并排显示 + 展开详情 -->
+        <!-- 所有币种决策并排显示 -->
         <div class="all-decisions-panel">
             <div class="decisions-header">
                 <h2>🎯 L1 咨询决策（实时）<span class="tip-text">点击卡片查看详情</span></h2>
             </div>
             <div class="decisions-grid" id="decisionsGrid">
-                <!-- 动态生成所有币种的决策卡片 + 展开详情区域 -->
+                <!-- 动态生成所有币种的决策卡片 -->
                 <div class="loading-placeholder">正在加载决策...</div>
+            </div>
+        </div>
+        
+        <!-- 详情悬浮弹窗 -->
+        <div class="detail-modal" id="detailModal" style="display:none;">
+            <div class="detail-overlay" onclick="closeDetailModal()"></div>
+            <div class="detail-content" id="detailContent">
+                <!-- 动态内容 -->
             </div>
         </div>
 

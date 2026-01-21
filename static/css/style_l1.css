@@ -1328,7 +1328,7 @@ footer {
 }
 
 /* ===========================
-   币种详情展开区域
+   币种详情悬浮弹窗
    =========================== */
 .tip-text {
     font-size: 0.7em;
@@ -1337,29 +1337,50 @@ footer {
     margin-left: 10px;
 }
 
-.decision-card.expanded {
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+.detail-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
 }
 
-.symbol-detail {
-    grid-column: 1 / -1;
+.detail-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+
+.detail-content {
+    position: relative;
     background: var(--bg-primary);
-    border: 2px solid var(--primary-color);
-    border-radius: 8px;
-    padding: 16px;
-    margin: 8px 0;
-    animation: slideDown 0.3s ease;
+    border-radius: 12px;
+    max-width: 900px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    padding: 20px;
+    animation: modalSlideIn 0.3s ease;
 }
 
-@keyframes slideDown {
+@keyframes modalSlideIn {
     from {
         opacity: 0;
-        transform: translateY(-10px);
+        transform: scale(0.9) translateY(-20px);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
+        transform: scale(1) translateY(0);
     }
 }
 

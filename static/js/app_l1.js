@@ -249,65 +249,42 @@ function updateAllDecisionsPanel(decisions) {
         // 设置卡片ID
         card.id = `card-${symbol}`;
         
-        // 点击展开/折叠详情
-        card.onclick = () => toggleSymbolDetail(symbol, advisory);
+        // 点击显示悬浮详情
+        card.onclick = () => showDetailModal(symbol, advisory);
         
         grid.appendChild(card);
-        
-        // 如果该币种已展开，重新显示详情
-        if (expandedSymbols.has(symbol)) {
-            const detailDiv = createSymbolDetailDiv(symbol, advisory);
-            grid.appendChild(detailDiv);
-        }
     }
 }
 
 /**
- * 切换币种详情展开/折叠
+ * 显示详情悬浮弹窗
  */
-function toggleSymbolDetail(symbol, advisory) {
-    const detailId = `detail-${symbol}`;
-    const existingDetail = document.getElementById(detailId);
+function showDetailModal(symbol, advisory) {
+    const modal = document.getElementById('detailModal');
+    const content = document.getElementById('detailContent');
     
-    if (existingDetail) {
-        // 已展开，折叠
-        existingDetail.remove();
-        expandedSymbols.delete(symbol);
-        document.getElementById(`card-${symbol}`).classList.remove('expanded');
-    } else {
-        // 未展开，展开
-        const detailDiv = createSymbolDetailDiv(symbol, advisory);
-        
-        // 插入到卡片后面
-        const card = document.getElementById(`card-${symbol}`);
-        const grid = document.getElementById('decisionsGrid');
-        
-        // 找到卡片在grid中的位置
-        const cardIndex = Array.from(grid.children).indexOf(card);
-        
-        // 插入到卡片后面
-        if (cardIndex < grid.children.length - 1) {
-            grid.insertBefore(detailDiv, grid.children[cardIndex + 1]);
-        } else {
-            grid.appendChild(detailDiv);
-        }
-        
-        expandedSymbols.add(symbol);
-        card.classList.add('expanded');
-        
-        // 加载管道数据
-        loadPipelineForSymbol(symbol);
-    }
+    // 生成详情内容
+    content.innerHTML = createSymbolDetailHTML(symbol, advisory);
+    
+    // 显示弹窗
+    modal.style.display = 'flex';
+    
+    // 加载管道数据
+    loadPipelineForSymbol(symbol);
 }
 
 /**
- * 创建币种详情区域
+ * 关闭详情弹窗
  */
-function createSymbolDetailDiv(symbol, advisory) {
-    const detailDiv = document.createElement('div');
-    detailDiv.className = 'symbol-detail';
-    detailDiv.id = `detail-${symbol}`;
-    
+function closeDetailModal() {
+    const modal = document.getElementById('detailModal');
+    modal.style.display = 'none';
+}
+
+/**
+ * 创建币种详情HTML内容
+ */
+function createSymbolDetailHTML(symbol, advisory) {
     const { 
         decision, confidence, executable, execution_permission,
         market_regime, system_state, risk_exposure_allowed, trade_quality,
@@ -335,10 +312,10 @@ function createSymbolDetailDiv(symbol, advisory) {
         'deny': 'danger'
     }[execution_permission] || 'neutral';
     
-    detailDiv.innerHTML = `
+    return `
         <div class="detail-header">
             <h3>📊 ${symbol} 决策详情</h3>
-            <button class="detail-close" onclick="toggleSymbolDetail('${symbol}', allDecisions['${symbol}'])">✕ 关闭</button>
+            <button class="detail-close" onclick="closeDetailModal()">✕ 关闭</button>
         </div>
         
         <div class="detail-body">
@@ -394,8 +371,6 @@ function createSymbolDetailDiv(symbol, advisory) {
             </div>
         </div>
     `;
-    
-    return detailDiv;
 }
 
 /**
