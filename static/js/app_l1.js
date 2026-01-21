@@ -14,12 +14,12 @@
 // 全局变量
 // ==========================================
 
-let currentSymbol = 'BTC';
 let currentMarketType = 'futures'; // 固定为合约市场
 let autoRefreshInterval = null;
 let refreshCountdown = 60;
 let reasonTagExplanations = {};
 let availableSymbols = []; // 可用币种列表
+let allDecisions = {};  // 所有币种的决策缓存
 
 // 历史记录列表分页状态
 let allHistoryData = []; // 所有历史数据
@@ -178,13 +178,116 @@ async function refreshAdvisory() {
 }
 
 /**
- * 更新决策信号面板
+ * 更新所有币种决策面板（并排显示）
+ */
+function updateAllDecisionsPanel(decisions) {
+    const grid = document.getElementById('decisionsGrid');
+    grid.innerHTML = '';
+    
+    if (!decisions || Object.keys(decisions).length === 0) {
+        grid.innerHTML = '<div class="loading-placeholder">暂无决策数据</div>';
+        return;
+    }
+    
+    // 为每个币种创建决策卡片
+    for (const symbol of availableSymbols) {
+        const advisory = decisions[symbol];
+        if (!advisory) continue;
+        
+        const card = document.createElement('div');
+        card.className = 'decision-card';
+        
+        const { decision, confidence, executable } = advisory;
+        
+        // 决策图标和颜色
+        let icon = '⚪';
+        let decisionClass = 'notrade';
+        let decisionLabel = 'NO_TRADE';
+        
+        if (decision === 'long') {
+            icon = '🟢';
+            decisionClass = 'long';
+            decisionLabel = 'LONG';
+        } else if (decision === 'short') {
+            icon = '🔴';
+            decisionClass = 'short';
+            decisionLabel = 'SHORT';
+        }
+        
+        // 置信度标签
+        const confidenceLabel = {
+            'ultra': '极高',
+            'high': '高',
+            'medium': '中',
+            'low': '低'
+        }[confidence] || confidence;
+        
+        // 可执行标识
+        const execBadge = executable 
+            ? '<span class="exec-badge exec-yes">✓</span>'
+            : '<span class="exec-badge exec-no">✗</span>';
+        
+        card.innerHTML = `
+            <div class="decision-card-header ${decisionClass}">
+                <span class="symbol-name">${symbol}</span>
+                ${execBadge}
+            </div>
+            <div class="decision-card-body">
+                <div class="decision-icon ${decisionClass}">${icon}</div>
+                <div class="decision-label ${decisionClass}">${decisionLabel}</div>
+                <div class="confidence-mini confidence-${confidence}">${confidenceLabel}</div>
+            </div>
+        `;
+        
+        // 点击查看详情
+        card.onclick = () => showSymbolDetail(symbol, advisory);
+        
+        grid.appendChild(card);
+    }
+}
+
+/**
+ * 显示币种决策详情
+ */
+function showSymbolDetail(symbol, advisory) {
+    const tags = advisory.reason_tags.map(tag => {
+        const tagData = reasonTagExplanations[tag];
+        return tagData ? tagData.explanation : tag;
+    }).join('\n• ');
+    
+    const execPermLabel = {
+        'allow': '正常执行',
+        'allow_reduced': '降级执行',
+        'deny': '拒绝执行'
+    }[advisory.execution_permission] || advisory.execution_permission;
+    
+    alert(`
+📊 ${symbol} 决策详情
+
+【核心决策】
+决策: ${advisory.decision.toUpperCase()}
+置信度: ${advisory.confidence.toUpperCase()}
+可执行: ${advisory.executable ? '是' : '否'}
+执行许可: ${execPermLabel}
+
+【市场状态】
+市场环境: ${advisory.market_regime.toUpperCase()}
+系统状态: ${advisory.system_state || 'N/A'}
+风险准入: ${advisory.risk_exposure_allowed ? '通过' : '拒绝'}
+交易质量: ${advisory.trade_quality.toUpperCase()}
+
+【决策依据】
+• ${tags || '无'}
+
+时间: ${new Date(advisory.timestamp).toLocaleString('zh-CN')}
+    `.trim());
+}
+
+/**
+ * 旧的更新决策信号面板（保留兼容）
  */
 function updateDecisionPanel(advisory) {
     const { decision, confidence, timestamp, executable } = advisory;
-    
-    // 更新币种标识
-    document.getElementById('currentSymbolBadge').textContent = `${currentSymbol}/USDT`;
     
     // 获取元素
     const decisionSignal = document.getElementById('decisionSignal');
@@ -398,6 +501,8 @@ function initHistorySymbolFilter(symbols) {
 
 /**
  * 加载历史记录（列表模式）
+ * 
+ * 修复：不依赖currentSymbol，完全根据筛选条件独立工作
  */
 async function loadHistoryList() {
     try {
@@ -413,6 +518,9 @@ async function loadHistoryList() {
                 fetchHistory(symbol, hours, 2000).then(history => {
                     // 为每条记录添加币种字段
                     return history.map(item => ({...item, symbol: symbol}));
+                }).catch(err => {
+                    console.error(`Failed to fetch history for ${symbol}:`, err);
+                    return [];  // 失败时返回空数组
                 })
             );
             

@@ -1191,3 +1191,138 @@ footer {
     opacity: 0.6;
     pointer-events: none;
 }
+
+/* ===========================
+   所有币种决策并排显示（新增）
+   =========================== */
+.all-decisions-panel {
+    background: var(--bg-primary);
+    padding: 12px 16px;
+    border-radius: 8px;
+    box-shadow: var(--shadow-md);
+    margin-bottom: 8px;
+}
+
+.decisions-header h2 {
+    font-size: 1.15em;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 10px;
+}
+
+.decisions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+}
+
+.decision-card {
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 2px solid var(--border-color);
+    cursor: pointer;
+    transition: all 0.2s;
+    overflow: hidden;
+}
+
+.decision-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.decision-card-header {
+    padding: 6px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.decision-card-header.long {
+    background: var(--signal-long-bg);
+    border-bottom-color: var(--signal-long);
+}
+
+.decision-card-header.short {
+    background: var(--signal-short-bg);
+    border-bottom-color: var(--signal-short);
+}
+
+.decision-card-header.notrade {
+    background: var(--signal-notrade-bg);
+    border-bottom-color: var(--signal-notrade);
+}
+
+.symbol-name {
+    font-size: 0.9em;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.exec-badge {
+    font-size: 0.75em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.exec-yes {
+    background: #d1fae5;
+    color: #059669;
+}
+
+.exec-no {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+.decision-card-body {
+    padding: 10px;
+    text-align: center;
+}
+
+.decision-icon {
+    font-size: 2em;
+    margin-bottom: 4px;
+}
+
+.decision-label {
+    font-size: 0.85em;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.decision-label.long {
+    color: var(--signal-long);
+}
+
+.decision-label.short {
+    color: var(--signal-short);
+}
+
+.decision-label.notrade {
+    color: var(--signal-notrade);
+}
+
+.confidence-mini {
+    font-size: 0.75em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.confidence-mini.high, .confidence-mini.ultra {
+    background: #d1fae5;
+    color: #059669;
+}
+
+.confidence-mini.medium {
+    background: #fef3c7;
+    color: #d97706;
+}
+
+.confidence-mini.low {
+    background: #fee2e2;
+    color: #dc2626;
+}
