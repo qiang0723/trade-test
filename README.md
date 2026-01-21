@@ -1,119 +1,170 @@
-# 🚀 加密货币行情监控系统
+# 🚀 L1 Advisory Layer - 加密货币决策咨询系统
 
-一个功能强大的加密货币实时行情监控和智能分析系统。
+基于市场数据的智能交易决策咨询系统（L1 Advisory Layer v3.1.5）
 
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](https://www.docker.com/)
 [![Python](https://img.shields.io/badge/python-3.12-green)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 
-## 🌐 生产环境
-
-**AWS服务器**: 43.212.176.169:8001  
-**部署命令**: `./aws-connect.sh deploy`（仅在需要部署时使用）
-
-**工作流程**：
-1. 📝 **本地开发调试** - 在本地进行开发、测试和Git提交
-2. 🚀 **按需部署AWS** - 完成开发后，使用命令部署到AWS服务器
-
 ## ✨ 核心特性
 
-- 📊 **实时行情监控** - 多币种、双市场（现货+合约）
-- 🎯 **智能市场分析** - 多维度数据综合判断
-- 📈 **综合K线图表** - 价格、成交量、持仓量一图展示
-- 🐋 **大单追踪** - 多维度筛选和分析
-- 💹 **成交统计** - 买卖力量可视化
-- 🔔 **价格报警** - 异常波动邮件通知
+- 🎯 **L1决策咨询层** - 仅提供决策建议，不包含执行逻辑
+- 📊 **多维市场分析** - 资金费率、持仓量、买卖压力综合判断
+- 🔍 **三态市场识别** - TREND（趋势）/ RANGE（震荡）/ EXTREME（极端）
+- ⚖️ **三级执行许可** - ALLOW / ALLOW_REDUCED / DENY
+- 🛡️ **四重启动校验** - 配置口径、门槛一致性、拼写、confidence值校验
+- 📈 **信心评级系统** - ULTRA / HIGH / MEDIUM / LOW 四级评分
+- 🔄 **配置热更新** - 支持YAML配置文件实时重载
 - 🐳 **Docker支持** - 一键部署
 
 ## 🚀 快速开始
 
-### Docker运行（推荐）
+### 方式1：本地运行（推荐）
 
 ```bash
 # 克隆项目
 git clone https://github.com/qiang0723/trade-test.git
 cd trade-test
 
-# 构建并启动
-./docker-build.sh
-./docker-run.sh
-
-# 访问应用
-open http://localhost:8001
-```
-
-### Python直接运行
-
-```bash
 # 创建虚拟环境并安装依赖
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 启动应用
-python3 btc_web_app_multi.py
+# 启动L1服务
+./run_l1.sh
 ```
 
-访问：http://localhost:8001
+访问：http://localhost:5001
 
-## 🔧 Docker管理
+### 方式2：Docker运行
+
+```bash
+# 构建并启动L1容器
+./docker-l1-build.sh
+./docker-l1-run.sh
+
+# 访问应用
+open http://localhost:5001
+```
+
+## 🔧 管理命令
+
+### 本地服务管理
+
+```bash
+# 启动服务
+./run_l1.sh
+
+# 停止服务
+pkill -f btc_web_app_l1.py
+```
+
+### Docker服务管理
 
 ```bash
 # 查看日志
-docker logs -f trade-info-app
+docker logs -f trade-info-l1
 
 # 停止服务
-./docker-stop.sh
+./docker-l1-stop.sh
 
 # 重启服务
-docker restart trade-info-app
+docker restart trade-info-l1
 ```
 
 ## ⚙️ 配置
 
-### 添加币种
+### L1阈值配置
 
-编辑 `btc_web_app_multi.py`：
+编辑 `config/l1_thresholds.yaml` 来调整决策参数：
 
-```python
-self.symbols = ['TA', 'BTR', 'AT']  # 添加更多币种
+```yaml
+market_regimes:
+  trend_threshold: 0.03      # 趋势市场阈值（3%）
+  extreme_threshold: 0.10    # 极端市场阈值（10%）
+
+confidence_scoring:
+  strong_signal_boost:
+    required_tags: [strong_buy_pressure, strong_sell_pressure]
+    boost: "ULTRA"
 ```
 
-### 配置邮件报警（可选）
-
-编辑 `btc_web_app_multi.py`：
-
-```python
-class EmailAlert:
-    def __init__(self):
-        self.sender_password = 'your_app_password'  # 配置密码
-```
-
-详见：`邮件报警配置说明.md`
+配置文件支持热更新，修改后自动生效。
 
 ## 📚 文档
 
-- `快速开始.md` - 快速上手
-- `Docker使用说明.md` - Docker部署
-- `数据更新机制说明.md` - 更新机制
-- `邮件报警配置说明.md` - 报警配置
+详细文档请查看 `doc/` 目录：
+
+- **平台详解3.1.md** - L1系统完整说明（推荐阅读）
+- **L1_API完整文档.md** - API接口文档
+- **L1_Advisory_Layer使用指南.md** - 使用指南
+- **L1字段规范.md** - 数据字段说明
+- **L1实施总结.md** - 实施总结
 
 ## 🎨 技术栈
 
-- **后端**: Flask + python-binance + Pandas
-- **前端**: HTML5 + CSS3 + JavaScript + Chart.js
+- **后端**: Flask + Python 3.12
+- **决策引擎**: L1AdvisoryEngine（状态机 + 置信度评分）
+- **数据获取**: Binance API + python-binance
+- **数据库**: SQLite3（持久化决策记录）
+- **前端**: HTML5 + CSS3 + JavaScript
 - **部署**: Docker + Docker Compose
 
-## 📊 数据来源
+## 🏗️ 系统架构
 
-所有数据来自币安交易所（Binance）官方API。
+```
+┌─────────────────┐
+│  Binance API    │ ← 数据源
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│ Data Fetcher    │ ← 数据获取
+│ + Cache Layer   │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│ L1 Advisory     │ ← 决策引擎
+│ Engine          │   (10步决策管道)
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│ Database +      │ ← 持久化 + Web界面
+│ Flask Web UI    │
+└─────────────────┘
+```
+
+## 📊 决策输出
+
+L1 Advisory Layer 输出包含：
+
+- **decision**: LONG / SHORT / NO_TRADE
+- **confidence**: ULTRA / HIGH / MEDIUM / LOW
+- **market_regime**: TREND / RANGE / EXTREME
+- **execution_permission**: ALLOW / ALLOW_REDUCED / DENY
+- **trade_quality**: GOOD / UNCERTAIN / POOR
+- **reason_tags**: 决策原因标签列表
+
+## 🧪 测试
+
+```bash
+# 运行所有测试
+pytest tests/
+
+# 运行特定测试
+pytest tests/test_l1_advisory.py
+pytest tests/test_pr_h_confidence_validation.py
+```
+
+当前测试覆盖：**56个测试用例**
 
 ## ⚠️ 注意事项
 
-1. 需要网络访问币安API
-2. 币安API有请求频率限制
-3. 数据仅供参考，不构成投资建议
-4. 加密货币投资有风险，请谨慎决策
+1. **咨询层定位**: L1仅提供决策建议，不包含执行逻辑
+2. **数据依赖**: 需要网络访问币安API
+3. **API限制**: 币安API有请求频率限制
+4. **投资风险**: 数据仅供参考，不构成投资建议
+5. **谨慎决策**: 加密货币投资有风险，请谨慎决策
 
 ## 📞 联系
 
