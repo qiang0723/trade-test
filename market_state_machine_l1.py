@@ -263,6 +263,24 @@ class L1AdvisoryEngine:
             'result': decision.value
         })
         
+        # ===== Step 6.5: 三层触发判定（PR-005）=====
+        # 在方向确定后，频控前，进行多周期确认
+        ltf_status, ltf_tags = self._evaluate_multi_tf(data, decision)
+        reason_tags.extend(ltf_tags)
+        
+        # 应用binding_policy
+        if ltf_status not in ['disabled', 'not_applicable']:
+            self.last_pipeline_steps.append({
+                'step': 6.5, 'name': 'multi_tf_check',
+                'status': 'success' if ltf_status in ['confirmed', 'partial'] else 'warning',
+                'message': f"三层触发: {ltf_status.upper()}",
+                'result': ltf_status
+            })
+            
+            # PR-005: 根据ltf_status应用策略
+            # 这里只添加标签，具体影响在execution_permission中体现
+            logger.debug(f"[{symbol}] LTF Status: {ltf_status}")
+        
         # ===== Step 7: 决策频率控制（PR-004重构）=====
         # PR-004: 保存原始信号（频控前的方向）
         signal_decision = decision
@@ -1803,3 +1821,240 @@ class L1AdvisoryEngine:
         """
         self.thresholds.update(new_thresholds)
         logger.info(f"Thresholds updated: {len(new_thresholds)} items")
+
+    # ========================================
+    # PR-005: 三层触发机制（1h/15m/5m）
+    # ========================================
+    
+    def _evaluate_multi_tf(
+        self,
+        data: Dict,
+        decision: Decision
+    ) -> Tuple[str, List[ReasonTag]]:
+        """
+        PR-005: 三层触发判定（1h Context → 15m Confirm → 5m Trigger）
+        
+        三层架构：
+        1. Context（1h）：确定允许的方向偏置
+        2. Confirm（15m）：4选2确认信号强度
+        3. Trigger（5m）：3选2最终触发
+        
+        Args:
+            data: 市场数据（必须包含5m/15m/1h多周期字段）
+            decision: 当前决策方向（LONG/SHORT）
+        
+        Returns:
+            (ltf_status, ltf_tags列表)
+        """
+        from models.enums import LTFStatus
+        
+        # 检查功能开关
+        config = self.config.get('multi_tf', {})
+        if not config.get('enabled', False):
+            return 'disabled', []
+        
+        # 如果decision是NO_TRADE，无需LTF判定
+        if decision == Decision.NO_TRADE:
+            return 'not_applicable', []
+        
+        # PR-005: 检查数据完整性
+        required_fields = [
+            'volume_5m', 'volume_15m', 'volume_1h',
+            'volume_ratio_5m', 'volume_ratio_15m',
+            'taker_imbalance_5m', 'taker_imbalance_15m', 'taker_imbalance_1h'
+        ]
+        
+        missing_fields = [f for f in required_fields if data.get(f) is None]
+        if missing_fields:
+            logger.warning(f"LTF data incomplete, missing: {missing_fields}")
+            return LTFStatus.MISSING.value, [ReasonTag.DATA_INCOMPLETE]
+        
+        # Layer 1: Context（1小时方向偏置）
+        context_allowed = self._check_context_1h(data, decision, config)
+        if not context_allowed:
+            logger.debug(f"[LTF] Context denied for {decision.value}")
+            return LTFStatus.NOT_APPLICABLE.value, [ReasonTag.LTF_CONTEXT_DENIED]
+        
+        # Layer 2: Confirm（15分钟，4选2）
+        confirm_count = self._check_confirm_15m(data, decision, config)
+        
+        # Layer 3: Trigger（5分钟，3选2）
+        trigger_count = self._check_trigger_5m(data, decision, config)
+        
+        logger.debug(f"[LTF] {decision.value}: confirm={confirm_count}/4, trigger={trigger_count}/3")
+        
+        # 综合判定
+        confirm_config = config.get('confirm_15m', {}).get(decision.value, {})
+        required_confirmed = confirm_config.get('required_confirmed', 2)
+        required_partial = confirm_config.get('required_partial', 1)
+        
+        trigger_config = config.get('trigger_5m', {}).get(decision.value, {})
+        required_trigger = trigger_config.get('required_signals', 2)
+        
+        if confirm_count >= required_confirmed and trigger_count >= required_trigger:
+            return LTFStatus.CONFIRMED.value, [ReasonTag.LTF_CONFIRMED]
+        elif confirm_count >= required_partial and trigger_count >= required_trigger:
+            return LTFStatus.PARTIAL.value, [ReasonTag.LTF_PARTIAL_CONFIRM]
+        else:
+            return LTFStatus.FAILED.value, [ReasonTag.LTF_FAILED_CONFIRM]
+    
+    def _check_context_1h(
+        self,
+        data: Dict,
+        decision: Decision,
+        config: Dict
+    ) -> bool:
+        """
+        PR-005 Layer 1: Context层（1小时方向偏置）
+        
+        判定1小时级别是否允许该方向的交易
+        3个信号，满足required_signals个（默认2个）
+        
+        Args:
+            data: 市场数据
+            decision: 决策方向（LONG/SHORT）
+            config: multi_tf配置
+        
+        Returns:
+            bool: 是否允许该方向
+        """
+        context_config = config.get('context_1h', {}).get(decision.value, {})
+        if not context_config:
+            return True  # 无配置时默认允许
+        
+        price_change_1h = data.get('price_change_1h', 0)
+        taker_imbalance_1h = data.get('taker_imbalance_1h', 0)
+        oi_change_1h = data.get('oi_change_1h', 0)
+        
+        signals_met = 0
+        
+        if decision == Decision.LONG:
+            # LONG Context: 1h上涨趋势
+            if price_change_1h > context_config.get('min_price_change', 0.01):
+                signals_met += 1
+            if taker_imbalance_1h > context_config.get('min_taker_imbalance', 0.40):
+                signals_met += 1
+            if oi_change_1h > context_config.get('min_oi_change', 0.05):
+                signals_met += 1
+        
+        elif decision == Decision.SHORT:
+            # SHORT Context: 1h下跌趋势
+            if price_change_1h < context_config.get('max_price_change', -0.01):
+                signals_met += 1
+            if taker_imbalance_1h < context_config.get('max_taker_imbalance', -0.40):
+                signals_met += 1
+            if oi_change_1h > context_config.get('min_oi_change', 0.05):
+                signals_met += 1
+        
+        required = context_config.get('required_signals', 2)
+        context_ok = signals_met >= required
+        
+        logger.debug(f"[Context] {decision.value}: {signals_met}/{required} signals met")
+        return context_ok
+    
+    def _check_confirm_15m(
+        self,
+        data: Dict,
+        decision: Decision,
+        config: Dict
+    ) -> int:
+        """
+        PR-005 Layer 2: Confirm层（15分钟确认）
+        
+        4个信号，满足>=2个为CONFIRMED，1个为PARTIAL
+        
+        Args:
+            data: 市场数据
+            decision: 决策方向
+            config: multi_tf配置
+        
+        Returns:
+            int: 满足的信号数量（0-4）
+        """
+        confirm_config = config.get('confirm_15m', {}).get(decision.value, {})
+        if not confirm_config:
+            return 0
+        
+        # 需要从data_cache计算price_change_15m和oi_change_15m
+        # 当前data可能没有这些字段，暂时使用简化方式
+        # TODO: 需要在data_cache中添加15m和5m的变化率计算
+        
+        price_change_15m = data.get('price_change_15m', 0)  # 需要data_cache支持
+        taker_imbalance_15m = data.get('taker_imbalance_15m', 0)
+        volume_ratio_15m = data.get('volume_ratio_15m', 1.0)
+        oi_change_15m = data.get('oi_change_15m', 0)  # 需要data_cache支持
+        
+        signals_met = 0
+        
+        if decision == Decision.LONG:
+            if price_change_15m > confirm_config.get('min_price_change', 0.005):
+                signals_met += 1
+            if taker_imbalance_15m > confirm_config.get('min_taker_imbalance', 0.50):
+                signals_met += 1
+            if volume_ratio_15m > confirm_config.get('min_volume_ratio', 1.5):
+                signals_met += 1
+            if oi_change_15m > confirm_config.get('min_oi_change', 0.03):
+                signals_met += 1
+        
+        elif decision == Decision.SHORT:
+            if price_change_15m < confirm_config.get('max_price_change', -0.005):
+                signals_met += 1
+            if taker_imbalance_15m < confirm_config.get('max_taker_imbalance', -0.50):
+                signals_met += 1
+            if volume_ratio_15m > confirm_config.get('min_volume_ratio', 1.5):
+                signals_met += 1
+            if oi_change_15m > confirm_config.get('min_oi_change', 0.03):
+                signals_met += 1
+        
+        logger.debug(f"[Confirm] {decision.value}: {signals_met}/4 signals met")
+        return signals_met
+    
+    def _check_trigger_5m(
+        self,
+        data: Dict,
+        decision: Decision,
+        config: Dict
+    ) -> int:
+        """
+        PR-005 Layer 3: Trigger层（5分钟触发）
+        
+        3个信号，满足>=2个触发
+        
+        Args:
+            data: 市场数据
+            decision: 决策方向
+            config: multi_tf配置
+        
+        Returns:
+            int: 满足的信号数量（0-3）
+        """
+        trigger_config = config.get('trigger_5m', {}).get(decision.value, {})
+        if not trigger_config:
+            return 0
+        
+        # 需要从data_cache计算price_change_5m
+        # 当前data可能没有这些字段
+        price_change_5m = data.get('price_change_5m', 0)  # 需要data_cache支持
+        taker_imbalance_5m = data.get('taker_imbalance_5m', 0)
+        volume_ratio_5m = data.get('volume_ratio_5m', 1.0)
+        
+        signals_met = 0
+        
+        if decision == Decision.LONG:
+            if price_change_5m > trigger_config.get('min_price_change', 0.002):
+                signals_met += 1
+            if taker_imbalance_5m > trigger_config.get('min_taker_imbalance', 0.60):
+                signals_met += 1
+            if volume_ratio_5m > trigger_config.get('min_volume_ratio', 2.0):
+                signals_met += 1
+        
+        elif decision == Decision.SHORT:
+            if price_change_5m < trigger_config.get('max_price_change', -0.002):
+                signals_met += 1
+            if taker_imbalance_5m < trigger_config.get('max_taker_imbalance', -0.60):
+                signals_met += 1
+            if volume_ratio_5m > trigger_config.get('min_volume_ratio', 2.0):
+                signals_met += 1
+        
+        logger.debug(f"[Trigger] {decision.value}: {signals_met}/3 signals met")
+        return signals_met
