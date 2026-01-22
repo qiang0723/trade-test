@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>L1 Advisory Layer - 双周期决策</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style_l1.css') }}">
+    <style>
+        /* 双周期卡片专用样式 */
+        .decision-card {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            min-width: 240px;
+        }
+        
+        .decision-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        }
+        
+        .decision-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .symbol-name {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #1f2937;
+        }
+        
+        .exec-status {
+            font-size: 0.75em;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: bold;
+        }
+        
+        .exec-status.both-exec {
+            background: #d1fae5;
+            color: #059669;
+        }
+        
+        .exec-status.partial-exec {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        
+        .exec-status.no-exec {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        /* 双周期决策行 */
+        .timeframe-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin: 6px 0;
+            background: #f9fafb;
+            border-radius: 8px;
+            border-left: 4px solid transparent;
+        }
+        
+        .timeframe-row.short-term {
+            border-left-color: #3b82f6;
+        }
+        
+        .timeframe-row.medium-term {
+            border-left-color: #8b5cf6;
+        }
+        
+        .timeframe-label {
+            font-size: 0.75em;
+            color: #6b7280;
+            font-weight: 600;
+            min-width: 70px;
+        }
+        
+        .timeframe-decision {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+        }
+        
+        .decision-icon-mini {
+            font-size: 1.2em;
+        }
+        
+        .decision-text {
+            font-weight: 700;
+            font-size: 0.95em;
+        }
+        
+        .decision-text.long {
+            color: #10b981;
+        }
+        
+        .decision-text.short {
+            color: #ef4444;
+        }
+        
+        .decision-text.no_trade {
+            color: #9ca3af;
+        }
+        
+        .confidence-mini {
+            font-size: 0.7em;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+        
+        .confidence-mini.ultra {
+            background: #d1fae5;
+            color: #059669;
+        }
+        
+        .confidence-mini.high {
+            background: #d1fae5;
+            color: #059669;
+        }
+        
+        .confidence-mini.medium {
+            background: #fef3c7;
+            color: #d97706;
+        }
+        
+        .confidence-mini.low {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        /* 一致性标签 */
+        .alignment-badge {
+            margin-top: 8px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.75em;
+            text-align: center;
+            font-weight: 600;
+        }
+        
+        .alignment-badge.both_long {
+            background: #d1fae5;
+            color: #059669;
+            border: 1px solid #a7f3d0;
+        }
+        
+        .alignment-badge.both_short {
+            background: #fee2e2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+        
+        .alignment-badge.both_no_trade {
+            background: #f3f4f6;
+            color: #6b7280;
+            border: 1px solid #e5e7eb;
+        }
+        
+        .alignment-badge.conflict,
+        .alignment-badge.short_confirm_long,
+        .alignment-badge.long_confirm_short {
+            background: #fef3c7;
+            color: #d97706;
+            border: 1px solid #fde68a;
+        }
+        
+        /* 详情弹窗样式增强 */
+        .detail-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .detail-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+        }
+        
+        .detail-content {
+            position: relative;
+            background: white;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 1200px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            z-index: 1001;
+        }
+        
+        .detail-header {
+            position: sticky;
+            top: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 16px 16px 0 0;
+            z-index: 10;
+        }
+        
+        .detail-header h3 {
+            font-size: 1.5em;
+            margin: 0;
+        }
+        
+        .detail-close {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        
+        .detail-close:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .detail-body {
+            padding: 24px;
+        }
+        
+        .detail-section {
+            margin-bottom: 24px;
+            padding: 16px;
+            background: #f9fafb;
+            border-radius: 12px;
+        }
+        
+        .detail-section h4 {
+            font-size: 1.1em;
+            margin-bottom: 12px;
+            color: #374151;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .dual-timeframe-detail {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .timeframe-detail-panel {
+            background: white;
+            padding: 16px;
+            border-radius: 12px;
+            border-left: 4px solid #e5e7eb;
+        }
+        
+        .timeframe-detail-panel.short-term {
+            border-left-color: #3b82f6;
+        }
+        
+        .timeframe-detail-panel.medium-term {
+            border-left-color: #8b5cf6;
+        }
+        
+        .timeframe-detail-header {
+            font-weight: 700;
+            margin-bottom: 12px;
+            font-size: 1.05em;
+            color: #1f2937;
+        }
+        
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        
+        .detail-label {
+            color: #6b7280;
+            font-size: 0.9em;
+        }
+        
+        .detail-value {
+            font-weight: 600;
+            color: #1f2937;
+        }
+        
+        .alignment-detail {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid #667eea40;
+        }
+        
+        .alignment-detail-header {
+            font-size: 1.2em;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: #5b21b6;
+        }
+        
+        .alignment-notes {
+            font-size: 0.95em;
+            line-height: 1.6;
+            color: #4b5563;
+            margin-top: 12px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 8px;
+        }
+        
+        .gates-mini {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        
+        .gate-mini {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            border-left: 3px solid #e5e7eb;
+        }
+        
+        .gate-mini.success {
+            border-left-color: #10b981;
+        }
+        
+        .gate-mini.warning {
+            border-left-color: #f59e0b;
+        }
+        
+        .gate-mini.danger {
+            border-left-color: #ef4444;
+        }
+        
+        .gate-label {
+            display: block;
+            font-size: 0.75em;
+            color: #9ca3af;
+            margin-bottom: 4px;
+        }
+        
+        .gate-value {
+            display: block;
+            font-weight: 700;
+            font-size: 0.95em;
+            color: #1f2937;
+        }
+        
+        .key-metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 12px;
+        }
+        
+        .metric-item {
+            background: white;
+            padding: 10px;
+            border-radius: 6px;
+        }
+        
+        .metric-label {
+            font-size: 0.75em;
+            color: #9ca3af;
+            margin-bottom: 4px;
+        }
+        
+        .metric-value {
+            font-weight: 700;
+            color: #1f2937;
+            font-size: 0.9em;
+        }
+        
+        .reason-tags-mini {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        
+        .reason-tag {
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 0.8em;
+            font-weight: 500;
+            border: 1px solid;
+        }
+        
+        .reason-tag.signal {
+            background: #dbeafe;
+            border-color: #3b82f6;
+            color: #1e40af;
+        }
+        
+        .reason-tag.risk {
+            background: #fee2e2;
+            border-color: #ef4444;
+            color: #991b1b;
+        }
+        
+        .reason-tag.quality {
+            background: #fef3c7;
+            border-color: #f59e0b;
+            color: #92400e;
+        }
+        
+        .reason-tag.info {
+            background: #f3f4f6;
+            border-color: #9ca3af;
+            color: #4b5563;
+        }
+        
+        .pipeline-mini {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .pipeline-step-mini {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: white;
+            border-radius: 8px;
+            border-left: 3px solid #e5e7eb;
+        }
+        
+        .pipeline-step-mini.success {
+            border-left-color: #10b981;
+        }
+        
+        .pipeline-step-mini.failed {
+            border-left-color: #ef4444;
+        }
+        
+        .step-num {
+            font-size: 0.75em;
+            font-weight: 700;
+            color: #9ca3af;
+            min-width: 45px;
+        }
+        
+        .step-name {
+            flex: 1;
+            font-size: 0.9em;
+            color: #374151;
+        }
+        
+        .step-icon {
+            font-size: 1.1em;
+        }
+        
+        .step-message {
+            font-size: 0.8em;
+            color: #6b7280;
+            font-style: italic;
+        }
+        
+        .detail-timestamp {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 0.85em;
+            color: #9ca3af;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header>
+            <div class="header-main">
+                <h1>🎯 L1 Advisory Layer - 双周期决策系统</h1>
+                <p class="header-subtitle">短期（5m/15m）+ 中长期（1h/6h）独立结论</p>
+            </div>
+            <div class="header-info">
+                <div class="notification-controls">
+                    <button id="toggleNotificationBtn" onclick="toggleSignalNotification()" class="notification-btn" title="开启/关闭交易信号弹窗提示">
+                        🔔 通知已开启
+                    </button>
+                    <button id="toggleSoundBtn" onclick="toggleSound()" class="notification-btn" title="开启/关闭提示音">
+                        🔊 声音已开启
+                    </button>
+                </div>
+                <div class="update-time">
+                    <span class="label">最后更新</span>
+                    <span id="lastUpdate" class="value">--</span>
+                </div>
+                <button onclick="refreshAdvisory()" class="refresh-btn">🔄 刷新决策</button>
+            </div>
+        </header>
+
+        <!-- 所有币种双周期决策并排显示 -->
+        <div class="all-decisions-panel">
+            <div class="decisions-header">
+                <h2>🎯 实时双周期决策 <span class="tip-text">点击卡片查看详情</span></h2>
+            </div>
+            <div class="decisions-grid" id="decisionsGrid">
+                <!-- 动态生成所有币种的决策卡片 -->
+                <div class="loading-placeholder">正在加载决策...</div>
+            </div>
+        </div>
+        
+        <!-- 详情悬浮弹窗 -->
+        <div class="detail-modal" id="detailModal" style="display:none;">
+            <div class="detail-overlay" onclick="closeDetailModal()"></div>
+            <div class="detail-content" id="detailContent">
+                <!-- 动态内容 -->
+            </div>
+        </div>
+
+        <!-- 历史决策列表（保留原样） -->
+        <div class="history-panel">
+            <div class="history-header">
+                <h3>📋 历史决策记录</h3>
+                
+                <!-- 查询筛选条件 -->
+                <div class="history-filters">
+                    <div class="filter-group">
+                        <label>币种</label>
+                        <select id="filterSymbol" onchange="applyHistoryFilters()">
+                            <option value="all">全部币种</option>
+                            <!-- 动态生成币种选项 -->
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>周期</label>
+                        <select id="filterTimeframe" onchange="applyHistoryFilters()">
+                            <option value="all">全部周期</option>
+                            <option value="short">短期</option>
+                            <option value="medium">中长期</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>决策类型</label>
+                        <select id="filterDecision" onchange="applyHistoryFilters()">
+                            <option value="all">全部</option>
+                            <option value="long">LONG (做多)</option>
+                            <option value="short">SHORT (做空)</option>
+                            <option value="no_trade">NO_TRADE (观望)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>时间范围</label>
+                        <select id="filterHours" onchange="applyHistoryFilters()">
+                            <option value="1">最近1小时</option>
+                            <option value="6">最近6小时</option>
+                            <option value="24" selected>最近24小时</option>
+                            <option value="48">最近48小时</option>
+                        </select>
+                    </div>
+                    
+                    <button class="filter-reset-btn" onclick="resetHistoryFilters()">
+                        🔄 重置筛选
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 统计信息 -->
+            <div class="history-stats" id="historyStats">
+                <div class="stat-item">
+                    <span class="stat-label">总记录数</span>
+                    <span class="stat-value" id="statTotal">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">LONG</span>
+                    <span class="stat-value long" id="statLong">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">SHORT</span>
+                    <span class="stat-value short" id="statShort">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">NO_TRADE</span>
+                    <span class="stat-value notrade" id="statNoTrade">0</span>
+                </div>
+            </div>
+            
+            <!-- 历史记录表格 -->
+            <div class="history-table-container">
+                <table class="history-table" id="historyTable">
+                    <thead>
+                        <tr>
+                            <th width="8%">币种</th>
+                            <th width="8%">周期</th>
+                            <th width="12%">时间</th>
+                            <th width="10%">决策</th>
+                            <th width="10%">置信度</th>
+                            <th width="8%">可执行</th>
+                            <th width="44%">说明</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody">
+                        <tr>
+                            <td colspan="7" class="table-loading">正在加载历史记录...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 分页控制 -->
+            <div class="history-pagination">
+                <div class="pagination-info" id="paginationInfo">
+                    显示 <span id="pageStart">0</span>-<span id="pageEnd">0</span> / 总共 <span id="pageTotal">0</span> 条
+                </div>
+                <div class="pagination-controls">
+                    <button id="btnFirstPage" onclick="goToPage(1)" disabled>首页</button>
+                    <button id="btnPrevPage" onclick="previousPage()" disabled>上一页</button>
+                    <span class="page-number">
+                        第 <input type="number" id="currentPageInput" value="1" min="1" onchange="goToPageInput()"> / 
+                        <span id="totalPages">1</span> 页
+                    </span>
+                    <button id="btnNextPage" onclick="nextPage()" disabled>下一页</button>
+                    <button id="btnLastPage" onclick="goToLastPage()" disabled>末页</button>
+                </div>
+                <div class="pagination-size">
+                    <label>每页显示</label>
+                    <select id="pageSizeSelect" onchange="changePageSize()">
+                        <option value="10">10条</option>
+                        <option value="20" selected>20条</option>
+                        <option value="50">50条</option>
+                        <option value="100">100条</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- 页脚信息 -->
+        <footer>
+            <div class="footer-info">
+                <p>💡 <strong>L1 Advisory Layer</strong>: 双周期独立决策系统</p>
+                <p>🎯 <strong>短期</strong>: 5m/15m快速响应 | 📈 <strong>中长期</strong>: 1h/6h趋势确认</p>
+                <p>📊 数据来源: 币安合约市场 | 🔄 自动刷新: 60秒 | 📅 数据保留: 48小时</p>
+            </div>
+            <div class="footer-warning">
+                ⚠️ 本系统仅供参考，不构成投资建议。投资有风险，决策需谨慎。
+            </div>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app_l1_unified.js') }}"></script>
+</body>
+</html>

@@ -336,13 +336,19 @@ scheduler = start_scheduler()
 
 @app.route('/')
 def index():
-    """L1 Advisory主页"""
+    """L1 Advisory主页 - 双周期统一界面"""
+    return render_template('index_l1_unified.html')
+
+
+@app.route('/single')
+def index_single():
+    """L1 Advisory单周期页面（旧版）"""
     return render_template('index_l1.html')
 
 
 @app.route('/dual')
 def index_dual():
-    """L1 Advisory双周期决策页面（PR-DUAL）"""
+    """L1 Advisory双周期决策页面（独立版）"""
     return render_template('index_l1_dual.html')
 
 
