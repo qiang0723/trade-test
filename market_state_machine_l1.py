@@ -2278,9 +2278,21 @@ class L1AdvisoryEngine:
         regime: MarketRegime
     ) -> 'TimeframeConclusion':
         """
-        短期评估（5m/15m）
+        短期评估（5m/15m）- P0动态阈值版本
         
-        使用5分钟和15分钟的数据进行快速方向判断
+        使用5分钟和15分钟的数据进行快速方向判断。
+        
+        5维信号评估：
+        1. 价格变化（15m） - 动态阈值
+        2. Taker失衡（15m）
+        3. OI变化（15m）
+        4. 放量比率（15m）
+        5. 5m动量确认
+        
+        动态阈值规则：
+        - TREND: 0.3%（灵敏，捕捉趋势延续）
+        - RANGE: 0.8%（保守，减少假信号）
+        - EXTREME: 1.5%（Safety First，极端环境更严格）
         """
         from models.dual_timeframe_result import TimeframeConclusion
         from models.enums import Timeframe
@@ -2294,46 +2306,97 @@ class L1AdvisoryEngine:
         taker_imbalance_15m = data.get('taker_imbalance_15m', 0) or 0
         volume_ratio_5m = data.get('volume_ratio_5m', 1.0) or 1.0
         volume_ratio_15m = data.get('volume_ratio_15m', 1.0) or 1.0
+        oi_change_15m = data.get('oi_change_15m', 0) or 0  # 第5维：OI变化
         
+        # 短期方向判断（使用配置中的短期阈值）
+        short_config = self.config.get('dual_timeframe', {}).get('short_term', {})
+        
+        # ===== P0: 动态阈值选择 =====
+        price_change_config = short_config.get('min_price_change_15m', {})
+        
+        if isinstance(price_change_config, dict) and price_change_config.get('dynamic', False):
+            # 动态阈值模式：根据市场环境选择
+            if regime == MarketRegime.TREND:
+                min_price_change = price_change_config.get('trend', 0.003)  # 0.3%
+                threshold_regime = 'trend'
+            elif regime == MarketRegime.RANGE:
+                min_price_change = price_change_config.get('range', 0.008)  # 0.8%
+                threshold_regime = 'range'
+            elif regime == MarketRegime.EXTREME:
+                min_price_change = price_change_config.get('extreme', 0.015)  # 1.5%
+                threshold_regime = 'extreme'
+            else:
+                min_price_change = price_change_config.get('default', 0.005)  # 0.5%
+                threshold_regime = 'default'
+            
+            logger.debug(f"[{symbol}] Dynamic threshold: regime={regime.value} -> min_price_change={min_price_change:.4f} ({threshold_regime})")
+        else:
+            # 兼容模式：使用固定阈值（向后兼容）
+            min_price_change = price_change_config if isinstance(price_change_config, (int, float)) else 0.003
+            threshold_regime = 'fixed'
+        
+        # 其他阈值
+        min_taker_imbalance = short_config.get('min_taker_imbalance', 0.40)
+        min_volume_ratio = short_config.get('min_volume_ratio', 1.5)
+        min_oi_change = short_config.get('min_oi_change_15m', 0.02)
+        required_signals = short_config.get('required_signals', 4)
+        
+        # 构造key_metrics（含动态阈值信息）
         key_metrics = {
             'price_change_5m': price_change_5m,
             'price_change_15m': price_change_15m,
             'taker_imbalance_5m': taker_imbalance_5m,
             'taker_imbalance_15m': taker_imbalance_15m,
             'volume_ratio_5m': volume_ratio_5m,
-            'volume_ratio_15m': volume_ratio_15m
+            'volume_ratio_15m': volume_ratio_15m,
+            'oi_change_15m': oi_change_15m,
+            # 动态阈值元数据（便于前端显示和回测分析）
+            'threshold_min_price_change': min_price_change,
+            'threshold_regime': threshold_regime
         }
         
-        # 短期方向判断（使用配置中的短期阈值）
-        short_config = self.config.get('dual_timeframe', {}).get('short_term', {})
+        # ===== 5维信号评估 =====
         
-        # LONG 条件：价格上涨 + 买压 + 放量
+        # LONG 条件：价格上涨 + 买压 + OI增长 + 放量 + 5m确认
         long_signals = 0
-        if price_change_15m > short_config.get('min_price_change_15m', 0.003):
+        # 维度1: 价格变化（动态阈值）
+        if price_change_15m > min_price_change:
             long_signals += 1
-        if taker_imbalance_15m > short_config.get('min_taker_imbalance', 0.40):
+        # 维度2: Taker失衡
+        if taker_imbalance_15m > min_taker_imbalance:
             long_signals += 1
-        if volume_ratio_15m > short_config.get('min_volume_ratio', 1.2):
+        # 维度3: OI变化（多头增仓）
+        if oi_change_15m > min_oi_change:
             long_signals += 1
-        # 5m确认
+        # 维度4: 放量
+        if volume_ratio_15m > min_volume_ratio:
+            long_signals += 1
+        # 维度5: 5m动量确认
         if price_change_5m > 0 and taker_imbalance_5m > 0.30:
             long_signals += 1
         
-        # SHORT 条件：价格下跌 + 卖压 + 放量
+        # SHORT 条件：价格下跌 + 卖压 + OI增长 + 放量 + 5m确认
         short_signals = 0
-        if price_change_15m < -short_config.get('min_price_change_15m', 0.003):
+        # 维度1: 价格变化（动态阈值）
+        if price_change_15m < -min_price_change:
             short_signals += 1
-        if taker_imbalance_15m < -short_config.get('min_taker_imbalance', 0.40):
+        # 维度2: Taker失衡
+        if taker_imbalance_15m < -min_taker_imbalance:
             short_signals += 1
-        if volume_ratio_15m > short_config.get('min_volume_ratio', 1.2):
+        # 维度3: OI变化（空头增仓，OI同样增长）
+        if oi_change_15m > min_oi_change:
             short_signals += 1
-        # 5m确认
+        # 维度4: 放量
+        if volume_ratio_15m > min_volume_ratio:
+            short_signals += 1
+        # 维度5: 5m动量确认
         if price_change_5m < 0 and taker_imbalance_5m < -0.30:
             short_signals += 1
         
-        # 决策判断
-        required_signals = short_config.get('required_signals', 3)
+        # 记录信号详情到日志
+        logger.debug(f"[{symbol}] Short-term signals: LONG={long_signals}/5, SHORT={short_signals}/5, required={required_signals}")
         
+        # 决策判断（5选N）
         if long_signals >= required_signals and long_signals > short_signals:
             decision = Decision.LONG
             reason_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
@@ -2348,14 +2411,16 @@ class L1AdvisoryEngine:
             decision = Decision.NO_TRADE
             reason_tags.append(ReasonTag.NO_CLEAR_DIRECTION)
         
-        # 置信度计算
+        # 置信度计算（基于信号数量）
         max_signals = max(long_signals, short_signals)
-        if max_signals >= 4:
-            confidence = Confidence.HIGH
+        if max_signals >= 5:
+            confidence = Confidence.ULTRA  # 5/5 完美信号
+        elif max_signals >= 4:
+            confidence = Confidence.HIGH   # 4/5 高置信
         elif max_signals >= 3:
-            confidence = Confidence.MEDIUM
+            confidence = Confidence.MEDIUM # 3/5 中等
         else:
-            confidence = Confidence.LOW
+            confidence = Confidence.LOW    # <3 低置信
         
         # 质量评估
         if abs(taker_imbalance_15m) > 0.6 and volume_ratio_15m > 1.5:
@@ -2382,7 +2447,7 @@ class L1AdvisoryEngine:
             key_metrics=key_metrics
         )
         
-        logger.debug(f"[{symbol}] Short-term: {decision.value}, conf={confidence.value}, exec={conclusion.executable}")
+        logger.debug(f"[{symbol}] Short-term result: {decision.value}, conf={confidence.value}, threshold={threshold_regime}({min_price_change:.4f})")
         
         return conclusion
     
@@ -2636,13 +2701,36 @@ class L1AdvisoryEngine:
     ) -> 'DualTimeframeResult':
         """
         构造双周期NO_TRADE结果（用于全局风险拒绝等场景）
+        
+        即使在NO_TRADE场景，也包含动态阈值元数据，便于前端显示和回测分析。
         """
         from models.dual_timeframe_result import (
             DualTimeframeResult, TimeframeConclusion, AlignmentAnalysis
         )
         from models.enums import Timeframe, AlignmentType
         
-        # 短期NO_TRADE
+        # ===== P0: 计算动态阈值元数据（即使NO_TRADE也需要） =====
+        short_config = self.config.get('dual_timeframe', {}).get('short_term', {})
+        price_change_config = short_config.get('min_price_change_15m', {})
+        
+        if isinstance(price_change_config, dict) and price_change_config.get('dynamic', False):
+            if regime == MarketRegime.TREND:
+                threshold_value = price_change_config.get('trend', 0.003)
+                threshold_regime = 'trend'
+            elif regime == MarketRegime.RANGE:
+                threshold_value = price_change_config.get('range', 0.008)
+                threshold_regime = 'range'
+            elif regime == MarketRegime.EXTREME:
+                threshold_value = price_change_config.get('extreme', 0.015)
+                threshold_regime = 'extreme'
+            else:
+                threshold_value = price_change_config.get('default', 0.005)
+                threshold_regime = 'default'
+        else:
+            threshold_value = price_change_config if isinstance(price_change_config, (int, float)) else 0.003
+            threshold_regime = 'fixed'
+        
+        # 短期NO_TRADE（含动态阈值元数据）
         short_term = TimeframeConclusion(
             timeframe=Timeframe.SHORT_TERM,
             timeframe_label="5m/15m",
@@ -2653,7 +2741,10 @@ class L1AdvisoryEngine:
             execution_permission=ExecutionPermission.DENY,
             executable=False,
             reason_tags=global_risk_tags.copy(),
-            key_metrics={}
+            key_metrics={
+                'threshold_min_price_change': threshold_value,
+                'threshold_regime': threshold_regime
+            }
         )
         
         # 中长期NO_TRADE

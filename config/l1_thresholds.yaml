@@ -322,17 +322,26 @@ dual_timeframe:
   
   # 短期评估（5m/15m）阈值
   short_term:
-    # 15分钟价格变化阈值（方向确认）
-    min_price_change_15m: 0.003    # 0.3%
+    # 15分钟价格变化阈值（动态阈值，根据市场环境自动调整）
+    # P0-动态阈值：TREND灵敏、RANGE保守、EXTREME拒绝
+    min_price_change_15m:
+      dynamic: true                 # 启用动态阈值
+      trend: 0.003                  # TREND环境: 0.3%（灵敏，捕捉趋势延续）
+      range: 0.008                  # RANGE环境: 0.8%（保守，减少假信号）
+      extreme: 0.015                # EXTREME环境: 1.5%（Safety First）
+      default: 0.005                # 默认/降级: 0.5%
     
     # taker失衡阈值（买卖压力）
     min_taker_imbalance: 0.40      # 40%
     
-    # 放量比率阈值
-    min_volume_ratio: 1.2          # 1.2倍
+    # 放量比率阈值（Layer1优化: 1.2 → 1.5）
+    min_volume_ratio: 1.5          # 1.5倍（与GOOD质量标准一致）
     
-    # 满足信号数要求（4选N）
-    required_signals: 3
+    # OI变化阈值（5维信号补充）
+    min_oi_change_15m: 0.02        # 2%
+    
+    # 满足信号数要求（Layer1优化: 3 → 4，5选4）
+    required_signals: 4            # 5维信号中至少4维满足
   
   # 中长期评估（1h/6h）复用 direction 配置
   # medium_term 使用现有的 direction.trend/range 配置
