@@ -21,6 +21,7 @@ from backtest.data_loader import HistoricalDataLoader
 from backtest.backtest_engine import BacktestEngine
 from backtest.performance_analyzer import PerformanceAnalyzer
 from backtest.report_generator import ReportGenerator
+from backtest.signal_accuracy_analyzer import SignalAccuracyAnalyzer
 
 # 配置日志
 logging.basicConfig(
@@ -212,7 +213,94 @@ def main():
         print(f"  更优策略（收益）: {comparison['better_return']}")
         print(f"  更优策略（夏普）: {comparison['better_sharpe']}")
     
-    # 6. 打印摘要
+    # 6. 信号准确率分析
+    print("\n📈 步骤6: 信号准确率分析...")
+    
+    from market_state_machine_l1 import L1AdvisoryEngine
+    from models.enums import Decision
+    
+    # 创建分析器和引擎（使用回测专用配置）
+    accuracy_analyzer = SignalAccuracyAnalyzer()
+    engine = L1AdvisoryEngine()
+    
+    # 回测模式配置
+    engine.thresholds['data_max_staleness_seconds'] = 315360000
+    engine.config['decision_control'] = {
+        'min_decision_interval_seconds': 0,
+        'flip_cooldown_seconds': 0,
+        'enable_min_interval': False,
+        'enable_flip_cooldown': False
+    }
+    engine.config['dual_decision_control'] = {
+        'short_term_interval_seconds': 0,
+        'short_term_flip_cooldown_seconds': 0,
+        'medium_term_interval_seconds': 0,
+        'medium_term_flip_cooldown_seconds': 0,
+        'alignment_flip_cooldown_seconds': 0
+    }
+    # 更新双周期决策记忆的参数
+    engine.dual_decision_memory.short_term_interval = 0
+    engine.dual_decision_memory.short_term_flip_cooldown = 0
+    engine.dual_decision_memory.medium_term_interval = 0
+    engine.dual_decision_memory.medium_term_flip_cooldown = 0
+    engine.dual_decision_memory.alignment_flip_cooldown = 0
+    
+    # 遍历数据收集信号
+    signal_count = 0
+    for md in market_data_list:
+        # 记录价格
+        accuracy_analyzer.record_price(md['timestamp'], md['price'])
+        
+        # 获取决策
+        if 'dual' in backtest_config['modes']:
+            result = engine.on_new_tick_dual(data_config['symbol'], md)
+            decision = result.alignment.recommended_action
+            confidence = result.alignment.recommended_confidence.value
+            # 获取regime
+            try:
+                regime = result.short_term.regime.value
+            except:
+                regime = 'unknown'
+            # 检查是否可执行
+            executable = result._compute_combined_executable()
+        else:
+            result = engine.on_new_tick(data_config['symbol'], md)
+            decision = result.decision
+            confidence = result.confidence.value
+            try:
+                regime = result.regime.value
+            except:
+                regime = 'unknown'
+            executable = result.executable
+        
+        # 只记录可执行的LONG/SHORT信号
+        if decision in [Decision.LONG, Decision.SHORT] and executable:
+            accuracy_analyzer.record_signal(
+                timestamp=md['timestamp'],
+                decision=decision,
+                confidence=confidence,
+                regime=regime,
+                price=md['price']
+            )
+            signal_count += 1
+    
+    print(f"  收集到 {signal_count} 个可执行信号")
+    
+    # 生成准确率报告
+    accuracy_report = accuracy_analyzer.generate_report()
+    print(accuracy_report)
+    
+    # 保存准确率报告
+    accuracy_summary = accuracy_analyzer.get_summary_dict()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    accuracy_file = os.path.join(output_config['reports_dir'], f"{data_config['symbol']}_signal_accuracy_{timestamp}.json")
+    
+    import json
+    with open(accuracy_file, 'w') as f:
+        json.dump(accuracy_summary, f, indent=2)
+    print(f"✅ 信号准确率报告已保存: {accuracy_file}")
+    
+    # 7. 打印摘要
     print("\n" + "=" * 60)
     print("📋 回测摘要")
     print("=" * 60)
