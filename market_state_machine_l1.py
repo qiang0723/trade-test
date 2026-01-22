@@ -316,7 +316,146 @@ class L1AdvisoryEngine:
     - 不涉及执行逻辑
     - 不输出仓位/入场点/止损止盈
     - 不管理订单
+    
+    PATCH-P0-02增强:
+    - None一等公民：全链路None-safe，防止abs(None)/比较None崩溃
+    - 提供统一helper函数：_num, _abs, _compare, _fmt
+    
+    PATCH-P0-01增强:
+    - 冷启动/缺口策略：字段分级检查（core vs optional）
+    - 禁止6h缺数据长期INVALID_DATA
     """
+    
+    # ========== PATCH-P0-01: 字段分类定义 ==========
+    
+    # 核心必需字段（最小不可缺集合）
+    CORE_REQUIRED_FIELDS = [
+        'price',
+        'volume_24h',
+        'funding_rate'
+    ]
+    
+    # 短期可选字段（5m/15m）- 缺失影响short_term结论
+    SHORT_TERM_OPTIONAL_FIELDS = [
+        'price_change_5m',
+        'price_change_15m',
+        'oi_change_5m',
+        'oi_change_15m',
+        'taker_imbalance_5m',
+        'taker_imbalance_15m',
+        'volume_ratio_5m',
+        'volume_ratio_15m'
+    ]
+    
+    # 中期可选字段（1h/6h）- 缺失影响medium_term结论
+    MEDIUM_TERM_OPTIONAL_FIELDS = [
+        'price_change_1h',
+        'price_change_6h',
+        'oi_change_1h',
+        'oi_change_6h',
+        'taker_imbalance_1h',
+        'volume_1h'
+    ]
+    
+    # ========== End of Field Categories ==========
+    
+    # ========== PATCH-P0-02: None-safe Helper函数 ==========
+    
+    def _num(self, data: Dict, key: str, default=None) -> Optional[float]:
+        """
+        None-safe数值读取
+        
+        Args:
+            data: 数据字典
+            key: 键名
+            default: 默认值（None）
+        
+        Returns:
+            float值或None
+        
+        示例:
+            imbalance = self._num(data, 'taker_imbalance_1h')
+            if imbalance is not None and abs(imbalance) > 0.6:
+                # 安全处理
+        """
+        value = data.get(key, default)
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid numeric value for {key}: {value}")
+            return None
+    
+    def _abs(self, value: Optional[float]) -> Optional[float]:
+        """
+        None-safe abs
+        
+        Args:
+            value: 数值或None
+        
+        Returns:
+            abs(value)或None
+        """
+        return abs(value) if value is not None else None
+    
+    def _compare(self, value: Optional[float], op: str, threshold: float) -> bool:
+        """
+        None-safe比较（None视为False）
+        
+        Args:
+            value: 数值或None
+            op: 操作符（'>', '<', '>=', '<=', '==', '!='）
+            threshold: 阈值
+        
+        Returns:
+            比较结果（None返回False）
+        
+        示例:
+            if self._compare(imbalance, '>', 0.6):
+                # imbalance > 0.6 且不为None
+        """
+        if value is None:
+            return False
+        
+        if op == '>':
+            return value > threshold
+        elif op == '<':
+            return value < threshold
+        elif op == '>=':
+            return value >= threshold
+        elif op == '<=':
+            return value <= threshold
+        elif op == '==':
+            return value == threshold
+        elif op == '!=':
+            return value != threshold
+        else:
+            logger.warning(f"Unknown operator: {op}")
+            return False
+    
+    def _fmt(self, value: Optional[float], precision: int = 2) -> str:
+        """
+        None-safe格式化（用于日志）
+        
+        Args:
+            value: 数值或None
+            precision: 小数位数
+        
+        Returns:
+            格式化字符串（None返回"NA"）
+        
+        示例:
+            logger.info(f"Imbalance: {self._fmt(imbalance)}")
+        """
+        if value is None:
+            return "NA"
+        try:
+            return f"{value:.{precision}f}"
+        except (TypeError, ValueError):
+            return str(value)
+    
+    # ========== End of None-safe Helpers ==========
     
     def __init__(self, config_path: str = None):
         """
@@ -666,22 +805,33 @@ class L1AdvisoryEngine:
         Returns:
             (是否有效, 规范化后的数据, 失败原因tag, normalization_trace字典)
         """
-        # P0-BugFix-4: 添加 6h 变化率字段到必填列表
-        # price_change_6h 用于 TREND 市场环境识别
-        # oi_change_6h 用于拥挤风险检测
-        # 缺失这两个字段会导致相关逻辑静默失败（默认为0）
-        required_fields = [
-            'price', 'price_change_1h', 'price_change_6h',
-            'volume_1h', 'volume_24h',
-            'taker_imbalance_1h', 'funding_rate',  # PATCH-P0-2: 替换为taker_imbalance_1h
-            'oi_change_1h', 'oi_change_6h'
-        ]
+        # PATCH-P0-01: 字段分级检查（替代原有required_fields）
+        # 1. 检查核心必需字段（最小不可缺集合）
+        missing_core = [f for f in self.CORE_REQUIRED_FIELDS if f not in data or data[f] is None]
+        if missing_core:
+            logger.error(f"Missing core required fields: {missing_core}")
+            return False, data, ReasonTag.INVALID_DATA, None
         
-        # 检查必需字段
-        for field in required_fields:
-            if field not in data or data[field] is None:
-                logger.error(f"Missing required field: {field}")
-                return False, data, ReasonTag.INVALID_DATA, None
+        # 2. 检查短期可选字段（缺失标记但不硬失败）
+        missing_short_term = [f for f in self.SHORT_TERM_OPTIONAL_FIELDS if f not in data or data[f] is None]
+        
+        # 3. 检查中期可选字段（缺失标记但不硬失败）
+        missing_medium_term = [f for f in self.MEDIUM_TERM_OPTIONAL_FIELDS if f not in data or data[f] is None]
+        
+        # 4. 记录缺失情况（用于后续决策）
+        data['_field_gaps'] = {
+            'short_term': missing_short_term,
+            'medium_term': missing_medium_term
+        }
+        
+        # 5. 日志输出
+        if missing_short_term:
+            logger.info(f"Short-term optional fields missing: {missing_short_term}")
+        if missing_medium_term:
+            logger.info(f"Medium-term optional fields missing: {missing_medium_term}")
+        
+        # PATCH-P0-01: 即使optional字段缺失，也不返回INVALID_DATA
+        # 后续逻辑会根据_field_gaps决定如何处理
         
         # 数据新鲜度检查（PR-002）
         if 'timestamp' in data or 'source_timestamp' in data:
@@ -808,31 +958,57 @@ class L1AdvisoryEngine:
         - 为RANGE短期机会识别奠定基础
         - 返回regime_tags以在前端展示
         
+        PATCH-P0-02改进：
+        - None-safe：缺6h时使用1h/15m退化判定
+        - 使用_num/_abs helper
+        
         Args:
             data: 市场数据
         
         Returns:
             (MarketRegime, 标识标签列表)
         """
-        price_change_1h = abs(data.get('price_change_1h', 0))
-        price_change_6h = abs(data.get('price_change_6h', 0))
         regime_tags = []
         
+        # PATCH-P0-02: None-safe读取
+        price_change_1h = self._num(data, 'price_change_1h')
+        price_change_6h = self._num(data, 'price_change_6h')
+        price_change_15m = self._num(data, 'price_change_15m')  # fallback
+        
         # 1. EXTREME: 极端波动（优先级最高）
-        if price_change_1h > self.thresholds['extreme_price_change_1h']:
-            return MarketRegime.EXTREME, regime_tags
+        if price_change_1h is not None:
+            price_change_1h_abs = abs(price_change_1h)
+            if price_change_1h_abs > self.thresholds['extreme_price_change_1h']:
+                return MarketRegime.EXTREME, regime_tags
         
         # 2. TREND: 趋势市
         # 2.1 中期趋势（6小时）
-        if price_change_6h > self.thresholds['trend_price_change_6h']:
-            return MarketRegime.TREND, regime_tags
+        if price_change_6h is not None:
+            price_change_6h_abs = abs(price_change_6h)
+            if price_change_6h_abs > self.thresholds['trend_price_change_6h']:
+                return MarketRegime.TREND, regime_tags
+        elif price_change_15m is not None:
+            # PATCH-P0-02: 缺6h时使用15m退化判定（更保守阈值）
+            price_change_15m_abs = abs(price_change_15m)
+            fallback_threshold = self.thresholds['trend_price_change_6h'] * 0.5  # 15m用更低阈值
+            if price_change_15m_abs > fallback_threshold:
+                regime_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)  # 标记退化
+                logger.debug("Regime detection using 15m fallback (6h missing)")
+                return MarketRegime.TREND, regime_tags
         
         # 2.2 短期趋势（1小时）- 方案1: 捕获短期机会
-        if price_change_1h > self.thresholds.get('short_term_trend_1h', 0.02):
-            regime_tags.append(ReasonTag.SHORT_TERM_TREND)  # ✅ 标识短期趋势
-            return MarketRegime.TREND, regime_tags
+        if price_change_1h is not None:
+            price_change_1h_abs = abs(price_change_1h)
+            if price_change_1h_abs > self.thresholds.get('short_term_trend_1h', 0.02):
+                regime_tags.append(ReasonTag.SHORT_TERM_TREND)
+                return MarketRegime.TREND, regime_tags
         
         # 3. RANGE: 震荡市（默认）
+        # PATCH-P0-02: 如果关键字段全缺失，标记但仍返回RANGE（保守）
+        if price_change_1h is None and price_change_6h is None:
+            regime_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
+            logger.debug("Regime defaults to RANGE (price_change data missing)")
+        
         return MarketRegime.RANGE, regime_tags
     
     # ========================================
@@ -853,6 +1029,10 @@ class L1AdvisoryEngine:
         3. 拥挤风险（极端费率 + 高OI增长）
         4. 极端成交量
         
+        PATCH-P0-02改进：
+        - None-safe：关键字段缺失时跳过规则（不误DENY）
+        - 使用_num/_abs/_compare helper
+        
         Args:
             data: 市场数据
             regime: 市场环境
@@ -867,31 +1047,47 @@ class L1AdvisoryEngine:
             tags.append(ReasonTag.EXTREME_REGIME)
             return False, tags
         
-        # 2. 清算阶段
-        price_change_1h = data.get('price_change_1h', 0)
-        oi_change_1h = data.get('oi_change_1h', 0)
+        # 2. 清算阶段（PATCH-P0-02: None-safe）
+        price_change_1h = self._num(data, 'price_change_1h')
+        oi_change_1h = self._num(data, 'oi_change_1h')
         
-        if (abs(price_change_1h) > self.thresholds['liquidation_price_change'] and 
-            oi_change_1h < self.thresholds['liquidation_oi_drop']):
-            tags.append(ReasonTag.LIQUIDATION_PHASE)
-            return False, tags
+        if price_change_1h is not None and oi_change_1h is not None:
+            if (abs(price_change_1h) > self.thresholds['liquidation_price_change'] and 
+                oi_change_1h < self.thresholds['liquidation_oi_drop']):
+                tags.append(ReasonTag.LIQUIDATION_PHASE)
+                return False, tags
+        else:
+            # 关键字段缺失，跳过此规则但记录
+            if price_change_1h is None or oi_change_1h is None:
+                logger.debug("Liquidation check skipped (price_change_1h or oi_change_1h missing)")
         
-        # 3. 拥挤风险
-        funding_rate = abs(data.get('funding_rate', 0))
-        oi_change_6h = data.get('oi_change_6h', 0)
+        # 3. 拥挤风险（PATCH-P0-02: None-safe）
+        funding_rate_value = self._num(data, 'funding_rate')
+        oi_change_6h = self._num(data, 'oi_change_6h')
         
-        if (funding_rate > self.thresholds['crowding_funding_abs'] and 
-            oi_change_6h > self.thresholds['crowding_oi_growth']):
-            tags.append(ReasonTag.CROWDING_RISK)
-            return False, tags
+        if funding_rate_value is not None and oi_change_6h is not None:
+            funding_rate_abs = abs(funding_rate_value)
+            if (funding_rate_abs > self.thresholds['crowding_funding_abs'] and 
+                oi_change_6h > self.thresholds['crowding_oi_growth']):
+                tags.append(ReasonTag.CROWDING_RISK)
+                return False, tags
+        else:
+            # 关键字段缺失，跳过此规则
+            if funding_rate_value is None or oi_change_6h is None:
+                logger.debug("Crowding check skipped (funding_rate or oi_change_6h missing)")
         
-        # 4. 极端成交量
-        volume_1h = data.get('volume_1h', 0)
-        volume_avg = data.get('volume_24h', 0) / 24
+        # 4. 极端成交量（PATCH-P0-02: None-safe）
+        volume_1h = self._num(data, 'volume_1h')
+        volume_24h = self._num(data, 'volume_24h')
         
-        if volume_avg > 0 and volume_1h > volume_avg * self.thresholds['extreme_volume_multiplier']:
-            tags.append(ReasonTag.EXTREME_VOLUME)
-            return False, tags
+        if volume_1h is not None and volume_24h is not None and volume_24h > 0:
+            volume_avg = volume_24h / 24
+            if volume_1h > volume_avg * self.thresholds['extreme_volume_multiplier']:
+                tags.append(ReasonTag.EXTREME_VOLUME)
+                return False, tags
+        else:
+            # 成交量数据缺失，跳过此规则
+            logger.debug("Extreme volume check skipped (volume data missing)")
         
         # 通过所有风险检查
         return True, []
@@ -915,6 +1111,10 @@ class L1AdvisoryEngine:
         3. 轮动风险（OI和价格背离）
         4. 震荡市弱信号
         
+        PATCH-P0-02改进：
+        - None-safe：关键字段缺失时最多降级到UNCERTAIN（不直接POOR）
+        - 使用_num/_abs helper
+        
         Args:
             data: 市场数据
             regime: 市场环境
@@ -924,66 +1124,76 @@ class L1AdvisoryEngine:
         """
         tags = []
         
-        # 1. 吸纳风险（deny_tags等价物：双重保护机制）
-        # - 第一道防线：返回POOR → 硬短路为NO_TRADE
-        # - 第二道防线：BLOCK标签 → ExecutionPermission.DENY → executable=False
-        # - 即使有强信号也无法绕过（Step 8先于Step 9的强信号boost）
-        # PATCH-P0-2: 使用taker_imbalance_1h替代buy_sell_imbalance
-        imbalance = abs(data.get('taker_imbalance_1h', 0))
-        volume_1h = data.get('volume_1h', 0)
-        volume_avg = data.get('volume_24h', 0) / 24
+        # 1. 吸纳风险（PATCH-P0-02: None-safe）
+        imbalance_value = self._num(data, 'taker_imbalance_1h')
+        volume_1h = self._num(data, 'volume_1h')
+        volume_24h = self._num(data, 'volume_24h')
         
-        if (volume_avg > 0 and 
-            imbalance > self.thresholds['absorption_imbalance'] and 
-            volume_1h < volume_avg * self.thresholds['absorption_volume_ratio']):
-            tags.append(ReasonTag.ABSORPTION_RISK)
-            return TradeQuality.POOR, tags
-        
-        # 2. 噪音市（需要历史数据）- PR-004: 返回UNCERTAIN而非POOR
-        funding_rate = data.get('funding_rate', 0)
-        history_key = f'{symbol}_funding_rate_prev'
-        is_first_call = history_key not in self.history_data
-        
-        # 首次调用时使用当前值作为历史值（冷启动，无法检测波动）
-        funding_rate_prev = self.history_data.get(history_key, funding_rate)
-        funding_volatility = abs(funding_rate - funding_rate_prev)
-        
-        # P0-2修复: 先保存当前数据供下次使用（确保每次tick都更新，避免NOISY分支return导致不可达）
-        # 同时使用 symbol 前缀避免多币种串扰
-        self.history_data[history_key] = funding_rate
-        
-        # 首次调用时记录日志（冷启动期间无法检测噪音市场）
-        if is_first_call:
-            logger.debug(f"[{symbol}] First call for noise detection, funding_rate history initialized")
-        
-        if (funding_volatility > self.thresholds['noisy_funding_volatility'] and 
-            abs(funding_rate) < self.thresholds['noisy_funding_abs']):
-            tags.append(ReasonTag.NOISY_MARKET)
-            # PR-004: 噪声市场 → UNCERTAIN（不确定性），而非POOR（明确风险）
+        if imbalance_value is not None and volume_1h is not None and volume_24h is not None and volume_24h > 0:
+            imbalance_abs = abs(imbalance_value)
+            volume_avg = volume_24h / 24
+            if (imbalance_abs > self.thresholds['absorption_imbalance'] and 
+                volume_1h < volume_avg * self.thresholds['absorption_volume_ratio']):
+                tags.append(ReasonTag.ABSORPTION_RISK)
+                return TradeQuality.POOR, tags
+        elif imbalance_value is None or volume_1h is None or volume_24h is None:
+            # PATCH-P0-02: 关键字段缺失 → 降级到UNCERTAIN（不直接POOR）
+            logger.debug(f"[{symbol}] Absorption check skipped (imbalance/volume missing)")
+            tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
             return TradeQuality.UNCERTAIN, tags
         
-        # 3. 轮动风险（deny_tags等价物：双重保护机制）
-        # - 第一道防线：返回POOR → 硬短路为NO_TRADE
-        # - 第二道防线：BLOCK标签 → ExecutionPermission.DENY → executable=False
-        # - 即使有强信号也无法绕过（Step 8先于Step 9的强信号boost）
-        price_change_1h = data.get('price_change_1h', 0)
-        oi_change_1h = data.get('oi_change_1h', 0)
+        # 2. 噪音市（PATCH-P0-02: None-safe）
+        funding_rate = self._num(data, 'funding_rate')
         
-        if ((price_change_1h > self.thresholds['rotation_price_threshold'] and 
-             oi_change_1h < -self.thresholds['rotation_oi_threshold']) or
-            (price_change_1h < -self.thresholds['rotation_price_threshold'] and 
-             oi_change_1h > self.thresholds['rotation_oi_threshold'])):
-            tags.append(ReasonTag.ROTATION_RISK)
-            return TradeQuality.POOR, tags
-        
-        # 4. 震荡市弱信号
-        if regime == MarketRegime.RANGE:
-            if (imbalance < self.thresholds['range_weak_imbalance'] and 
-                abs(oi_change_1h) < self.thresholds['range_weak_oi']):
-                tags.append(ReasonTag.WEAK_SIGNAL_IN_RANGE)
-                # P0-1修复: 震荡弱信号 → UNCERTAIN（可降级执行），而非POOR（直接阻断）
-                # 与NOISY_MARKET保持一致，支持ExecutionPermission.ALLOW_REDUCED + 双门槛机制
+        if funding_rate is not None:
+            history_key = f'{symbol}_funding_rate_prev'
+            is_first_call = history_key not in self.history_data
+            
+            # 首次调用时使用当前值作为历史值（冷启动）
+            funding_rate_prev = self.history_data.get(history_key, funding_rate)
+            funding_volatility = abs(funding_rate - funding_rate_prev)
+            
+            # 保存当前数据供下次使用
+            self.history_data[history_key] = funding_rate
+            
+            if is_first_call:
+                logger.debug(f"[{symbol}] First call for noise detection, funding_rate history initialized")
+            
+            if (funding_volatility > self.thresholds['noisy_funding_volatility'] and 
+                abs(funding_rate) < self.thresholds['noisy_funding_abs']):
+                tags.append(ReasonTag.NOISY_MARKET)
                 return TradeQuality.UNCERTAIN, tags
+        else:
+            logger.debug(f"[{symbol}] Noise check skipped (funding_rate missing)")
+        
+        # 3. 轮动风险（PATCH-P0-02: None-safe）
+        price_change_1h = self._num(data, 'price_change_1h')
+        oi_change_1h = self._num(data, 'oi_change_1h')
+        
+        if price_change_1h is not None and oi_change_1h is not None:
+            if ((price_change_1h > self.thresholds['rotation_price_threshold'] and 
+                 oi_change_1h < -self.thresholds['rotation_oi_threshold']) or
+                (price_change_1h < -self.thresholds['rotation_price_threshold'] and 
+                 oi_change_1h > self.thresholds['rotation_oi_threshold'])):
+                tags.append(ReasonTag.ROTATION_RISK)
+                return TradeQuality.POOR, tags
+        else:
+            # PATCH-P0-02: 关键字段缺失 → 跳过规则
+            logger.debug(f"[{symbol}] Rotation check skipped (price_change_1h or oi_change_1h missing)")
+        
+        # 4. 震荡市弱信号（PATCH-P0-02: None-safe）
+        if regime == MarketRegime.RANGE:
+            # 重新读取imbalance_abs（前面已读取imbalance_value）
+            imbalance_abs = self._abs(imbalance_value) if imbalance_value is not None else None
+            oi_change_1h_abs = self._abs(oi_change_1h) if oi_change_1h is not None else None
+            
+            if imbalance_abs is not None and oi_change_1h_abs is not None:
+                if (imbalance_abs < self.thresholds['range_weak_imbalance'] and 
+                    oi_change_1h_abs < self.thresholds['range_weak_oi']):
+                    tags.append(ReasonTag.WEAK_SIGNAL_IN_RANGE)
+                    return TradeQuality.UNCERTAIN, tags
+            else:
+                logger.debug(f"[{symbol}] Range weak signal check skipped (imbalance or oi_change missing)")
         
         # 通过所有质量检查
         return TradeQuality.GOOD, []
@@ -996,6 +1206,10 @@ class L1AdvisoryEngine:
         """
         做多方向评估（方案1+4组合：短期机会识别）
         
+        PATCH-P0-02改进：
+        - None-safe：关键字段缺失时返回False（不误判LONG）
+        - 使用_num helper
+        
         Args:
             data: 市场数据
             regime: 市场环境
@@ -1003,11 +1217,17 @@ class L1AdvisoryEngine:
         Returns:
             (是否允许做多, 标签列表)
         """
-        # PATCH-P0-2: 使用taker_imbalance_1h
-        imbalance = data.get('taker_imbalance_1h', 0)
-        oi_change = data.get('oi_change_1h', 0)
-        price_change = data.get('price_change_1h', 0)
         direction_tags = []
+        
+        # PATCH-P0-02: None-safe读取
+        imbalance = self._num(data, 'taker_imbalance_1h')
+        oi_change = self._num(data, 'oi_change_1h')
+        price_change = self._num(data, 'price_change_1h')
+        
+        # 关键字段缺失，无法判断方向
+        if imbalance is None or oi_change is None or price_change is None:
+            logger.debug("Long direction eval skipped (key fields missing)")
+            return False, direction_tags
         
         if regime == MarketRegime.TREND:
             # 趋势市：多方强势
@@ -1056,6 +1276,10 @@ class L1AdvisoryEngine:
         """
         做空方向评估（方案1+4组合：短期机会识别）
         
+        PATCH-P0-02改进：
+        - None-safe：关键字段缺失时返回False（不误判SHORT）
+        - 使用_num helper
+        
         Args:
             data: 市场数据
             regime: 市场环境
@@ -1063,11 +1287,17 @@ class L1AdvisoryEngine:
         Returns:
             (是否允许做空, 标签列表)
         """
-        # PATCH-P0-2: 使用taker_imbalance_1h
-        imbalance = data.get('taker_imbalance_1h', 0)
-        oi_change = data.get('oi_change_1h', 0)
-        price_change = data.get('price_change_1h', 0)
         direction_tags = []
+        
+        # PATCH-P0-02: None-safe读取
+        imbalance = self._num(data, 'taker_imbalance_1h')
+        oi_change = self._num(data, 'oi_change_1h')
+        price_change = self._num(data, 'price_change_1h')
+        
+        # 关键字段缺失，无法判断方向
+        if imbalance is None or oi_change is None or price_change is None:
+            logger.debug("Short direction eval skipped (key fields missing)")
+            return False, direction_tags
         
         if regime == MarketRegime.TREND:
             # 趋势市：空方强势

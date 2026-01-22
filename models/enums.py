@@ -97,7 +97,7 @@ class Timeframe(Enum):
 
 class AlignmentType(Enum):
     """
-    双周期一致性类型（PR-DUAL）
+    双周期一致性类型（PR-DUAL + PATCH-P0-04）
     
     描述短期和中长期结论的关系：
     - BOTH_LONG: 两者都看多
@@ -107,6 +107,9 @@ class AlignmentType(Enum):
     - CONFLICT_SHORT_LONG: 冲突 - 短期空/中长期多
     - PARTIAL_LONG: 一方看多，一方不交易
     - PARTIAL_SHORT: 一方看空，一方不交易
+    - SHORT_ONLY: 仅短期可用（中期数据缺口）- PATCH-P0-04
+    - MID_ONLY: 仅中期可用（短期数据缺口，罕见）- PATCH-P0-04
+    - NONE_AVAILABLE: 都不可用 - PATCH-P0-04
     """
     BOTH_LONG = "both_long"                    # 一致看多
     BOTH_SHORT = "both_short"                  # 一致看空
@@ -115,6 +118,9 @@ class AlignmentType(Enum):
     CONFLICT_SHORT_LONG = "conflict_short_long"  # 冲突：短期空/中长期多
     PARTIAL_LONG = "partial_long"              # 部分看多
     PARTIAL_SHORT = "partial_short"            # 部分看空
+    SHORT_ONLY = "short_only"                  # PATCH-P0-04: 仅短期可用（中期缺口）
+    MID_ONLY = "mid_only"                      # PATCH-P0-04: 仅中期可用（短期缺口）
+    NONE_AVAILABLE = "none_available"          # PATCH-P0-04: 都不可用
 
 
 class ConflictResolution(Enum):
