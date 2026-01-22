@@ -1,0 +1,767 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>回测报告 - BTCUSDT</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 30px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 8px;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .metric-card {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #4CAF50;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-value.positive {
+            color: #4CAF50;
+        }
+        .metric-value.negative {
+            color: #f44336;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #4CAF50;
+            color: white;
+            font-weight: bold;
+        }
+        tr:hover {
+            background: #f5f5f5;
+        }
+        .trade-long {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .trade-short {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .pnl-positive {
+            color: #4CAF50;
+        }
+        .pnl-negative {
+            color: #f44336;
+        }
+        .summary-box {
+            background: #e8f5e9;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .timestamp {
+            color: #999;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 回测报告</h1>
+        <p class="timestamp">生成时间: 2026-01-22 16:11:29</p>
+        
+        <div class="summary-box">
+            <h3>基本信息</h3>
+            <p><strong>交易对:</strong> BTCUSDT</p>
+            <p><strong>回测模式:</strong> dual</p>
+            <p><strong>平仓策略:</strong> signal_reverse</p>
+            <p><strong>初始资金:</strong> $10,000.00</p>
+            <p><strong>最终资金:</strong> $7,665.62</p>
+        </div>
+        
+        <h2>📈 绩效指标</h2>
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">总收益率</div>
+                <div class="metric-value negative">
+                    -23.34%
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">胜率</div>
+                <div class="metric-value">
+                    24.00%
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">总交易次数</div>
+                <div class="metric-value">
+                    75
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">夏普比率</div>
+                <div class="metric-value">
+                    -2.55
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">最大回撤</div>
+                <div class="metric-value negative">
+                    21.61%
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">盈亏比</div>
+                <div class="metric-value">
+                    1.68
+                </div>
+            </div>
+        </div>
+        
+        <h2>📊 收益对比</h2>
+        <table>
+            <tr>
+                <th>策略</th>
+                <th>收益率</th>
+                <th>说明</th>
+            </tr>
+            <tr>
+                <td>L1策略</td>
+                <td class="pnl-negative">
+                    -23.34%
+                </td>
+                <td>基于L1决策的主动交易</td>
+            </tr>
+            <tr>
+                <td>Buy & Hold</td>
+                <td class="pnl-positive">
+                    2.07%
+                </td>
+                <td>买入持有基准</td>
+            </tr>
+            <tr>
+                <td>超额收益</td>
+                <td class="pnl-negative">
+                    -25.42%
+                </td>
+                <td>相对基准的超额表现</td>
+            </tr>
+        </table>
+        
+        <h2>📝 交易记录</h2>
+        <p>共 75 笔交易，显示前50笔：</p>
+        <table>
+            <tr>
+                <th>方向</th>
+                <th>开仓时间</th>
+                <th>开仓价格</th>
+                <th>平仓时间</th>
+                <th>平仓价格</th>
+                <th>P&L</th>
+                <th>P&L金额</th>
+                <th>平仓原因</th>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-01 23:44</td>
+                <td>$42,867.38</td>
+                <td>2024-01-01 23:52</td>
+                <td>$42,759.72</td>
+                <td class="pnl-negative">-0.25%</td>
+                <td class="pnl-negative">$-35.08</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-02 07:32</td>
+                <td>$44,054.02</td>
+                <td>2024-01-02 09:53</td>
+                <td>$44,763.69</td>
+                <td class="pnl-positive">1.61%</td>
+                <td class="pnl-positive">$150.26</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-02 18:51</td>
+                <td>$45,449.26</td>
+                <td>2024-01-02 18:54</td>
+                <td>$45,537.18</td>
+                <td class="pnl-negative">-0.19%</td>
+                <td class="pnl-negative">$-29.59</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-03 15:45</td>
+                <td>$45,059.78</td>
+                <td>2024-01-03 15:49</td>
+                <td>$45,087.26</td>
+                <td class="pnl-negative">-0.06%</td>
+                <td class="pnl-negative">$-16.17</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-03 19:08</td>
+                <td>$44,907.47</td>
+                <td>2024-01-03 20:22</td>
+                <td>$42,303.25</td>
+                <td class="pnl-positive">5.80%</td>
+                <td class="pnl-positive">$571.01</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-04 12:07</td>
+                <td>$42,968.50</td>
+                <td>2024-01-04 12:57</td>
+                <td>$43,174.04</td>
+                <td class="pnl-negative">-0.48%</td>
+                <td class="pnl-negative">$-61.19</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-05 09:48</td>
+                <td>$42,508.49</td>
+                <td>2024-01-05 10:00</td>
+                <td>$43,771.20</td>
+                <td class="pnl-negative">-2.97%</td>
+                <td class="pnl-negative">$-322.65</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-06 11:43</td>
+                <td>$44,018.41</td>
+                <td>2024-01-06 11:47</td>
+                <td>$43,942.68</td>
+                <td class="pnl-negative">-0.17%</td>
+                <td class="pnl-negative">$-27.68</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-06 18:37</td>
+                <td>$43,735.06</td>
+                <td>2024-01-06 18:41</td>
+                <td>$43,666.28</td>
+                <td class="pnl-negative">-0.16%</td>
+                <td class="pnl-negative">$-26.08</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-07 00:14</td>
+                <td>$43,955.46</td>
+                <td>2024-01-07 00:18</td>
+                <td>$43,868.06</td>
+                <td class="pnl-negative">-0.20%</td>
+                <td class="pnl-negative">$-30.18</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-07 02:41</td>
+                <td>$44,094.05</td>
+                <td>2024-01-07 03:19</td>
+                <td>$43,838.10</td>
+                <td class="pnl-negative">-0.58%</td>
+                <td class="pnl-negative">$-68.46</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-07 08:38</td>
+                <td>$44,156.23</td>
+                <td>2024-01-07 08:46</td>
+                <td>$44,125.68</td>
+                <td class="pnl-negative">-0.07%</td>
+                <td class="pnl-negative">$-16.89</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-07 10:38</td>
+                <td>$43,885.30</td>
+                <td>2024-01-07 10:44</td>
+                <td>$43,961.08</td>
+                <td class="pnl-negative">-0.17%</td>
+                <td class="pnl-negative">$-27.15</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-08 10:51</td>
+                <td>$43,278.36</td>
+                <td>2024-01-08 11:37</td>
+                <td>$43,362.04</td>
+                <td class="pnl-negative">-0.19%</td>
+                <td class="pnl-negative">$-29.10</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-08 14:21</td>
+                <td>$44,227.05</td>
+                <td>2024-01-08 14:35</td>
+                <td>$43,910.05</td>
+                <td class="pnl-negative">-0.72%</td>
+                <td class="pnl-negative">$-80.69</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-08 19:54</td>
+                <td>$44,462.32</td>
+                <td>2024-01-08 20:55</td>
+                <td>$44,932.98</td>
+                <td class="pnl-positive">1.06%</td>
+                <td class="pnl-positive">$93.83</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-09 11:08</td>
+                <td>$46,957.79</td>
+                <td>2024-01-09 11:19</td>
+                <td>$46,901.34</td>
+                <td class="pnl-negative">-0.12%</td>
+                <td class="pnl-negative">$-21.74</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-09 15:28</td>
+                <td>$46,951.66</td>
+                <td>2024-01-09 15:30</td>
+                <td>$46,848.55</td>
+                <td class="pnl-negative">-0.22%</td>
+                <td class="pnl-negative">$-31.45</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-09 20:14</td>
+                <td>$46,747.34</td>
+                <td>2024-01-09 20:20</td>
+                <td>$46,656.62</td>
+                <td class="pnl-negative">-0.19%</td>
+                <td class="pnl-negative">$-28.82</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-10 05:11</td>
+                <td>$47,326.65</td>
+                <td>2024-01-10 05:17</td>
+                <td>$46,042.98</td>
+                <td class="pnl-negative">-2.71%</td>
+                <td class="pnl-negative">$-274.53</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-10 16:50</td>
+                <td>$45,595.90</td>
+                <td>2024-01-10 17:38</td>
+                <td>$45,670.85</td>
+                <td class="pnl-negative">-0.16%</td>
+                <td class="pnl-negative">$-25.06</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-10 19:12</td>
+                <td>$45,661.62</td>
+                <td>2024-01-10 19:24</td>
+                <td>$45,497.24</td>
+                <td class="pnl-negative">-0.36%</td>
+                <td class="pnl-negative">$-43.44</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-11 01:42</td>
+                <td>$46,131.82</td>
+                <td>2024-01-11 02:11</td>
+                <td>$46,083.95</td>
+                <td class="pnl-negative">-0.10%</td>
+                <td class="pnl-negative">$-19.14</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-11 07:05</td>
+                <td>$47,164.90</td>
+                <td>2024-01-11 07:28</td>
+                <td>$46,862.57</td>
+                <td class="pnl-negative">-0.64%</td>
+                <td class="pnl-negative">$-69.37</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-11 13:44</td>
+                <td>$46,003.45</td>
+                <td>2024-01-11 14:04</td>
+                <td>$46,014.40</td>
+                <td class="pnl-negative">-0.02%</td>
+                <td class="pnl-negative">$-11.49</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-11 22:46</td>
+                <td>$48,859.18</td>
+                <td>2024-01-11 23:07</td>
+                <td>$48,118.32</td>
+                <td class="pnl-negative">-1.52%</td>
+                <td class="pnl-negative">$-149.71</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-13 06:03</td>
+                <td>$42,887.24</td>
+                <td>2024-01-13 06:35</td>
+                <td>$42,371.19</td>
+                <td class="pnl-positive">1.20%</td>
+                <td class="pnl-positive">$100.44</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-13 10:50</td>
+                <td>$42,566.52</td>
+                <td>2024-01-13 11:58</td>
+                <td>$42,630.34</td>
+                <td class="pnl-negative">-0.15%</td>
+                <td class="pnl-negative">$-22.98</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-14 14:11</td>
+                <td>$42,875.61</td>
+                <td>2024-01-14 15:17</td>
+                <td>$42,958.52</td>
+                <td class="pnl-positive">0.19%</td>
+                <td class="pnl-positive">$8.56</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-14 22:13</td>
+                <td>$43,022.59</td>
+                <td>2024-01-14 22:16</td>
+                <td>$42,914.57</td>
+                <td class="pnl-negative">-0.25%</td>
+                <td class="pnl-negative">$-32.16</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-15 04:02</td>
+                <td>$42,202.35</td>
+                <td>2024-01-15 04:15</td>
+                <td>$42,706.14</td>
+                <td class="pnl-negative">-1.19%</td>
+                <td class="pnl-negative">$-118.00</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-15 11:24</td>
+                <td>$42,627.31</td>
+                <td>2024-01-15 12:15</td>
+                <td>$42,528.72</td>
+                <td class="pnl-negative">-0.23%</td>
+                <td class="pnl-negative">$-29.80</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-15 15:33</td>
+                <td>$42,534.36</td>
+                <td>2024-01-15 16:18</td>
+                <td>$42,732.72</td>
+                <td class="pnl-negative">-0.47%</td>
+                <td class="pnl-negative">$-50.71</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-16 10:45</td>
+                <td>$42,671.16</td>
+                <td>2024-01-16 12:15</td>
+                <td>$42,889.63</td>
+                <td class="pnl-positive">0.51%</td>
+                <td class="pnl-positive">$36.65</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-16 15:43</td>
+                <td>$42,797.62</td>
+                <td>2024-01-16 16:50</td>
+                <td>$42,948.52</td>
+                <td class="pnl-positive">0.35%</td>
+                <td class="pnl-positive">$22.54</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-16 22:53</td>
+                <td>$42,659.94</td>
+                <td>2024-01-16 23:50</td>
+                <td>$43,036.88</td>
+                <td class="pnl-positive">0.88%</td>
+                <td class="pnl-positive">$70.03</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-17 10:33</td>
+                <td>$42,942.35</td>
+                <td>2024-01-17 12:06</td>
+                <td>$42,915.42</td>
+                <td class="pnl-positive">0.06%</td>
+                <td class="pnl-positive">$-3.35</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-18 18:45</td>
+                <td>$42,520.84</td>
+                <td>2024-01-18 19:01</td>
+                <td>$42,507.24</td>
+                <td class="pnl-positive">0.03%</td>
+                <td class="pnl-positive">$-6.11</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-19 03:55</td>
+                <td>$41,047.92</td>
+                <td>2024-01-19 04:10</td>
+                <td>$41,149.81</td>
+                <td class="pnl-negative">-0.25%</td>
+                <td class="pnl-negative">$-31.24</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-20 19:03</td>
+                <td>$41,468.14</td>
+                <td>2024-01-20 19:12</td>
+                <td>$41,542.39</td>
+                <td class="pnl-negative">-0.18%</td>
+                <td class="pnl-negative">$-24.92</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-21 07:51</td>
+                <td>$41,618.70</td>
+                <td>2024-01-21 08:05</td>
+                <td>$41,746.90</td>
+                <td class="pnl-negative">-0.31%</td>
+                <td class="pnl-negative">$-36.30</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-22 04:47</td>
+                <td>$41,629.18</td>
+                <td>2024-01-22 05:47</td>
+                <td>$41,739.67</td>
+                <td class="pnl-negative">-0.27%</td>
+                <td class="pnl-negative">$-32.34</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-23 02:49</td>
+                <td>$40,270.96</td>
+                <td>2024-01-23 03:04</td>
+                <td>$40,500.68</td>
+                <td class="pnl-negative">-0.57%</td>
+                <td class="pnl-negative">$-59.06</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-23 12:27</td>
+                <td>$40,184.01</td>
+                <td>2024-01-23 13:09</td>
+                <td>$40,062.91</td>
+                <td class="pnl-negative">-0.30%</td>
+                <td class="pnl-negative">$-35.09</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-23 18:30</td>
+                <td>$39,140.71</td>
+                <td>2024-01-23 18:36</td>
+                <td>$39,000.49</td>
+                <td class="pnl-negative">-0.36%</td>
+                <td class="pnl-negative">$-39.86</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-23 23:40</td>
+                <td>$39,277.15</td>
+                <td>2024-01-24 01:57</td>
+                <td>$39,382.36</td>
+                <td class="pnl-positive">0.27%</td>
+                <td class="pnl-positive">$14.52</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-24 07:26</td>
+                <td>$39,808.69</td>
+                <td>2024-01-24 08:26</td>
+                <td>$39,861.15</td>
+                <td class="pnl-positive">0.13%</td>
+                <td class="pnl-positive">$2.75</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-24 08:51</td>
+                <td>$40,194.00</td>
+                <td>2024-01-24 08:55</td>
+                <td>$40,139.02</td>
+                <td class="pnl-negative">-0.14%</td>
+                <td class="pnl-negative">$-20.48</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-short">SHORT</td>
+                <td>2024-01-24 11:28</td>
+                <td>$39,578.13</td>
+                <td>2024-01-24 11:40</td>
+                <td>$39,666.79</td>
+                <td class="pnl-negative">-0.22%</td>
+                <td class="pnl-negative">$-27.93</td>
+                <td>signal_reverse</td>
+            </tr>
+
+            <tr>
+                <td class="trade-long">LONG</td>
+                <td>2024-01-24 12:35</td>
+                <td>$39,729.73</td>
+                <td>2024-01-24 13:05</td>
+                <td>$39,668.60</td>
+                <td class="pnl-negative">-0.15%</td>
+                <td class="pnl-negative">$-21.79</td>
+                <td>signal_reverse</td>
+            </tr>
+
+        </table>
+        
+        <h2>💡 总结</h2>
+        <div class="summary-box">
+
+            <p>⚠️ <strong>策略表现不佳</strong></p>
+            <p>总收益率 -23.34% 低于Buy & Hold的 2.07%。</p>
+
+            <p>胜率为 24.00%，盈亏比为 1.68。</p>
+            <p>最大回撤为 21.61%，夏普比率为 -2.55。</p>
+        </div>
+        
+    </div>
+</body>
+</html>
