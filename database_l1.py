@@ -10,7 +10,7 @@ L1 Advisory Layer - 数据库访问层
 import sqlite3
 import json
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime, timedelta
 from models.advisory_result import AdvisoryResult
 from models.enums import Decision, Confidence, TradeQuality, MarketRegime, SystemState, ExecutionPermission

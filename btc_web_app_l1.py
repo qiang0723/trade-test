@@ -501,7 +501,7 @@ def get_advisory_dual(symbol):
         
         # 2.5 保存到数据库（PR-DUAL）
         try:
-            db.save_dual_advisory_result(symbol, result)
+            l1_db.save_dual_advisory_result(symbol, result)
         except Exception as e:
             logger.warning(f"Failed to save dual advisory result to database: {e}")
             # 数据库保存失败不影响API返回
@@ -565,7 +565,7 @@ def get_history_dual(symbol):
         limit = int(request.args.get('limit', 1500))
         
         # 从数据库获取历史记录
-        history = db.get_dual_advisory_history(symbol, hours=hours, limit=limit)
+        history = l1_db.get_dual_advisory_history(symbol, hours=hours, limit=limit)
         
         return jsonify({
             'success': True,
@@ -619,7 +619,7 @@ def get_stats_dual(symbol):
             }), 400
         
         # 从数据库获取统计信息
-        stats = db.get_dual_decision_stats(symbol)
+        stats = l1_db.get_dual_decision_stats(symbol)
         
         return jsonify({
             'success': True,
