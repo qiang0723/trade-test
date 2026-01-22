@@ -48,15 +48,37 @@ class LookbackResult:
 
 
 class TickData:
-    """单个tick数据"""
+    """
+    单个tick数据
+    
+    PATCH-P0-1改进：
+    - volume优先读取volume_24h（权威来源），兼容旧volume键
+    - buy_volume/sell_volume标记为已废弃（fetcher不再提供）
+    """
     def __init__(self, timestamp: datetime, data: dict):
         self.timestamp = timestamp
         self.price = data.get('price', 0)
-        self.volume = data.get('volume', 0)
+        
+        # PATCH-P0-1: volume优先读取volume_24h，兼容旧volume键
+        self.volume = data.get('volume_24h') or data.get('volume', 0)
+        
+        # PATCH-P0-1: 如果两个键都缺失，记录警告（显性化缺失）
+        if self.volume == 0 and 'volume_24h' not in data and 'volume' not in data:
+            logger.debug(f"Volume data missing at {timestamp}")
+            self._incomplete = True
+        else:
+            self._incomplete = False
+        
         self.open_interest = data.get('open_interest', 0)
         self.funding_rate = data.get('funding_rate', 0)
-        self.buy_volume = data.get('buy_volume', 0)
-        self.sell_volume = data.get('sell_volume', 0)
+        
+        # PATCH-P0-1: buy_volume/sell_volume已废弃（fetcher不再提供）
+        # 保留字段仅用于向后兼容，但标记为不可信
+        self.buy_volume = data.get('buy_volume', 0)  # ⚠️ DEPRECATED
+        self.sell_volume = data.get('sell_volume', 0)  # ⚠️ DEPRECATED
+        
+        if self.buy_volume > 0 or self.sell_volume > 0:
+            logger.warning(f"buy_volume/sell_volume are deprecated and should not be used (at {timestamp})")
     
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -463,13 +485,20 @@ class MarketDataCache:
         """
         计算买卖失衡度
         
+        ⚠️  DEPRECATED (PATCH-P0-1)
+        ====================================
+        本方法依赖buy_volume/sell_volume字段，但这些字段已废弃（fetcher不再提供）。
+        
+        推荐替代：使用 taker_imbalance_* 字段（klines聚合，权威来源）
+        PATCH-P0-2将全面替换为taker_imbalance_1h
+        ====================================
+        
         Args:
             symbol: 币种符号
             hours: 统计时间范围（默认1小时）
         
         Returns:
             失衡度（-1到1之间）或None
-            正值表示买方强势，负值表示卖方强势
         """
         ticks = self.get_historical_ticks(symbol, hours=hours)
         
@@ -481,8 +510,10 @@ class MarketDataCache:
         
         total = total_buy + total_sell
         
+        # PATCH-P0-1: buy/sell全为0时返回None（显性化缺失）
         if total == 0:
-            return 0.0
+            logger.debug(f"buy/sell volumes all zero for {symbol}, returning None [DEPRECATED]")
+            return None
         
         # 失衡度 = (买量 - 卖量) / 总量
         imbalance = (total_buy - total_sell) / total
@@ -585,8 +616,19 @@ class MarketDataCache:
         oi_change_15m = self.calculate_oi_change(symbol, hours=0.25)  # PR-005: 15分钟
         oi_change_5m = self.calculate_oi_change(symbol, hours=0.0833)  # PR-005: 5分钟
         
-        volume_1h = self.calculate_volume_1h(symbol)
-        buy_sell_imbalance = self.calculate_buy_sell_imbalance(symbol, hours=1.0)
+        # PATCH-P0-2: volume_1h优先使用klines聚合（权威来源）
+        volume_1h_klines = current_data.get('volume_1h')  # klines聚合
+        volume_1h_calculated = self.calculate_volume_1h(symbol)  # 24h ticker差分（fallback）
+        
+        # 优先使用klines，fallback到calculate
+        volume_1h = volume_1h_klines if volume_1h_klines is not None else volume_1h_calculated
+        
+        # PATCH-P0-2: buy_sell_imbalance改为taker_imbalance_1h的alias（唯一真相）
+        taker_imbalance_1h_value = current_data.get('taker_imbalance_1h')  # klines聚合（权威）
+        buy_sell_imbalance_legacy = self.calculate_buy_sell_imbalance(symbol, hours=1.0)  # 旧计算（DEPRECATED）
+        
+        # 优先使用taker_imbalance_1h，fallback到旧计算（向后兼容）
+        imbalance_value = taker_imbalance_1h_value if taker_imbalance_1h_value is not None else buy_sell_imbalance_legacy
         
         # PATCH-2: 获取 lookback coverage
         coverage = self.get_lookback_coverage(symbol)
@@ -597,21 +639,30 @@ class MarketDataCache:
             if symbol in self.cache and len(self.cache[symbol]) > 0:
                 source_timestamp = self.cache[symbol][-1].timestamp
         
-        # 构造增强数据（PR-005: 包含5m/15m变化率）
+        # 构造增强数据（PR-005 + PATCH-P0-3: 缺失不填0）
         enhanced_data = {
             'price': current_data.get('price', 0),
-            'price_change_1h': price_change_1h if price_change_1h is not None else 0.0,
-            'price_change_6h': price_change_6h if price_change_6h is not None else 0.0,
-            'price_change_15m': price_change_15m if price_change_15m is not None else None,  # PR-005
-            'price_change_5m': price_change_5m if price_change_5m is not None else None,  # PR-005
-            'volume_1h': volume_1h if volume_1h is not None else 0.0,
+            
+            # PATCH-P0-3: 关键字段缺失保留None，不填0（消除"伪中性"）
+            # 中长期字段（1h/6h）- 缺失时返回None
+            'price_change_1h': price_change_1h,  # None-aware
+            'price_change_6h': price_change_6h,  # None-aware
+            'oi_change_1h': oi_change_1h,        # None-aware
+            'oi_change_6h': oi_change_6h,        # None-aware
+            'volume_1h': volume_1h,              # None-aware
+            
+            # 短期字段（5m/15m）- 已经是None-aware（PR-005）
+            'price_change_15m': price_change_15m,  # None-aware
+            'price_change_5m': price_change_5m,    # None-aware
+            'oi_change_15m': oi_change_15m,        # None-aware
+            'oi_change_5m': oi_change_5m,          # None-aware
+            
+            # PATCH-P0-2: buy_sell_imbalance改为taker_imbalance_1h的alias
+            'buy_sell_imbalance': imbalance_value,  # alias of taker_imbalance_1h
+            
+            # 非关键字段（可填默认值）
             'volume_24h': current_data.get('volume_24h', 0),
-            'buy_sell_imbalance': buy_sell_imbalance if buy_sell_imbalance is not None else 0.0,
             'funding_rate': current_data.get('funding_rate', 0),
-            'oi_change_1h': oi_change_1h if oi_change_1h is not None else 0.0,
-            'oi_change_6h': oi_change_6h if oi_change_6h is not None else 0.0,
-            'oi_change_15m': oi_change_15m if oi_change_15m is not None else None,  # PR-005
-            'oi_change_5m': oi_change_5m if oi_change_5m is not None else None,  # PR-005
             # PR-002: 添加时间戳信息（用于新鲜度检查）
             'source_timestamp': source_timestamp,
             'computed_at': datetime.now(),

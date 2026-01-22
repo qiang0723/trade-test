@@ -228,7 +228,7 @@ class TestL1EngineIntegration:
             'oi_change_6h': 12.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {
                 'percentage_format': 'percent_point',
@@ -263,7 +263,7 @@ class TestL1EngineIntegration:
             'oi_change_6h': 12.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {
                 'percentage_format': 'percent_point',
@@ -298,7 +298,7 @@ class TestL1EngineIntegration:
             'oi_change_6h': 12.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {
                 'percentage_format': 'percent_point',
@@ -356,23 +356,25 @@ class TestCacheWithEnhancedData:
         cache = MarketDataCache()
         
         base_time = datetime.now()
-        # 存储充足的历史数据
-        for i in range(0, 360, 5):
+        # 存储充足的历史数据（倒序：最旧到最新）
+        # PATCH-P0-1: 6h窗口需要>6h的数据，增加到400分钟
+        for i in reversed(range(0, 400, 5)):
             timestamp = base_time - timedelta(minutes=i)
-            data = {'price': 90000, 'volume': 1000 + i, 'volume_24h': 24000, 
-                    'open_interest': 100000, 'funding_rate': 0.0001,
-                    'buy_volume': 600, 'sell_volume': 400}
+            # PATCH-P0-1: 不再使用buy_volume/sell_volume
+            data = {'price': 90000, 'volume_24h': 24000 + 1000 + i, 
+                    'open_interest': 100000, 'funding_rate': 0.0001}
             cache.store_tick('BTC', data, timestamp)
         
         # 获取 enhanced data
+        # PATCH-P0-1/P0-2: 使用新字段
         current_data = {
             'price': 91000,
-            'volume': 2000,
-            'volume_24h': 50000,
+            'volume_24h': 50000,  # PATCH-P0-1: 使用volume_24h
             'open_interest': 112000,
             'funding_rate': 0.0002,
-            'buy_volume': 1200,
-            'sell_volume': 800
+            # PATCH-P0-2: 提供taker_imbalance_1h和volume_1h（klines聚合）
+            'taker_imbalance_1h': 0.6,
+            'volume_1h': 5000
         }
         
         enhanced = cache.get_enhanced_market_data('BTC', current_data)

@@ -80,7 +80,7 @@ class TestPercentPointToDecimalConversion:
             'price': 90000,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             input_field: input_value,
             '_metadata': {'percentage_format': 'percent_point'}
@@ -115,7 +115,7 @@ class TestDecimalInputPreservation:
             'oi_change_6h': 0.15,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {'percentage_format': 'decimal'}
         }
@@ -145,7 +145,7 @@ class TestMetadataMissingPolicy:
             'oi_change_6h': 15.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             # ❌ 缺少 _metadata
         }
@@ -170,7 +170,7 @@ class TestMetadataMissingPolicy:
             'oi_change_6h': 15.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             # ❌ 缺少 _metadata
         }
@@ -203,7 +203,7 @@ class TestRangeValidation:
             'oi_change_6h': 0.15,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {'percentage_format': 'decimal'},
             field: bad_value  # 覆盖为异常值
@@ -232,7 +232,7 @@ class TestTraceCompleteness:
             'oi_change_6h': 20.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {'percentage_format': 'percent_point'}
         }
@@ -269,7 +269,7 @@ class TestL1EngineIntegration:
             'oi_change_6h': 12.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {'percentage_format': 'percent_point'}
         }
@@ -296,7 +296,7 @@ class TestL1EngineIntegration:
             'oi_change_6h': 0.12,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {'percentage_format': 'decimal'}
         }
@@ -324,7 +324,7 @@ class TestNewFieldAutomatic:
             'oi_change_6h': 12.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {'percentage_format': 'percent_point'}
         }
@@ -350,7 +350,7 @@ class TestNewFieldAutomatic:
             'oi_change_4h': 10.0,        # 新增字段
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {'percentage_format': 'percent_point'}
         }
@@ -376,7 +376,7 @@ class TestScaleAnomalyDetection:
             'oi_change_6h': 12.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {'percentage_format': 'percent_point'}
         }
@@ -402,7 +402,7 @@ class TestBackwardCompatibility:
             'oi_change_6h': 12.0,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
         }
         

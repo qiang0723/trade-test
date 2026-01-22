@@ -369,7 +369,7 @@ class L1AdvisoryEngine:
                 - price_change_6h: 6小时价格变化率(%)
                 - volume_1h: 1小时成交量
                 - volume_24h: 24小时成交量
-                - buy_sell_imbalance: 买卖失衡度 (-1到1)
+                - taker_imbalance_1h: Taker买卖失衡度 (-1到1)（PATCH-P0-2：统一使用taker_imbalance）
                 - funding_rate: 资金费率（小数，如0.0001表示0.01%）
                 - oi_change_1h: 1小时持仓量变化率(%)
                 - oi_change_6h: 6小时持仓量变化率(%)
@@ -673,7 +673,7 @@ class L1AdvisoryEngine:
         required_fields = [
             'price', 'price_change_1h', 'price_change_6h',
             'volume_1h', 'volume_24h',
-            'buy_sell_imbalance', 'funding_rate', 
+            'taker_imbalance_1h', 'funding_rate',  # PATCH-P0-2: 替换为taker_imbalance_1h
             'oi_change_1h', 'oi_change_6h'
         ]
         
@@ -734,8 +734,10 @@ class L1AdvisoryEngine:
         )
         
         # 基础异常值检查（保留，作为双重保护）
-        if normalized_data['buy_sell_imbalance'] < -1 or normalized_data['buy_sell_imbalance'] > 1:
-            logger.error(f"Invalid buy_sell_imbalance: {normalized_data['buy_sell_imbalance']}")
+        # PATCH-P0-2: 使用taker_imbalance_1h
+        taker_imb_1h = normalized_data.get('taker_imbalance_1h', 0)
+        if taker_imb_1h < -1 or taker_imb_1h > 1:
+            logger.error(f"Invalid taker_imbalance_1h: {taker_imb_1h}")
             return False, normalized_data, ReasonTag.INVALID_DATA, norm_trace.to_dict()
         
         if normalized_data['price'] <= 0:
@@ -926,7 +928,8 @@ class L1AdvisoryEngine:
         # - 第一道防线：返回POOR → 硬短路为NO_TRADE
         # - 第二道防线：BLOCK标签 → ExecutionPermission.DENY → executable=False
         # - 即使有强信号也无法绕过（Step 8先于Step 9的强信号boost）
-        imbalance = abs(data.get('buy_sell_imbalance', 0))
+        # PATCH-P0-2: 使用taker_imbalance_1h替代buy_sell_imbalance
+        imbalance = abs(data.get('taker_imbalance_1h', 0))
         volume_1h = data.get('volume_1h', 0)
         volume_avg = data.get('volume_24h', 0) / 24
         
@@ -1000,7 +1003,8 @@ class L1AdvisoryEngine:
         Returns:
             (是否允许做多, 标签列表)
         """
-        imbalance = data.get('buy_sell_imbalance', 0)
+        # PATCH-P0-2: 使用taker_imbalance_1h
+        imbalance = data.get('taker_imbalance_1h', 0)
         oi_change = data.get('oi_change_1h', 0)
         price_change = data.get('price_change_1h', 0)
         direction_tags = []
@@ -1059,7 +1063,8 @@ class L1AdvisoryEngine:
         Returns:
             (是否允许做空, 标签列表)
         """
-        imbalance = data.get('buy_sell_imbalance', 0)
+        # PATCH-P0-2: 使用taker_imbalance_1h
+        imbalance = data.get('taker_imbalance_1h', 0)
         oi_change = data.get('oi_change_1h', 0)
         price_change = data.get('price_change_1h', 0)
         direction_tags = []
@@ -2554,7 +2559,7 @@ class L1AdvisoryEngine:
             global_risk_tags = [fail_tag] if fail_tag else [ReasonTag.INVALID_DATA]
             # PATCH-1: 记录 trace（虽然是 dual 模式，也要记录）
             logger.debug(f"[{symbol}] Normalization trace (failed): {norm_trace}")
-            return self._build_dual_no_trade_result(symbol, global_risk_tags)
+            return self._build_dual_no_trade_result(symbol, global_risk_tags, price=data.get('price'))
         
         data = normalized_data
         
@@ -2571,6 +2576,27 @@ class L1AdvisoryEngine:
                 # 非关键窗口缺失（1h/6h），记录但继续（可能降级）
                 global_risk_tags.extend(coverage_tags)
                 logger.info(f"[{symbol}] Non-critical window gap, continuing with degraded quality")
+        
+        # ===== Step 1.6: Critical Fields 检查（PATCH-P0-3）=====
+        # 检查短期关键字段（5m/15m）
+        critical_short_fields = ['price_change_5m', 'price_change_15m', 'oi_change_5m', 'oi_change_15m',
+                                 'taker_imbalance_5m', 'taker_imbalance_15m', 'volume_ratio_5m', 'volume_ratio_15m']
+        missing_short = [f for f in critical_short_fields if data.get(f) is None]
+        
+        if missing_short:
+            logger.warning(f"[{symbol}] Short-term critical fields missing: {missing_short}")
+            global_risk_tags.append(ReasonTag.DATA_INCOMPLETE_LTF)
+            # 短期关键字段缺失 → 返回NO_TRADE（无法进行短期决策）
+            return self._build_dual_no_trade_result(symbol, global_risk_tags, regime=MarketRegime.RANGE)
+        
+        # 检查中期关键字段（1h/6h）
+        critical_medium_fields = ['price_change_1h', 'price_change_6h', 'oi_change_1h', 'oi_change_6h']
+        missing_medium = [f for f in critical_medium_fields if data.get(f) is None]
+        
+        if missing_medium:
+            logger.info(f"[{symbol}] Medium-term critical fields missing: {missing_medium}, continuing with degraded quality")
+            global_risk_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
+            # 中期字段缺失 → 允许继续（short_term可能仍有效），但标记降级
         
         # ===== Step 2: 全局风险评估（极端行情等）=====
         regime, regime_tags = self._detect_market_regime(data)
@@ -2911,7 +2937,8 @@ class L1AdvisoryEngine:
         price_change_6h = data.get('price_change_6h', 0) or 0
         oi_change_1h = data.get('oi_change_1h', 0) or 0
         oi_change_6h = data.get('oi_change_6h', 0) or 0
-        buy_sell_imbalance = data.get('buy_sell_imbalance', 0) or 0
+        # PATCH-P0-2: 使用taker_imbalance_1h替代buy_sell_imbalance
+        taker_imbalance_1h = data.get('taker_imbalance_1h', 0) or 0
         funding_rate = data.get('funding_rate', 0) or 0
         
         key_metrics = {
@@ -2919,7 +2946,7 @@ class L1AdvisoryEngine:
             'price_change_6h': price_change_6h,
             'oi_change_1h': oi_change_1h,
             'oi_change_6h': oi_change_6h,
-            'buy_sell_imbalance': buy_sell_imbalance,
+            'taker_imbalance_1h': taker_imbalance_1h,  # PATCH-P0-2: 统一字段名
             'funding_rate': funding_rate
         }
         
@@ -3136,7 +3163,8 @@ class L1AdvisoryEngine:
         symbol: str,
         global_risk_tags: List[ReasonTag],
         regime: MarketRegime = MarketRegime.RANGE,
-        risk_allowed: bool = True
+        risk_allowed: bool = True,
+        price: Optional[float] = None  # PATCH-P0-3: 支持传入price
     ) -> 'DualTimeframeResult':
         """
         构造双周期NO_TRADE结果（用于全局风险拒绝等场景）
@@ -3218,7 +3246,7 @@ class L1AdvisoryEngine:
             alignment=alignment,
             symbol=symbol,
             timestamp=datetime.now(),
-            price=data.get('price'),
+            price=price,  # PATCH-P0-3: 使用传入的price参数
             risk_exposure_allowed=risk_allowed,
             global_risk_tags=global_risk_tags
         )

@@ -43,7 +43,7 @@ class TestFrequencyControlPreservesSignal:
             'volume_ratio_15m': 2.5,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.5,
+            'taker_imbalance_1h': 0.5,
             'funding_rate': 0.0001,
             '_metadata': {
                 'percentage_format': 'percent_point',
@@ -111,7 +111,7 @@ class TestShortTermIndependence:
             'volume_ratio_15m': 2.5,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.3,    # 中期偏弱
+            'taker_imbalance_1h': 0.3,    # 中期偏弱
             'funding_rate': 0.0001,
             '_metadata': {
                 'percentage_format': 'percent_point',
@@ -163,7 +163,7 @@ class TestMediumTermIndependence:
             'volume_ratio_15m': 1.1,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.6,    # 中期强
+            'taker_imbalance_1h': 0.6,    # 中期强
             'funding_rate': 0.0001,
             '_metadata': {
                 'percentage_format': 'percent_point',
@@ -213,7 +213,7 @@ class TestAlignmentAnalysis:
             'volume_ratio_15m': 2.5,
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.6,
+            'taker_imbalance_1h': 0.6,
             'funding_rate': 0.0001,
             '_metadata': {
                 'percentage_format': 'percent_point',
@@ -262,7 +262,7 @@ class TestExecutionPermissionConstraint:
             'volume_ratio_15m': 1.3,      # 偏弱
             'volume_1h': 1000,
             'volume_24h': 24000,
-            'buy_sell_imbalance': 0.3,
+            'taker_imbalance_1h': 0.3,
             'funding_rate': 0.0001,
             '_metadata': {
                 'percentage_format': 'percent_point',

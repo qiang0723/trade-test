@@ -27,11 +27,13 @@ class ReasonTag(Enum):
     # ===== 数据验证 =====
     INVALID_DATA = "invalid_data"
     DATA_STALE = "data_stale"
-    DATA_INCOMPLETE = "data_incomplete"  # PR-003: 数据不完整（启动期或历史不足）
-    DATA_GAP_5M = "data_gap_5m"          # PATCH-2: 5分钟窗口数据缺口过大
-    DATA_GAP_15M = "data_gap_15m"        # PATCH-2: 15分钟窗口数据缺口过大
-    DATA_GAP_1H = "data_gap_1h"          # PATCH-2: 1小时窗口数据缺口过大
-    DATA_GAP_6H = "data_gap_6h"          # PATCH-2: 6小时窗口数据缺口过大
+    DATA_INCOMPLETE = "data_incomplete"        # PR-003: 数据不完整（启动期或历史不足）
+    DATA_INCOMPLETE_LTF = "data_incomplete_ltf"  # PATCH-P0-3: 短期关键字段缺失（5m/15m）
+    DATA_INCOMPLETE_MTF = "data_incomplete_mtf"  # PATCH-P0-3: 中期关键字段缺失（1h/6h）
+    DATA_GAP_5M = "data_gap_5m"                # PATCH-2: 5分钟窗口数据缺口过大
+    DATA_GAP_15M = "data_gap_15m"              # PATCH-2: 15分钟窗口数据缺口过大
+    DATA_GAP_1H = "data_gap_1h"                # PATCH-2: 1小时窗口数据缺口过大
+    DATA_GAP_6H = "data_gap_6h"                # PATCH-2: 6小时窗口数据缺口过大
     
     # ===== 风险否决类 =====
     EXTREME_REGIME = "extreme_regime"
@@ -83,6 +85,8 @@ REASON_TAG_EXPLANATIONS = {
     "invalid_data": "❌ 数据无效：输入数据缺失或异常",
     "data_stale": "⏰ 数据过期：市场数据不够新鲜，可能缓存过期或API异常",
     "data_incomplete": "📊 数据不完整：历史数据不足（启动初期或缓存清空），无法准确计算",
+    "data_incomplete_ltf": "📊 短期数据不完整：5m/15m关键字段缺失，短期决策无法进行",
+    "data_incomplete_mtf": "📊 中期数据不完整：1h/6h关键字段缺失，中期信号质量下降",
     "data_gap_5m": "⏳ 5分钟数据缺口：历史点与目标时间gap过大，lookback失败",
     "data_gap_15m": "⏳ 15分钟数据缺口：历史点与目标时间gap过大，lookback失败",
     "data_gap_1h": "⏳ 1小时数据缺口：历史点与目标时间gap过大，lookback失败",
@@ -154,6 +158,8 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     # 数据验证 - 阻断
     ReasonTag.INVALID_DATA: ExecutabilityLevel.BLOCK,
     ReasonTag.DATA_STALE: ExecutabilityLevel.BLOCK,
+    ReasonTag.DATA_INCOMPLETE_LTF: ExecutabilityLevel.BLOCK,    # PATCH-P0-3: 短期关键字段缺失，阻断
+    ReasonTag.DATA_INCOMPLETE_MTF: ExecutabilityLevel.DEGRADE,  # PATCH-P0-3: 中期关键字段缺失，降级
     ReasonTag.DATA_GAP_5M: ExecutabilityLevel.BLOCK,      # PATCH-2: 5分钟数据缺口阻断短期决策
     ReasonTag.DATA_GAP_15M: ExecutabilityLevel.BLOCK,     # PATCH-2: 15分钟数据缺口阻断短期决策
     ReasonTag.DATA_GAP_1H: ExecutabilityLevel.DEGRADE,    # PATCH-2: 1小时数据缺口降级（不完全阻断）
