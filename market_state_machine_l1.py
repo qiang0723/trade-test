@@ -2588,6 +2588,7 @@ class L1AdvisoryEngine:
             alignment=alignment,
             symbol=symbol,
             timestamp=current_time,
+            price=data.get('price'),
             risk_exposure_allowed=risk_allowed,
             global_risk_tags=global_risk_tags + regime_tags
         )

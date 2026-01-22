@@ -84,6 +84,9 @@ class L1Database:
             # 迁移：为已存在的表添加 price 字段
             self._migrate_add_price(cursor)
             
+            # 迁移：为双周期表添加 price 字段
+            self._migrate_add_price_dual(cursor)
+            
             # 创建索引（优化查询性能）
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_l1_symbol_timestamp 
@@ -130,6 +133,7 @@ class L1Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     symbol TEXT NOT NULL,
                     timestamp TEXT NOT NULL,
+                    price REAL,
                     
                     -- 短期结论（5m/15m）
                     short_term_decision TEXT NOT NULL,
@@ -261,6 +265,27 @@ class L1Database:
         except Exception as e:
             logger.error(f"Error during database migration: {e}")
             # 非致命错误，继续运行（新表创建时已包含该字段）
+    
+    def _migrate_add_price_dual(self, cursor):
+        """
+        数据库迁移：为双周期表添加 price 字段
+        """
+        try:
+            cursor.execute("PRAGMA table_info(l1_dual_advisory_results)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if 'price' not in columns:
+                logger.info("Migrating dual database: adding price column")
+                cursor.execute('''
+                    ALTER TABLE l1_dual_advisory_results 
+                    ADD COLUMN price REAL
+                ''')
+                logger.info("✅ Dual database migration completed: price added")
+            else:
+                logger.debug("price column already exists in dual table, skipping migration")
+        
+        except Exception as e:
+            logger.error(f"Error during dual database migration: {e}")
     
     def save_advisory_result(self, symbol: str, result: AdvisoryResult) -> int:
         """
@@ -670,7 +695,7 @@ class L1Database:
                 
                 cursor.execute('''
                     INSERT INTO l1_dual_advisory_results (
-                        symbol, timestamp,
+                        symbol, timestamp, price,
                         short_term_decision, short_term_confidence, short_term_executable,
                         short_term_regime, short_term_quality,
                         medium_term_decision, medium_term_confidence, medium_term_executable,
@@ -678,10 +703,11 @@ class L1Database:
                         alignment_type, is_aligned, has_conflict,
                         recommended_action, recommended_confidence,
                         full_json, risk_exposure_allowed
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     symbol,
                     result.timestamp.isoformat(),
+                    result.price,
                     short.decision.value,
                     short.confidence.value,
                     1 if short.executable else 0,

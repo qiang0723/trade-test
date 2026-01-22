@@ -154,6 +154,7 @@ class DualTimeframeResult:
     # ===== 元信息 =====
     symbol: str                       # 交易对
     timestamp: datetime               # 决策时间戳
+    price: Optional[float] = None     # 信号出现时的价格
     
     # ===== 系统风险状态（全局，不分周期）=====
     risk_exposure_allowed: bool = True  # 全局风险准入
@@ -178,6 +179,7 @@ class DualTimeframeResult:
             # 元信息
             'symbol': self.symbol,
             'timestamp': self.timestamp.isoformat(),
+            'price': self.price,
             'risk_exposure_allowed': self.risk_exposure_allowed,
             'global_risk_tags': [tag.value for tag in self.global_risk_tags],
             
