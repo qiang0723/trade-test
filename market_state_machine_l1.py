@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from models.enums import Decision, Confidence, TradeQuality, MarketRegime, SystemState, ExecutionPermission
 from models.advisory_result import AdvisoryResult
 from models.reason_tags import ReasonTag
-from metrics_normalizer import normalize_metrics
+from metrics_normalizer import normalize_metrics, normalize_metrics_with_trace
 import logging
 
 # PR-DUAL: 类型检查导入（避免循环导入）
@@ -385,13 +385,15 @@ class L1AdvisoryEngine:
         logger.info(f"[{symbol}] Starting L1 decision pipeline")
         
         # ===== Step 1: 数据验证 + 指标规范化 + 新鲜度检查 =====
-        is_valid, normalized_data, fail_tag = self._validate_data(data)
+        is_valid, normalized_data, fail_tag, norm_trace = self._validate_data(data)
         if not is_valid:
             fail_reason = fail_tag.value if fail_tag else 'unknown'
             logger.warning(f"[{symbol}] Data validation failed: {fail_reason}")
             self.last_pipeline_steps.append({
                 'step': 1, 'name': 'validate_data', 'status': 'failed',
-                'message': f'数据验证失败：{fail_reason}', 'result': None
+                'message': f'数据验证失败：{fail_reason}',
+                'result': None,
+                'normalization_trace': norm_trace  # PATCH-1: 添加 trace
             })
             return self._build_no_trade_result(
                 reason_tags=[fail_tag] if fail_tag else [ReasonTag.INVALID_DATA],
@@ -405,7 +407,9 @@ class L1AdvisoryEngine:
         
         self.last_pipeline_steps.append({
             'step': 1, 'name': 'validate_data', 'status': 'success',
-            'message': '数据验证通过（含规范化+新鲜度检查）', 'result': 'Valid'
+            'message': '数据验证通过（含规范化+新鲜度检查）',
+            'result': 'Valid',
+            'normalization_trace': norm_trace  # PATCH-1: 添加 trace
         })
         
         # ===== Step 2: 市场环境识别 =====
@@ -625,13 +629,13 @@ class L1AdvisoryEngine:
     # Step 1: 数据验证
     # ========================================
     
-    def _validate_data(self, data: Dict) -> Tuple[bool, Dict, Optional[ReasonTag]]:
+    def _validate_data(self, data: Dict) -> Tuple[bool, Dict, Optional[ReasonTag], Optional[dict]]:
         """
         验证输入数据的完整性和有效性
         
         包含：
         1. 必需字段检查
-        2. 指标口径规范化（百分比统一为小数格式）
+        2. 指标口径规范化（百分比统一为小数格式）- PATCH-1增强
         3. 异常尺度检测（防止混用）
         4. 数据新鲜度检查（PR-002）
         
@@ -639,7 +643,7 @@ class L1AdvisoryEngine:
             data: 市场数据字典
         
         Returns:
-            (是否有效, 规范化后的数据, 失败原因tag)
+            (是否有效, 规范化后的数据, 失败原因tag, normalization_trace字典)
         """
         # P0-BugFix-4: 添加 6h 变化率字段到必填列表
         # price_change_6h 用于 TREND 市场环境识别
@@ -656,7 +660,7 @@ class L1AdvisoryEngine:
         for field in required_fields:
             if field not in data or data[field] is None:
                 logger.error(f"Missing required field: {field}")
-                return False, data, ReasonTag.INVALID_DATA
+                return False, data, ReasonTag.INVALID_DATA, None
         
         # 数据新鲜度检查（PR-002）
         if 'timestamp' in data or 'source_timestamp' in data:
@@ -686,32 +690,31 @@ class L1AdvisoryEngine:
                         f"Data is stale: {staleness_seconds:.1f}s old "
                         f"(max: {max_staleness}s)"
                     )
-                    return False, data, ReasonTag.DATA_STALE
+                    return False, data, ReasonTag.DATA_STALE, None
         
-        # 指标口径规范化（PR-001）
-        normalized_data, is_valid, error_msg = normalize_metrics(data)
+        # 指标口径规范化（PATCH-1增强：含 trace）
+        normalized_data, is_valid, error_msg, norm_trace = normalize_metrics_with_trace(data)
         if not is_valid:
             logger.error(f"Metrics normalization failed: {error_msg}")
-            return False, data, ReasonTag.INVALID_DATA
+            return False, data, ReasonTag.INVALID_DATA, norm_trace.to_dict()
         
-        # PR-J: 超范围拦截（统一校验链路）
-        # 在规范化后显式调用 validate_ranges，确保所有指标在合理范围内
-        from metrics_normalizer import MetricsNormalizer
-        range_valid, range_error = MetricsNormalizer.validate_ranges(normalized_data)
-        if not range_valid:
-            logger.error(f"Metrics range validation failed: {range_error}")
-            return False, normalized_data, ReasonTag.INVALID_DATA
+        # 规范化成功，记录 trace
+        logger.debug(
+            f"Normalization trace: format={norm_trace.input_percentage_format}, "
+            f"converted={len(norm_trace.converted_fields)}, "
+            f"skipped={len(norm_trace.skipped_fields)}"
+        )
         
         # 基础异常值检查（保留，作为双重保护）
         if normalized_data['buy_sell_imbalance'] < -1 or normalized_data['buy_sell_imbalance'] > 1:
             logger.error(f"Invalid buy_sell_imbalance: {normalized_data['buy_sell_imbalance']}")
-            return False, normalized_data, ReasonTag.INVALID_DATA
+            return False, normalized_data, ReasonTag.INVALID_DATA, norm_trace.to_dict()
         
         if normalized_data['price'] <= 0:
             logger.error(f"Invalid price: {normalized_data['price']}")
-            return False, normalized_data, ReasonTag.INVALID_DATA
+            return False, normalized_data, ReasonTag.INVALID_DATA, norm_trace.to_dict()
         
-        return True, normalized_data, None
+        return True, normalized_data, None, norm_trace.to_dict()
     
     # ========================================
     # Step 2: 市场环境识别
@@ -2463,13 +2466,15 @@ class L1AdvisoryEngine:
         logger.info(f"[{symbol}] Starting dual-timeframe L1 decision pipeline")
         
         # ===== Step 1: 数据验证（全局）=====
-        is_valid, normalized_data, fail_tag = self._validate_data(data)
+        is_valid, normalized_data, fail_tag, norm_trace = self._validate_data(data)
         global_risk_tags = []
         
         if not is_valid:
             # 数据验证失败，返回双NO_TRADE
             logger.warning(f"[{symbol}] Data validation failed, returning dual NO_TRADE")
             global_risk_tags = [fail_tag] if fail_tag else [ReasonTag.INVALID_DATA]
+            # PATCH-1: 记录 trace（虽然是 dual 模式，也要记录）
+            logger.debug(f"[{symbol}] Normalization trace (failed): {norm_trace}")
             return self._build_dual_no_trade_result(symbol, global_risk_tags)
         
         data = normalized_data
