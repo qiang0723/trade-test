@@ -1080,6 +1080,9 @@ function applyHistoryFilters() {
     
     // 筛选数据（不需要重新加载）
     filteredHistoryData = allHistoryData.filter(item => {
+        // 过滤掉NO_TRADE观望信号
+        if (item.decision === 'no_trade') return false;
+        
         // 币种筛选（如果已在loadHistoryList中处理，这里可以跳过，但为了一致性保留）
         if (symbol !== 'all' && item.symbol !== symbol) return false;
         if (decision !== 'all' && item.decision !== decision) return false;
