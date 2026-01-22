@@ -893,6 +893,9 @@ function applyHistoryFilters() {
     
     // 应用筛选
     filteredHistoryData = flattenedData.filter(item => {
+        // 过滤掉NO_TRADE观望信号
+        if (item.decision === 'no_trade') return false;
+        
         if (symbol !== 'all' && item.symbol !== symbol) return false;
         if (timeframe !== 'all' && item.timeframe !== timeframe) return false;
         if (decision !== 'all' && item.decision !== decision) return false;
