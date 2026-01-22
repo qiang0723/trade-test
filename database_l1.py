@@ -70,6 +70,7 @@ class L1Database:
                     execution_permission TEXT DEFAULT 'allow',
                     executable INTEGER DEFAULT 0,
                     signal_decision TEXT,
+                    price REAL,
                     created_at TEXT DEFAULT (datetime('now'))
                 )
             ''')
@@ -79,6 +80,9 @@ class L1Database:
             
             # 迁移：为已存在的表添加 signal_decision 字段（PR-004）
             self._migrate_add_signal_decision(cursor)
+            
+            # 迁移：为已存在的表添加 price 字段
+            self._migrate_add_price(cursor)
             
             # 创建索引（优化查询性能）
             cursor.execute('''
@@ -230,6 +234,34 @@ class L1Database:
             logger.error(f"Error during database migration: {e}")
             # 非致命错误，继续运行（新表创建时已包含该字段）
     
+    def _migrate_add_price(self, cursor):
+        """
+        数据库迁移：添加 price 字段
+        
+        向后兼容处理：
+        - 检测字段是否存在
+        - 如不存在，添加字段（可为NULL）
+        - 老数据自动获得NULL值
+        """
+        try:
+            # 检查字段是否存在
+            cursor.execute("PRAGMA table_info(l1_advisory_results)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if 'price' not in columns:
+                logger.info("Migrating database: adding price column")
+                cursor.execute('''
+                    ALTER TABLE l1_advisory_results 
+                    ADD COLUMN price REAL
+                ''')
+                logger.info("✅ Database migration completed: price added")
+            else:
+                logger.debug("price column already exists, skipping migration")
+        
+        except Exception as e:
+            logger.error(f"Error during database migration: {e}")
+            # 非致命错误，继续运行（新表创建时已包含该字段）
+    
     def save_advisory_result(self, symbol: str, result: AdvisoryResult) -> int:
         """
         保存决策结果到数据库
@@ -248,8 +280,8 @@ class L1Database:
                 cursor.execute('''
                     INSERT INTO l1_advisory_results 
                     (symbol, timestamp, decision, confidence, market_regime, system_state, 
-                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable, signal_decision)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable, signal_decision, price)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     symbol,
                     result.timestamp.isoformat(),
@@ -262,7 +294,8 @@ class L1Database:
                     json.dumps([tag.value for tag in result.reason_tags]),
                     result.execution_permission.value,  # 方案D新增
                     1 if result.executable else 0,
-                    result.signal_decision.value if result.signal_decision else None  # PR-004新增
+                    result.signal_decision.value if result.signal_decision else None,  # PR-004新增
+                    result.price  # 添加价格信息
                 ))
                 
                 conn.commit()
@@ -421,7 +454,7 @@ class L1Database:
                 cursor.execute('''
                     SELECT decision, confidence, market_regime, system_state,
                            risk_exposure_allowed, trade_quality, reason_tags, 
-                           execution_permission, executable, signal_decision, timestamp
+                           execution_permission, executable, signal_decision, timestamp, price
                     FROM l1_advisory_results
                     WHERE symbol = ? AND timestamp >= ?
                     ORDER BY timestamp DESC
@@ -441,7 +474,8 @@ class L1Database:
                         'execution_permission': row[7] or 'allow',  # 向后兼容
                         'executable': bool(row[8]),
                         'signal_decision': row[9],  # PR-004新增
-                        'timestamp': row[10]
+                        'timestamp': row[10],
+                        'price': row[11] if len(row) > 11 else None  # 向后兼容
                     })
                 
                 logger.info(f"Retrieved {len(results)} history records for {symbol}")
@@ -587,14 +621,15 @@ class L1Database:
                         json.dumps([tag.value for tag in result.reason_tags]),
                         result.execution_permission.value,  # 方案D新增
                         1 if result.executable else 0,
-                        result.signal_decision.value if result.signal_decision else None  # PR-004新增
+                        result.signal_decision.value if result.signal_decision else None,  # PR-004新增
+                        result.price  # 添加价格信息
                     ))
                 
                 cursor.executemany('''
                     INSERT INTO l1_advisory_results 
                     (symbol, timestamp, decision, confidence, market_regime, system_state, 
-                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable, signal_decision)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable, signal_decision, price)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', data)
                 
                 conn.commit()

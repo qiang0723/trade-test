@@ -592,7 +592,8 @@ class L1AdvisoryEngine:
             timestamp=result_timestamp,
             execution_permission=execution_permission,  # 方案D新增
             executable=False,  # 先初始化为False
-            signal_decision=signal_decision  # PR-004: 原始信号方向（频控前）
+            signal_decision=signal_decision,  # PR-004: 原始信号方向（频控前）
+            price=data.get('price')  # 添加信号出现时的价格
         )
         
         # 计算executable标志位（方案D双门槛）
@@ -1602,7 +1603,8 @@ class L1AdvisoryEngine:
             timestamp=datetime.now(),
             execution_permission=ExecutionPermission.DENY,  # NO_TRADE → DENY
             executable=False,
-            signal_decision=None  # PR-004: NO_TRADE场景无原始信号
+            signal_decision=None,  # PR-004: NO_TRADE场景无原始信号
+            price=data.get('price')  # 添加价格信息
         )
         # NO_TRADE的executable永远是False，无需重新计算
         return result

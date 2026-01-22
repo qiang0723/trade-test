@@ -52,3 +52,4 @@ data/db/*.db-*
 
 # Docker相关（保留配置文件，但忽略镜像和容器数据）
 # 注意：Dockerfile和docker-compose.yml等配置文件会被提交
+backtest/reports/*.html

@@ -41,6 +41,9 @@ let totalPages = 1;
 document.addEventListener('DOMContentLoaded', function() {
     console.log('L1 Advisory Layer - Frontend initialized');
     
+    // 注册Service Worker（实现全局通知）
+    registerServiceWorker();
+    
     // 加载用户设置
     loadUserSettings();
     
@@ -71,6 +74,21 @@ function loadUserSettings() {
     const savedSound = localStorage.getItem('soundEnabled');
     if (savedSound !== null) {
         soundEnabled = savedSound === 'true';
+    }
+}
+
+/**
+ * 注册Service Worker（实现全局通知）
+ */
+function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/sw.js')
+            .then(registration => {
+                console.log('Service Worker registered:', registration);
+            })
+            .catch(error => {
+                console.error('Service Worker registration failed:', error);
+            });
     }
 }
 
@@ -360,7 +378,7 @@ function playNotificationSound(decision) {
 }
 
 /**
- * 显示浏览器通知
+ * 显示浏览器通知（使用Service Worker实现全局通知）
  */
 function showBrowserNotification(signal) {
     // 检查浏览器是否支持通知
@@ -370,11 +388,21 @@ function showBrowserNotification(signal) {
     
     // 检查权限
     if (Notification.permission === "granted") {
-        createNotification(signal);
+        // 优先使用Service Worker通知（全局）
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            createServiceWorkerNotification(signal);
+        } else {
+            // 降级到普通通知
+            createNotification(signal);
+        }
     } else if (Notification.permission !== "denied") {
         Notification.requestPermission().then(permission => {
             if (permission === "granted") {
-                createNotification(signal);
+                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                    createServiceWorkerNotification(signal);
+                } else {
+                    createNotification(signal);
+                }
             }
         });
     }
@@ -383,11 +411,41 @@ function showBrowserNotification(signal) {
 /**
  * 创建浏览器通知
  */
-function createNotification(signal) {
-    const { symbol, decision, confidence, executable } = signal;
+/**
+ * 创建Service Worker通知（全局通知，即使页面不在当前tab也能看到）
+ */
+function createServiceWorkerNotification(signal) {
+    const { symbol, decision, confidence, executable, advisory } = signal;
     
     const title = `${symbol} - ${decision === 'long' ? '做多' : '做空'}信号`;
-    const body = `置信度: ${confidence}\n${executable ? '✓ 可执行' : '✗ 不可执行'}`;
+    const priceText = advisory && advisory.price ? `\n价格: $${advisory.price.toLocaleString()}` : '';
+    const body = `置信度: ${confidence}${priceText}\n${executable ? '✓ 可执行' : '✗ 不可执行'}`;
+    
+    // 通过Service Worker发送通知
+    navigator.serviceWorker.controller.postMessage({
+        type: 'SHOW_NOTIFICATION',
+        notification: {
+            title: title,
+            body: body,
+            icon: '/static/favicon.ico',
+            tag: `signal-${symbol}`,
+            data: {
+                symbol: symbol,
+                decision: decision
+            }
+        }
+    });
+}
+
+/**
+ * 创建普通通知（降级方案）
+ */
+function createNotification(signal) {
+    const { symbol, decision, confidence, executable, advisory } = signal;
+    
+    const title = `${symbol} - ${decision === 'long' ? '做多' : '做空'}信号`;
+    const priceText = advisory && advisory.price ? `\n价格: $${advisory.price.toLocaleString()}` : '';
+    const body = `置信度: ${confidence}${priceText}\n${executable ? '✓ 可执行' : '✗ 不可执行'}`;
     const icon = decision === 'long' ? '🟢' : '🔴';
     
     const notification = new Notification(title, {
@@ -1211,10 +1269,12 @@ function showHistoryDetailModal(item) {
         'deny': '拒绝执行'
     }[item.execution_permission] || item.execution_permission;
     
+    const priceInfo = item.price ? `\n💰 价格: $${item.price.toLocaleString()}` : '';
+    
     const detail = `
 📊 决策详情
 
-时间: ${new Date(item.timestamp).toLocaleString('zh-CN')}
+时间: ${new Date(item.timestamp).toLocaleString('zh-CN')}${priceInfo}
 
 【核心决策】
 决策: ${item.decision.toUpperCase()}

@@ -51,6 +51,9 @@ class AdvisoryResult:
     # ===== (PR-004) 信号透明化 =====
     signal_decision: Optional[Decision] = None  # 原始信号方向（频控前的方向判断结果）
     
+    # ===== 市场价格信息 =====
+    price: Optional[float] = None  # 信号出现时的价格
+    
     def to_dict(self) -> dict:
         """
         转换为字典，用于JSON序列化
@@ -67,6 +70,7 @@ class AdvisoryResult:
             'trade_quality': self.trade_quality.value,
             'reason_tags': [tag.value for tag in self.reason_tags],
             'timestamp': self.timestamp.isoformat(),
+            'price': self.price,
             'execution_permission': self.execution_permission.value,  # 方案D新增
             'executable': self.executable,
             'signal_decision': self.signal_decision.value if self.signal_decision else None,  # PR-004新增
