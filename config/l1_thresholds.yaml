@@ -7,6 +7,9 @@
 symbol_universe:
   # 支持的币种列表（合约市场）
   enabled_symbols:
+    - BTC    # Bitcoin
+    - ETH    # Ethereum
+    - SOL    # Solana
     - TA     # TA
     - AT     # AT
     - HANA   # HANA
@@ -15,7 +18,7 @@ symbol_universe:
     - RIVER  # RIVER
   
   # 默认币种（前端初始化）
-  default_symbol: TA
+  default_symbol: BTC
 
 # ==================
 # 定时更新配置（整合自 monitored_symbols.yaml）
