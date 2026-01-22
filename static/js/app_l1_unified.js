@@ -571,6 +571,7 @@ function checkForNewDualSignals(newDecisions) {
                     decision: newDual.short_term.decision,
                     confidence: newDual.short_term.confidence,
                     executable: newDual.short_term.executable,
+                    price: newDual.price,
                     isReversal: oldDual && oldDual.short_term.decision !== 'no_trade' && 
                                oldDual.short_term.decision !== newDual.short_term.decision
                 });
@@ -587,6 +588,7 @@ function checkForNewDualSignals(newDecisions) {
                     decision: newDual.medium_term.decision,
                     confidence: newDual.medium_term.confidence,
                     executable: newDual.medium_term.executable,
+                    price: newDual.price,
                     isReversal: oldDual && oldDual.medium_term.decision !== 'no_trade' && 
                                oldDual.medium_term.decision !== newDual.medium_term.decision
                 });
@@ -618,7 +620,7 @@ function showSignalNotifications(signals) {
 }
 
 function showSignalPopup(signal) {
-    const { symbol, timeframe, decision, confidence, executable, isReversal } = signal;
+    const { symbol, timeframe, decision, confidence, executable, price, isReversal } = signal;
     
     const popup = document.createElement('div');
     popup.className = 'signal-popup';
@@ -628,6 +630,7 @@ function showSignalPopup(signal) {
     const decisionLabel = decision === 'long' ? '做多信号' : '做空信号';
     const timeframeLabel = timeframe === 'short_term' ? '短期(5m/15m)' : '中长期(1h/6h)';
     const reversalLabel = isReversal ? ' (方向反转)' : '';
+    const priceInfo = price ? `<div class="signal-price">💰 价格: $${price.toLocaleString()}</div>` : '';
     
     const confidenceLabel = {
         'ultra': '极高',
@@ -648,6 +651,7 @@ function showSignalPopup(signal) {
         <div class="signal-popup-body">
             <div class="signal-info">
                 <div class="signal-symbol">${symbol}</div>
+                ${priceInfo}
                 <div class="signal-details">
                     <span class="signal-confidence">置信度: ${confidenceLabel}</span>
                     <span class="signal-exec ${execClass}">${execLabel}</span>
@@ -733,11 +737,12 @@ function showBrowserNotification(signal) {
 }
 
 function createNotification(signal) {
-    const { symbol, timeframe, decision, confidence, executable } = signal;
+    const { symbol, timeframe, decision, confidence, executable, price } = signal;
     
     const timeframeLabel = timeframe === 'short_term' ? '短期' : '中长期';
     const title = `${symbol} - ${timeframeLabel}${decision === 'long' ? '做多' : '做空'}信号`;
-    const body = `置信度: ${confidence}\n${executable ? '✓ 可执行' : '✗ 不可执行'}`;
+    const priceText = price ? `\n💰 价格: $${price.toLocaleString()}` : '';
+    const body = `置信度: ${confidence}${priceText}\n${executable ? '✓ 可执行' : '✗ 不可执行'}`;
     
     const notification = new Notification(title, {
         body: body,
@@ -875,6 +880,7 @@ function applyHistoryFilters() {
                 timeframe: 'short',
                 timeframe_label: '短期(5m/15m)',
                 timestamp: item.timestamp,
+                price: item.price,
                 alignment_type: item.alignment?.alignment_type
             });
         }
@@ -886,6 +892,7 @@ function applyHistoryFilters() {
                 timeframe: 'medium',
                 timeframe_label: '中长(1h/6h)',
                 timestamp: item.timestamp,
+                price: item.price,
                 alignment_type: item.alignment?.alignment_type
             });
         }
