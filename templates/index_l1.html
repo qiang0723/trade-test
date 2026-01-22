@@ -15,6 +15,14 @@
                 <p class="header-subtitle">交易决策咨询系统 | Safety First</p>
             </div>
             <div class="header-info">
+                <div class="notification-controls">
+                    <button id="toggleNotificationBtn" onclick="toggleSignalNotification()" class="notification-btn" title="开启/关闭交易信号弹窗提示">
+                        🔔 通知已开启
+                    </button>
+                    <button id="toggleSoundBtn" onclick="toggleSound()" class="notification-btn" title="开启/关闭提示音">
+                        🔊 声音已开启
+                    </button>
+                </div>
                 <div class="update-time">
                     <span class="label">最后更新</span>
                     <span id="lastUpdate" class="value">--</span>

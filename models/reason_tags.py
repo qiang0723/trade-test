@@ -61,7 +61,8 @@ class ReasonTag(Enum):
     SHORT_TERM_TREND = "short_term_trend"                # 短期趋势（1h>2%）
     RANGE_SHORT_TERM_LONG = "range_short_term_long"      # RANGE短期做多机会
     RANGE_SHORT_TERM_SHORT = "range_short_term_short"    # RANGE短期做空机会
-    SHORT_TERM_PRICE_SURGE = "short_term_price_surge"    # 短期价格爆发
+    SHORT_TERM_PRICE_SURGE = "short_term_price_surge"    # 短期价格上涨
+    SHORT_TERM_PRICE_DROP = "short_term_price_drop"      # 短期价格下跌
     SHORT_TERM_STRONG_BUY = "short_term_strong_buy"      # 短期强买压
     SHORT_TERM_STRONG_SELL = "short_term_strong_sell"    # 短期强卖压
     
@@ -111,7 +112,8 @@ REASON_TAG_EXPLANATIONS = {
     "short_term_trend": "⚡ 短期趋势：1小时快速走势（>2%），捕获短期机会",
     "range_short_term_long": "🎯 震荡短期做多：综合信号强势做多机会（3选2确认）",
     "range_short_term_short": "🎯 震荡短期做空：综合信号强势做空机会（3选2确认）",
-    "short_term_price_surge": "💨 短期价格爆发：1小时涨幅>1.5%",
+    "short_term_price_surge": "💨 短期价格上涨：1小时涨幅>1.5%",
+    "short_term_price_drop": "💨 短期价格下跌：1小时跌幅>1.5%",
     "short_term_strong_buy": "🔥 短期强买压：买卖失衡>65%",
     "short_term_strong_sell": "🔥 短期强卖压：买卖失衡<-65%",
     
@@ -174,6 +176,18 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.STRONG_SELL_PRESSURE: ExecutabilityLevel.ALLOW,
     ReasonTag.OI_GROWING: ExecutabilityLevel.ALLOW,
     ReasonTag.OI_DECLINING: ExecutabilityLevel.ALLOW,
+    
+    # 数据质量类（补充）
+    ReasonTag.DATA_INCOMPLETE: ExecutabilityLevel.DEGRADE,     # 数据不完整，降级执行（不完全阻断）
+    
+    # 短期机会识别类（v3.2）- 全部为正面信号，不影响执行
+    ReasonTag.SHORT_TERM_TREND: ExecutabilityLevel.ALLOW,          # 短期趋势信号
+    ReasonTag.RANGE_SHORT_TERM_LONG: ExecutabilityLevel.ALLOW,     # 震荡短期做多
+    ReasonTag.RANGE_SHORT_TERM_SHORT: ExecutabilityLevel.ALLOW,    # 震荡短期做空
+    ReasonTag.SHORT_TERM_PRICE_SURGE: ExecutabilityLevel.ALLOW,    # 短期价格上涨
+    ReasonTag.SHORT_TERM_PRICE_DROP: ExecutabilityLevel.ALLOW,     # 短期价格下跌
+    ReasonTag.SHORT_TERM_STRONG_BUY: ExecutabilityLevel.ALLOW,     # 短期强买压
+    ReasonTag.SHORT_TERM_STRONG_SELL: ExecutabilityLevel.ALLOW,    # 短期强卖压
     
     # 三层触发状态类（PR-005新增）
     ReasonTag.LTF_CONFIRMED: ExecutabilityLevel.ALLOW,         # 三层确认，正常执行

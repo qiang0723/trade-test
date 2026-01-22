@@ -138,32 +138,47 @@ def cleanup_old_records_job():
 
 
 def load_monitored_symbols():
-    """加载监控的交易对配置"""
+    """
+    加载监控的交易对配置（统一使用 l1_thresholds.yaml）
+    
+    注意：此函数现在从 advisory_engine.config 中读取，不再使用单独的配置文件
+    """
     try:
-        config_path = os.path.join(
-            os.path.dirname(__file__), 
-            'config', 
-            'monitored_symbols.yaml'
-        )
+        config = advisory_engine.config
         
-        if not os.path.exists(config_path):
-            logger.warning(f"Monitored symbols config not found: {config_path}, using default [BTCUSDT]")
-            return {
-                'periodic_update': {'enabled': True, 'interval_minutes': 1, 'market_type': 'futures'},
-                'symbols': ['BTCUSDT']
-            }
+        # 从 symbol_universe 获取币种列表
+        symbol_universe = config.get('symbol_universe', {})
+        enabled_symbols = symbol_universe.get('enabled_symbols', ['BTC'])
         
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+        # 转换为 USDT 交易对格式
+        symbols = [f"{s}USDT" if not s.endswith('USDT') else s for s in enabled_symbols]
         
-        logger.info(f"Loaded monitored symbols config: {len(config.get('symbols', []))} symbols")
-        return config
+        # 构造返回格式（保持兼容性）
+        return {
+            'periodic_update': config.get('periodic_update', {
+                'enabled': True, 
+                'interval_minutes': 1, 
+                'market_type': 'futures'
+            }),
+            'symbols': symbols,
+            'data_retention': config.get('data_retention', {
+                'keep_hours': 24,
+                'cleanup_interval_hours': 6
+            }),
+            'error_handling': config.get('error_handling', {
+                'max_retries': 3,
+                'retry_delay_seconds': 5,
+                'continue_on_error': True
+            })
+        }
     
     except Exception as e:
         logger.error(f"Error loading monitored symbols config: {e}")
         return {
             'periodic_update': {'enabled': True, 'interval_minutes': 1, 'market_type': 'futures'},
-            'symbols': ['BTCUSDT']
+            'symbols': ['BTCUSDT'],
+            'data_retention': {'keep_hours': 24, 'cleanup_interval_hours': 6},
+            'error_handling': {'max_retries': 3, 'retry_delay_seconds': 5, 'continue_on_error': True}
         }
 
 
@@ -325,6 +340,12 @@ def index():
     return render_template('index_l1.html')
 
 
+@app.route('/dual')
+def index_dual():
+    """L1 Advisory双周期决策页面（PR-DUAL）"""
+    return render_template('index_l1_dual.html')
+
+
 # ========================================
 # API路由 - L1 Advisory
 # ========================================
@@ -353,6 +374,19 @@ def get_advisory(symbol):
     """
     try:
         logger.info(f"API request: /api/l1/advisory/{symbol}")
+        
+        # 0. 验证 symbol 有效性
+        config = advisory_engine.config
+        symbol_universe = config.get('symbol_universe', {})
+        enabled_symbols = symbol_universe.get('enabled_symbols', [])
+        
+        if symbol not in enabled_symbols:
+            logger.warning(f"Invalid symbol requested: {symbol}")
+            return jsonify({
+                'success': False,
+                'data': None,
+                'message': f'Invalid symbol: {symbol}. Enabled symbols: {", ".join(enabled_symbols)}'
+            }), 400
         
         # 1. 获取市场数据
         market_data_dict = fetch_market_data(symbol)
@@ -394,6 +428,93 @@ def get_advisory(symbol):
         }), 500
 
 
+@app.route('/api/l1/advisory-dual/<symbol>')
+def get_advisory_dual(symbol):
+    """
+    获取指定币种的双周期独立结论（PR-DUAL）
+    
+    GET /api/l1/advisory-dual/BTC
+    
+    Response:
+    {
+      "success": true,
+      "data": {
+        "short_term": {
+          "timeframe": "short_term",
+          "timeframe_label": "5m/15m",
+          "decision": "long",
+          "confidence": "high",
+          "executable": true,
+          ...
+        },
+        "medium_term": {
+          "timeframe": "medium_term",
+          "timeframe_label": "1h/6h",
+          "decision": "long",
+          "confidence": "medium",
+          "executable": false,
+          ...
+        },
+        "alignment": {
+          "is_aligned": true,
+          "alignment_type": "both_long",
+          "has_conflict": false,
+          "recommended_action": "long",
+          ...
+        },
+        "symbol": "BTC",
+        "timestamp": "...",
+        "decision": "long",  // 向后兼容
+        "executable": true   // 向后兼容
+      }
+    }
+    """
+    try:
+        logger.info(f"API request: /api/l1/advisory-dual/{symbol}")
+        
+        # 0. 验证 symbol 有效性
+        config = advisory_engine.config
+        symbol_universe = config.get('symbol_universe', {})
+        enabled_symbols = symbol_universe.get('enabled_symbols', [])
+        
+        if symbol not in enabled_symbols:
+            logger.warning(f"Invalid symbol requested: {symbol}")
+            return jsonify({
+                'success': False,
+                'data': None,
+                'message': f'Invalid symbol: {symbol}. Enabled symbols: {", ".join(enabled_symbols)}'
+            }), 400
+        
+        # 1. 获取市场数据
+        market_data_dict = fetch_market_data(symbol)
+        
+        if not market_data_dict:
+            logger.warning(f"Failed to fetch market data for {symbol}")
+            return jsonify({
+                'success': False,
+                'data': None,
+                'message': f'Failed to fetch market data for {symbol}'
+            }), 404
+        
+        # 2. L1双周期决策
+        result = advisory_engine.on_new_tick_dual(symbol, market_data_dict)
+        
+        # 3. 返回结果
+        return jsonify({
+            'success': True,
+            'data': result.to_dict(),
+            'message': None
+        })
+    
+    except Exception as e:
+        logger.error(f'Error in get_advisory_dual: {str(e)}', exc_info=True)
+        return jsonify({
+            'success': False,
+            'data': None,
+            'message': str(e)
+        }), 500
+
+
 @app.route('/api/l1/history/<symbol>')
 def get_history(symbol):
     """
@@ -421,6 +542,19 @@ def get_history(symbol):
     }
     """
     try:
+        # 验证 symbol 有效性
+        config = advisory_engine.config
+        symbol_universe = config.get('symbol_universe', {})
+        enabled_symbols = symbol_universe.get('enabled_symbols', [])
+        
+        if symbol not in enabled_symbols:
+            logger.warning(f"Invalid symbol requested for history: {symbol}")
+            return jsonify({
+                'success': False,
+                'data': None,
+                'message': f'Invalid symbol: {symbol}. Enabled symbols: {", ".join(enabled_symbols)}'
+            }), 400
+        
         hours = int(request.args.get('hours', 24))
         limit = int(request.args.get('limit', 1500))
         
@@ -465,6 +599,19 @@ def get_stats(symbol):
     }
     """
     try:
+        # 验证 symbol 有效性
+        config = advisory_engine.config
+        symbol_universe = config.get('symbol_universe', {})
+        enabled_symbols = symbol_universe.get('enabled_symbols', [])
+        
+        if symbol not in enabled_symbols:
+            logger.warning(f"Invalid symbol requested for stats: {symbol}")
+            return jsonify({
+                'success': False,
+                'data': None,
+                'message': f'Invalid symbol: {symbol}. Enabled symbols: {", ".join(enabled_symbols)}'
+            }), 400
+        
         hours = int(request.args.get('hours', 24))
         
         logger.info(f"API request: /api/l1/stats/{symbol}?hours={hours}")
@@ -503,6 +650,18 @@ def get_pipeline_status(symbol):
         JSON: 管道步骤详情
     """
     try:
+        # 验证 symbol 有效性
+        config = advisory_engine.config
+        symbol_universe = config.get('symbol_universe', {})
+        enabled_symbols = symbol_universe.get('enabled_symbols', [])
+        
+        if symbol not in enabled_symbols:
+            logger.warning(f"Invalid symbol requested for pipeline: {symbol}")
+            return jsonify({
+                'success': False,
+                'error': f'Invalid symbol: {symbol}. Enabled symbols: {", ".join(enabled_symbols)}'
+            }), 400
+        
         advisory_id = request.args.get('advisory_id', type=int)
         
         if advisory_id:

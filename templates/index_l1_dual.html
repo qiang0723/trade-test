@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>L1 Advisory Layer - 双周期决策</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style_l1.css') }}">
+    <style>
+        /* 双周期专用样式 */
+        .dual-timeframe-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .timeframe-panel {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .timeframe-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        
+        .timeframe-label {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .timeframe-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .timeframe-badge.short-term {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .timeframe-badge.medium-term {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+        
+        .decision-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        
+        .decision-label {
+            font-weight: 500;
+            color: #666;
+        }
+        
+        .decision-value {
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .decision-value.long {
+            color: #4caf50;
+        }
+        
+        .decision-value.short {
+            color: #f44336;
+        }
+        
+        .decision-value.no_trade {
+            color: #9e9e9e;
+        }
+        
+        .alignment-panel {
+            grid-column: 1 / -1;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .alignment-header {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .alignment-status {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .alignment-status.aligned {
+            background: rgba(76, 175, 80, 0.3);
+            border: 2px solid #4caf50;
+        }
+        
+        .alignment-status.conflict {
+            background: rgba(255, 152, 0, 0.3);
+            border: 2px solid #ff9800;
+        }
+        
+        .alignment-notes {
+            margin-top: 10px;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .recommended-action {
+            margin-top: 15px;
+            padding: 15px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 8px;
+            border-left: 4px solid #ffd700;
+        }
+        
+        .recommended-action-label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+        
+        .recommended-action-value {
+            font-size: 24px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .key-metrics {
+            margin-top: 15px;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+        
+        .metric-item {
+            background: rgba(0,0,0,0.05);
+            padding: 8px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        
+        .metric-label {
+            color: #888;
+            font-size: 11px;
+        }
+        
+        .metric-value {
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header>
+            <div class="header-main">
+                <h1>🎯 L1 Advisory Layer - 双周期决策</h1>
+                <p class="header-subtitle">短期（5m/15m）+ 中长期（1h/6h）独立结论</p>
+            </div>
+            <div class="header-info">
+                <div class="update-time">
+                    <span class="label">币种</span>
+                    <select id="symbolSelect" onchange="loadDualAdvisory()">
+                        <option value="BTC">BTC</option>
+                        <option value="ETH">ETH</option>
+                        <option value="SOL">SOL</option>
+                    </select>
+                </div>
+                <div class="update-time">
+                    <span class="label">最后更新</span>
+                    <span id="lastUpdate" class="value">--</span>
+                </div>
+                <button onclick="loadDualAdvisory()" class="refresh-btn">🔄 刷新</button>
+            </div>
+        </header>
+
+        <!-- 双周期决策面板 -->
+        <div class="dual-timeframe-container" id="dualContainer">
+            <!-- 短期结论 -->
+            <div class="timeframe-panel">
+                <div class="timeframe-header">
+                    <span class="timeframe-label">📊 短期结论</span>
+                    <span class="timeframe-badge short-term">5m/15m</span>
+                </div>
+                <div id="shortTermContent">
+                    <div class="loading-placeholder">加载中...</div>
+                </div>
+            </div>
+
+            <!-- 中长期结论 -->
+            <div class="timeframe-panel">
+                <div class="timeframe-header">
+                    <span class="timeframe-label">📈 中长期结论</span>
+                    <span class="timeframe-badge medium-term">1h/6h</span>
+                </div>
+                <div id="mediumTermContent">
+                    <div class="loading-placeholder">加载中...</div>
+                </div>
+            </div>
+
+            <!-- 一致性分析 -->
+            <div class="alignment-panel" id="alignmentPanel">
+                <div class="alignment-header">
+                    🎯 一致性分析
+                    <span class="alignment-status aligned" id="alignmentStatus">--</span>
+                </div>
+                <div class="alignment-notes" id="alignmentNotes">
+                    --
+                </div>
+                <div class="recommended-action">
+                    <div class="recommended-action-label">💡 综合建议</div>
+                    <div class="recommended-action-value" id="recommendedAction">--</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 全局风险状态 -->
+        <div class="safety-gates-panel">
+            <h3>🛡️ 全局风险状态</h3>
+            <div id="globalRiskContent">
+                <div class="loading-placeholder">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentSymbol = 'BTC';
+
+        // 加载双周期决策
+        async function loadDualAdvisory() {
+            currentSymbol = document.getElementById('symbolSelect').value;
+            
+            try {
+                const response = await fetch(`/api/l1/advisory-dual/${currentSymbol}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    renderDualTimeframe(result.data);
+                    updateLastUpdateTime();
+                } else {
+                    console.error('Failed to load dual advisory:', result.message);
+                }
+            } catch (error) {
+                console.error('Error loading dual advisory:', error);
+            }
+        }
+
+        // 渲染双周期结论
+        function renderDualTimeframe(data) {
+            // 渲染短期结论
+            renderTimeframeConclusion('shortTermContent', data.short_term);
+            
+            // 渲染中长期结论
+            renderTimeframeConclusion('mediumTermContent', data.medium_term);
+            
+            // 渲染一致性分析
+            renderAlignment(data.alignment);
+            
+            // 渲染全局风险
+            renderGlobalRisk(data);
+        }
+
+        // 渲染单个周期结论
+        function renderTimeframeConclusion(containerId, tf) {
+            const container = document.getElementById(containerId);
+            
+            const decisionClass = tf.decision.toLowerCase();
+            const decisionText = {
+                'long': '做多 ↗',
+                'short': '做空 ↘',
+                'no_trade': '不交易 ⏸'
+            }[tf.decision] || tf.decision;
+            
+            const confidenceEmoji = {
+                'ultra': '⭐⭐⭐⭐',
+                'high': '⭐⭐⭐',
+                'medium': '⭐⭐',
+                'low': '⭐'
+            }[tf.confidence] || '';
+            
+            const executableText = tf.executable ? '✅ 可执行' : '❌ 不可执行';
+            const executableClass = tf.executable ? 'executable' : 'not-executable';
+            
+            container.innerHTML = `
+                <div class="decision-row">
+                    <span class="decision-label">决策方向</span>
+                    <span class="decision-value ${decisionClass}">${decisionText}</span>
+                </div>
+                <div class="decision-row">
+                    <span class="decision-label">置信度</span>
+                    <span class="decision-value">${tf.confidence.toUpperCase()} ${confidenceEmoji}</span>
+                </div>
+                <div class="decision-row">
+                    <span class="decision-label">可执行性</span>
+                    <span class="decision-value ${executableClass}">${executableText}</span>
+                </div>
+                <div class="decision-row">
+                    <span class="decision-label">市场环境</span>
+                    <span class="decision-value">${tf.market_regime.toUpperCase()}</span>
+                </div>
+                <div class="decision-row">
+                    <span class="decision-label">交易质量</span>
+                    <span class="decision-value">${tf.trade_quality.toUpperCase()}</span>
+                </div>
+                
+                <div class="key-metrics">
+                    ${Object.entries(tf.key_metrics || {}).slice(0, 6).map(([key, value]) => `
+                        <div class="metric-item">
+                            <div class="metric-label">${key}</div>
+                            <div class="metric-value">${formatMetricValue(value)}</div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                    <strong>原因标签:</strong> ${tf.reason_tags.slice(0, 3).join(', ')}
+                </div>
+            `;
+        }
+
+        // 渲染一致性分析
+        function renderAlignment(alignment) {
+            const statusSpan = document.getElementById('alignmentStatus');
+            const notesDiv = document.getElementById('alignmentNotes');
+            const actionDiv = document.getElementById('recommendedAction');
+            
+            // 状态标签
+            if (alignment.is_aligned) {
+                statusSpan.textContent = '✅ 一致';
+                statusSpan.className = 'alignment-status aligned';
+            } else if (alignment.has_conflict) {
+                statusSpan.textContent = '⚠️ 冲突';
+                statusSpan.className = 'alignment-status conflict';
+            } else {
+                statusSpan.textContent = '⚠️ 部分确认';
+                statusSpan.className = 'alignment-status conflict';
+            }
+            
+            // 说明文字
+            notesDiv.innerHTML = `
+                <div><strong>一致性类型:</strong> ${alignment.alignment_type}</div>
+                ${alignment.has_conflict ? `<div><strong>冲突处理:</strong> ${alignment.conflict_resolution}</div>` : ''}
+                ${alignment.resolution_reason ? `<div><strong>处理原因:</strong> ${alignment.resolution_reason}</div>` : ''}
+                <div style="margin-top: 10px;">${alignment.recommendation_notes}</div>
+            `;
+            
+            // 综合建议
+            const actionClass = alignment.recommended_action.toLowerCase();
+            const actionText = {
+                'long': '做多 ↗',
+                'short': '做空 ↘',
+                'no_trade': '不交易 ⏸'
+            }[alignment.recommended_action] || alignment.recommended_action;
+            
+            actionDiv.innerHTML = `
+                <span class="decision-value ${actionClass}">${actionText}</span>
+                <span style="font-size: 14px; margin-left: 10px; opacity: 0.8;">
+                    (置信度: ${alignment.recommended_confidence.toUpperCase()})
+                </span>
+            `;
+        }
+
+        // 渲染全局风险
+        function renderGlobalRisk(data) {
+            const container = document.getElementById('globalRiskContent');
+            
+            const riskStatus = data.risk_exposure_allowed ? '✅ 通过' : '❌ 拒绝';
+            const riskClass = data.risk_exposure_allowed ? 'pass' : 'deny';
+            
+            container.innerHTML = `
+                <div class="decision-row">
+                    <span class="decision-label">风险准入</span>
+                    <span class="decision-value ${riskClass}">${riskStatus}</span>
+                </div>
+                ${data.global_risk_tags && data.global_risk_tags.length > 0 ? `
+                    <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 6px;">
+                        <strong>⚠️ 全局风险标签:</strong><br>
+                        ${data.global_risk_tags.join(', ')}
+                    </div>
+                ` : ''}
+            `;
+        }
+
+        // 格式化指标值
+        function formatMetricValue(value) {
+            if (typeof value === 'number') {
+                if (Math.abs(value) < 0.01) {
+                    return (value * 100).toFixed(3) + '%';
+                } else {
+                    return (value * 100).toFixed(2) + '%';
+                }
+            }
+            return value;
+        }
+
+        // 更新时间
+        function updateLastUpdateTime() {
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent = 
+                now.toLocaleTimeString('zh-CN', { hour12: false });
+        }
+
+        // 页面加载时执行
+        window.onload = function() {
+            loadDualAdvisory();
+            // 每30秒自动刷新
+            setInterval(loadDualAdvisory, 30000);
+        };
+    </script>
+</body>
+</html>

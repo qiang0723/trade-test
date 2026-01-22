@@ -1,0 +1,34 @@
+# 回测配置文件
+
+# 数据配置
+data:
+  symbol: "BTCUSDT"           # 交易对
+  start_date: "2024-01-01"    # 开始日期
+  end_date: "2024-01-31"      # 结束日期
+  interval: "1m"              # K线间隔
+  use_cache: true             # 是否使用缓存
+
+# 回测配置
+backtest:
+  initial_capital: 10000.0    # 初始资金
+  position_size: 1.0          # 每次开仓大小（占资金比例）
+  commission_rate: 0.001      # 手续费率 (0.1%)
+  slippage: 0.0005            # 滑点 (0.05%)
+  
+  # 回测模式
+  modes:
+    - "single"                # 单一决策
+    - "dual"                  # 双周期决策
+  
+  # 平仓策略
+  exit_strategies:
+    - "signal_reverse"        # 信号反转
+    # - "stop_loss"           # 止损
+    # - "time_based"          # 固定时间
+
+# 输出配置
+output:
+  reports_dir: "backtest/reports"
+  generate_html: true
+  export_csv: true
+  export_json: true

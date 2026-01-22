@@ -18,6 +18,29 @@ symbol_universe:
   default_symbol: TA
 
 # ==================
+# 定时更新配置（整合自 monitored_symbols.yaml）
+# ==================
+periodic_update:
+  enabled: true          # 是否启用定时更新
+  interval_minutes: 1    # 更新间隔（分钟）
+  market_type: futures   # 市场类型: futures 或 spot
+
+# ==================
+# 数据保留策略（整合自 monitored_symbols.yaml）
+# ==================
+data_retention:
+  keep_hours: 24         # 保留最近24小时的数据
+  cleanup_interval_hours: 6  # 每6小时清理一次
+
+# ==================
+# 错误处理（整合自 monitored_symbols.yaml）
+# ==================
+error_handling:
+  max_retries: 3         # API调用失败时最大重试次数
+  retry_delay_seconds: 5 # 重试延迟（秒）
+  continue_on_error: true  # 单个symbol失败时继续处理其他symbol
+
+# ==================
 # 数据质量阈值
 # ==================
 data_quality:
@@ -289,3 +312,46 @@ multi_tf:
     # FAILED的处理
     failed_short_term_action: "cancel"    # 短期机会取消
     failed_long_term_action: "degrade"    # 长期信号降级保留
+
+# ==================
+# PR-DUAL: 双周期独立结论配置
+# ==================
+dual_timeframe:
+  # 是否启用双周期输出
+  enabled: true
+  
+  # 短期评估（5m/15m）阈值
+  short_term:
+    # 15分钟价格变化阈值（方向确认）
+    min_price_change_15m: 0.003    # 0.3%
+    
+    # taker失衡阈值（买卖压力）
+    min_taker_imbalance: 0.40      # 40%
+    
+    # 放量比率阈值
+    min_volume_ratio: 1.2          # 1.2倍
+    
+    # 满足信号数要求（4选N）
+    required_signals: 3
+  
+  # 中长期评估（1h/6h）复用 direction 配置
+  # medium_term 使用现有的 direction.trend/range 配置
+  
+  # 冲突处理策略
+  conflict_resolution:
+    # 默认策略：no_trade / follow_medium_term / follow_short_term / follow_higher_confidence
+    default_strategy: "no_trade"
+    
+    # 说明：
+    # - no_trade: 冲突时保守不交易（默认，最安全）
+    # - follow_medium_term: 跟随中长期趋势（适合趋势交易者）
+    # - follow_short_term: 跟随短期信号（适合日内交易者）
+    # - follow_higher_confidence: 跟随置信度更高的一方
+  
+  # 一致性加成
+  alignment_bonus:
+    # 双周期一致时，置信度提升
+    confidence_boost: 1            # 提升1档（如 MEDIUM → HIGH）
+    
+    # 双周期一致时，是否放宽执行门槛
+    relax_executable_threshold: false

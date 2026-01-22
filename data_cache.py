@@ -226,6 +226,54 @@ class MarketDataCache:
             
             return change_percent
     
+    def calculate_price_change_15m(self, symbol: str) -> Optional[float]:
+        """
+        计算15分钟价格变化率（PR-005-DATA）
+        
+        Args:
+            symbol: 币种符号
+        
+        Returns:
+            变化率（百分比）或None
+        """
+        return self.calculate_price_change(symbol, hours=0.25)  # 15分钟 = 0.25小时
+    
+    def calculate_price_change_5m(self, symbol: str) -> Optional[float]:
+        """
+        计算5分钟价格变化率（PR-005-DATA）
+        
+        Args:
+            symbol: 币种符号
+        
+        Returns:
+            变化率（百分比）或None
+        """
+        return self.calculate_price_change(symbol, hours=5/60)  # 5分钟 ≈ 0.0833小时
+    
+    def calculate_oi_change_15m(self, symbol: str) -> Optional[float]:
+        """
+        计算15分钟持仓量变化率（PR-005-DATA）
+        
+        Args:
+            symbol: 币种符号
+        
+        Returns:
+            变化率（百分比）或None
+        """
+        return self.calculate_oi_change(symbol, hours=0.25)  # 15分钟 = 0.25小时
+    
+    def calculate_oi_change_5m(self, symbol: str) -> Optional[float]:
+        """
+        计算5分钟持仓量变化率（PR-005-DATA）
+        
+        Args:
+            symbol: 币种符号
+        
+        Returns:
+            变化率（百分比）或None
+        """
+        return self.calculate_oi_change(symbol, hours=5/60)  # 5分钟 ≈ 0.0833小时
+    
     def calculate_volume_1h(self, symbol: str) -> Optional[float]:
         """
         计算1小时成交量（取最新累计量与1小时前累计量的差值）
@@ -334,6 +382,7 @@ class MarketDataCache:
         oi_change_1h = self.calculate_oi_change(symbol, hours=1.0)
         oi_change_6h = self.calculate_oi_change(symbol, hours=6.0)
         oi_change_15m = self.calculate_oi_change(symbol, hours=0.25)  # PR-005: 15分钟
+        oi_change_5m = self.calculate_oi_change(symbol, hours=0.0833)  # PR-005: 5分钟
         
         volume_1h = self.calculate_volume_1h(symbol)
         buy_sell_imbalance = self.calculate_buy_sell_imbalance(symbol, hours=1.0)
@@ -358,6 +407,7 @@ class MarketDataCache:
             'oi_change_1h': oi_change_1h if oi_change_1h is not None else 0.0,
             'oi_change_6h': oi_change_6h if oi_change_6h is not None else 0.0,
             'oi_change_15m': oi_change_15m if oi_change_15m is not None else None,  # PR-005
+            'oi_change_5m': oi_change_5m if oi_change_5m is not None else None,  # PR-005
             # PR-002: 添加时间戳信息（用于新鲜度检查）
             'source_timestamp': source_timestamp,
             'computed_at': datetime.now(),
@@ -426,19 +476,23 @@ class MarketDataCache:
                 logger.info(f"Cache cleared for {symbol}")
 
 
-# 全局缓存实例（单例模式）
+# 全局缓存实例（单例模式，线程安全）
 _global_cache = None
+_cache_lock = threading.Lock()
 
 def get_cache() -> MarketDataCache:
     """
-    获取全局缓存实例
+    获取全局缓存实例（线程安全）
     
     Returns:
         MarketDataCache实例
     """
     global _global_cache
     if _global_cache is None:
-        _global_cache = MarketDataCache(max_hours=6)
+        with _cache_lock:
+            # 双重检查锁定模式（Double-Checked Locking）
+            if _global_cache is None:
+                _global_cache = MarketDataCache(max_hours=6)
     return _global_cache
 
 

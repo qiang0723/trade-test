@@ -20,13 +20,19 @@ L1 Advisory Layer - 核心决策引擎
 
 import yaml
 import os
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple, List, Optional, TYPE_CHECKING
 from datetime import datetime, timedelta
-from models.enums import Decision, Confidence, TradeQuality, MarketRegime, SystemState
+from models.enums import Decision, Confidence, TradeQuality, MarketRegime, SystemState, ExecutionPermission
 from models.advisory_result import AdvisoryResult
 from models.reason_tags import ReasonTag
 from metrics_normalizer import normalize_metrics
 import logging
+
+# PR-DUAL: 类型检查导入（避免循环导入）
+if TYPE_CHECKING:
+    from models.dual_timeframe_result import (
+        DualTimeframeResult, TimeframeConclusion, AlignmentAnalysis
+    )
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -268,8 +274,8 @@ class L1AdvisoryEngine:
         ltf_status, ltf_tags = self._evaluate_multi_tf(data, decision)
         reason_tags.extend(ltf_tags)
         
-        # 应用binding_policy
-        if ltf_status not in ['disabled', 'not_applicable']:
+        # 应用binding_policy（仅当LTF功能启用且有结果时记录）
+        if ltf_status != 'not_applicable':
             self.last_pipeline_steps.append({
                 'step': 6.5, 'name': 'multi_tf_check',
                 'status': 'success' if ltf_status in ['confirmed', 'partial'] else 'warning',
@@ -277,9 +283,13 @@ class L1AdvisoryEngine:
                 'result': ltf_status
             })
             
-            # PR-005: 根据ltf_status应用策略
-            # 这里只添加标签，具体影响在execution_permission中体现
-            logger.debug(f"[{symbol}] LTF Status: {ltf_status}")
+            # PR-005: 根据ltf_status和binding_policy应用策略
+            decision = self._apply_binding_policy(
+                decision=decision,
+                ltf_status=ltf_status,
+                reason_tags=reason_tags
+            )
+            logger.debug(f"[{symbol}] LTF Status: {ltf_status}, decision after binding: {decision.value}")
         
         # ===== Step 7: 决策频率控制（PR-004重构）=====
         # PR-004: 保存原始信号（频控前的方向）
@@ -304,7 +314,6 @@ class L1AdvisoryEngine:
         })
         
         # ===== Step 8: 计算执行许可级别（方案D）=====
-        from models.enums import ExecutionPermission
         execution_permission = self._compute_execution_permission(reason_tags)
         
         self.last_pipeline_steps.append({
@@ -328,7 +337,18 @@ class L1AdvisoryEngine:
         self._update_state(decision)
         
         # 添加辅助标签（资金费率、持仓量变化）
+        # ⚠️ 设计意图：辅助标签在 Step 8 之后添加，是纯信息性标签，不影响 execution_permission
+        # 如果需要让辅助标签影响执行许可，应移到 Step 8 之前
         self._add_auxiliary_tags(data, reason_tags)
+        
+        # 去重 reason_tags（保持顺序）
+        seen = set()
+        unique_tags = []
+        for tag in reason_tags:
+            if tag not in seen:
+                seen.add(tag)
+                unique_tags.append(tag)
+        reason_tags = unique_tags
         
         result_timestamp = datetime.now()
         
@@ -361,7 +381,12 @@ class L1AdvisoryEngine:
         )
         
         # 🔥 更新决策记忆（PR-C）- 仅LONG/SHORT会更新
-        self.decision_memory.update_decision(symbol, decision, result_timestamp)
+        # P1修复：被频控阻断的决策不更新记忆，避免"间隔"被被阻断的决策刷新
+        # 这样翻转冷却的计算基准始终是上次"真正可执行"的决策时间
+        if not control_blocked:
+            self.decision_memory.update_decision(symbol, decision, result_timestamp)
+        else:
+            logger.debug(f"[{symbol}] Decision memory NOT updated: blocked by frequency control")
         
         logger.info(f"[{symbol}] Decision: {result}")
         
@@ -592,12 +617,20 @@ class L1AdvisoryEngine:
         
         # 2. 噪音市（需要历史数据）- PR-004: 返回UNCERTAIN而非POOR
         funding_rate = data.get('funding_rate', 0)
-        funding_rate_prev = self.history_data.get(f'{symbol}_funding_rate_prev', funding_rate)
+        history_key = f'{symbol}_funding_rate_prev'
+        is_first_call = history_key not in self.history_data
+        
+        # 首次调用时使用当前值作为历史值（冷启动，无法检测波动）
+        funding_rate_prev = self.history_data.get(history_key, funding_rate)
         funding_volatility = abs(funding_rate - funding_rate_prev)
         
         # P0-2修复: 先保存当前数据供下次使用（确保每次tick都更新，避免NOISY分支return导致不可达）
         # 同时使用 symbol 前缀避免多币种串扰
-        self.history_data[f'{symbol}_funding_rate_prev'] = funding_rate
+        self.history_data[history_key] = funding_rate
+        
+        # 首次调用时记录日志（冷启动期间无法检测噪音市场）
+        if is_first_call:
+            logger.debug(f"[{symbol}] First call for noise detection, funding_rate history initialized")
         
         if (funding_volatility > self.thresholds['noisy_funding_volatility'] and 
             abs(funding_rate) < self.thresholds['noisy_funding_abs']):
@@ -732,7 +765,7 @@ class L1AdvisoryEngine:
                 # 信号1: 价格短期下跌
                 if price_change < short_term_config.get('max_price_change_1h', -0.015):
                     signals.append('price_drop')
-                    signal_tags.append(ReasonTag.SHORT_TERM_PRICE_SURGE)  # 使用price_surge，值为负
+                    signal_tags.append(ReasonTag.SHORT_TERM_PRICE_DROP)  # 使用专门的下跌标签
                 
                 # 信号2: OI增长
                 if oi_change > short_term_config.get('min_oi_change_1h', 0.15):
@@ -787,6 +820,9 @@ class L1AdvisoryEngine:
             return Decision.NO_TRADE, tags
         
         # SHORT优先
+        # 添加决策方向标识标签（与方向评估中的具体信号标签如SHORT_TERM_STRONG_SELL不同）
+        # STRONG_SELL_PRESSURE: 通用决策方向标识
+        # SHORT_TERM_STRONG_SELL: 具体信号来源标识
         if allow_short:
             tags.append(ReasonTag.STRONG_SELL_PRESSURE)
             return Decision.SHORT, tags
@@ -1082,7 +1118,7 @@ class L1AdvisoryEngine:
     # 方案D：执行许可计算
     # ========================================
     
-    def _compute_execution_permission(self, reason_tags: List[ReasonTag]) -> 'ExecutionPermission':
+    def _compute_execution_permission(self, reason_tags: List[ReasonTag]) -> ExecutionPermission:
         """
         计算执行许可级别（PR-004增强：频控标签映射为DENY）
         
@@ -1117,7 +1153,6 @@ class L1AdvisoryEngine:
             ExecutionPermission: 执行许可级别
         """
         from models.reason_tags import REASON_TAG_EXECUTABILITY, ExecutabilityLevel
-        from models.enums import ExecutionPermission
         
         # PR-004优先级0: 频控标签（最高优先级，确保阻断）
         if ReasonTag.MIN_INTERVAL_BLOCK in reason_tags:
@@ -1316,8 +1351,6 @@ class L1AdvisoryEngine:
         Returns:
             AdvisoryResult: NO_TRADE决策结果
         """
-        from models.enums import ExecutionPermission
-        
         result = AdvisoryResult(
             decision=Decision.NO_TRADE,
             confidence=Confidence.LOW,
@@ -1642,20 +1675,21 @@ class L1AdvisoryEngine:
         
         errors = []
         
-        # 检查 execution.min_confidence_normal
-        exec_config = config.get('execution', {})
+        # 检查 executable_control.min_confidence_normal
+        # P1修复：与实际使用的配置段名称保持一致（executable_control 而非 execution）
+        exec_config = config.get('executable_control', {})
         min_conf_normal = exec_config.get('min_confidence_normal', 'HIGH')
         if min_conf_normal.upper() not in valid_confidence_values:
             errors.append(
-                f"execution.min_confidence_normal: '{min_conf_normal}' 不是有效的Confidence值\n"
+                f"executable_control.min_confidence_normal: '{min_conf_normal}' 不是有效的Confidence值\n"
                 f"  → 有效值: LOW, MEDIUM, HIGH, ULTRA（大小写不敏感）"
             )
         
-        # 检查 execution.min_confidence_reduced
+        # 检查 executable_control.min_confidence_reduced
         min_conf_reduced = exec_config.get('min_confidence_reduced', 'MEDIUM')
         if min_conf_reduced.upper() not in valid_confidence_values:
             errors.append(
-                f"execution.min_confidence_reduced: '{min_conf_reduced}' 不是有效的Confidence值\n"
+                f"executable_control.min_confidence_reduced: '{min_conf_reduced}' 不是有效的Confidence值\n"
                 f"  → 有效值: LOW, MEDIUM, HIGH, ULTRA（大小写不敏感）"
             )
         
@@ -1851,11 +1885,11 @@ class L1AdvisoryEngine:
         # 检查功能开关
         config = self.config.get('multi_tf', {})
         if not config.get('enabled', False):
-            return 'disabled', []
+            return LTFStatus.NOT_APPLICABLE.value, []  # 统一使用枚举
         
         # 如果decision是NO_TRADE，无需LTF判定
         if decision == Decision.NO_TRADE:
-            return 'not_applicable', []
+            return LTFStatus.NOT_APPLICABLE.value, []
         
         # PR-005: 检查数据完整性
         required_fields = [
@@ -1975,14 +2009,21 @@ class L1AdvisoryEngine:
         if not confirm_config:
             return 0
         
-        # 需要从data_cache计算price_change_15m和oi_change_15m
-        # 当前data可能没有这些字段，暂时使用简化方式
-        # TODO: 需要在data_cache中添加15m和5m的变化率计算
+        # PR-005-DATA: 获取15分钟多周期数据（由 data_cache.py 计算提供）
+        price_change_15m = data.get('price_change_15m')
+        taker_imbalance_15m = data.get('taker_imbalance_15m')
+        volume_ratio_15m = data.get('volume_ratio_15m')
+        oi_change_15m = data.get('oi_change_15m')
         
-        price_change_15m = data.get('price_change_15m', 0)  # 需要data_cache支持
-        taker_imbalance_15m = data.get('taker_imbalance_15m', 0)
-        volume_ratio_15m = data.get('volume_ratio_15m', 1.0)
-        oi_change_15m = data.get('oi_change_15m', 0)  # 需要data_cache支持
+        # 防御性处理：冷启动期间可能数据不足，使用中性默认值
+        if price_change_15m is None:
+            price_change_15m = 0
+        if oi_change_15m is None:
+            oi_change_15m = 0
+        if taker_imbalance_15m is None:
+            taker_imbalance_15m = 0
+        if volume_ratio_15m is None:
+            volume_ratio_15m = 1.0
         
         signals_met = 0
         
@@ -2032,11 +2073,18 @@ class L1AdvisoryEngine:
         if not trigger_config:
             return 0
         
-        # 需要从data_cache计算price_change_5m
-        # 当前data可能没有这些字段
-        price_change_5m = data.get('price_change_5m', 0)  # 需要data_cache支持
-        taker_imbalance_5m = data.get('taker_imbalance_5m', 0)
-        volume_ratio_5m = data.get('volume_ratio_5m', 1.0)
+        # PR-005-DATA: 获取5分钟多周期数据（由 data_cache.py 计算提供）
+        price_change_5m = data.get('price_change_5m')
+        taker_imbalance_5m = data.get('taker_imbalance_5m')
+        volume_ratio_5m = data.get('volume_ratio_5m')
+        
+        # 防御性处理：冷启动期间可能数据不足，使用中性默认值
+        if price_change_5m is None:
+            price_change_5m = 0
+        if taker_imbalance_5m is None:
+            taker_imbalance_5m = 0
+        if volume_ratio_5m is None:
+            volume_ratio_5m = 1.0
         
         signals_met = 0
         
@@ -2058,3 +2106,588 @@ class L1AdvisoryEngine:
         
         logger.debug(f"[Trigger] {decision.value}: {signals_met}/3 signals met")
         return signals_met
+    
+    def _apply_binding_policy(
+        self,
+        decision: Decision,
+        ltf_status: str,
+        reason_tags: List[ReasonTag]
+    ) -> Decision:
+        """
+        PR-005: 应用binding_policy策略
+        
+        根据LTF状态和配置中的binding_policy决定如何处理决策：
+        - CONFIRMED: 正常通过
+        - PARTIAL: 根据 partial_action 处理（degrade/allow/deny）
+        - FAILED: 根据是否短期机会决定处理方式
+        - MISSING: 数据缺失，降级处理
+        
+        Args:
+            decision: 当前决策
+            ltf_status: LTF判定状态
+            reason_tags: 原因标签列表（可能被修改）
+        
+        Returns:
+            Decision: 处理后的决策（可能被改为NO_TRADE）
+        """
+        if decision == Decision.NO_TRADE:
+            return decision
+        
+        # 读取binding_policy配置
+        multi_tf_config = self.config.get('multi_tf', {})
+        binding_policy = multi_tf_config.get('binding_policy', {})
+        
+        # 检测是否是短期机会（通过检查特定标签）
+        short_term_tags = [
+            ReasonTag.RANGE_SHORT_TERM_LONG,
+            ReasonTag.RANGE_SHORT_TERM_SHORT,
+            ReasonTag.SHORT_TERM_TREND
+        ]
+        is_short_term_opportunity = any(tag in reason_tags for tag in short_term_tags)
+        
+        # 根据ltf_status应用策略
+        if ltf_status == 'confirmed':
+            # CONFIRMED: 三层全部满足，正常通过
+            logger.debug(f"[BindingPolicy] CONFIRMED: decision={decision.value} passed")
+            return decision
+        
+        elif ltf_status == 'partial':
+            # PARTIAL: 根据配置处理
+            partial_action = binding_policy.get('partial_action', 'degrade')
+            
+            if partial_action == 'deny':
+                logger.info(f"[BindingPolicy] PARTIAL + deny: {decision.value} → NO_TRADE")
+                return Decision.NO_TRADE
+            elif partial_action == 'degrade':
+                # degrade: 通过，但标签已经添加了LTF_PARTIAL_CONFIRM（会导致ALLOW_REDUCED）
+                logger.debug(f"[BindingPolicy] PARTIAL + degrade: decision={decision.value} degraded")
+                return decision
+            else:  # allow
+                logger.debug(f"[BindingPolicy] PARTIAL + allow: decision={decision.value} allowed")
+                return decision
+        
+        elif ltf_status == 'failed':
+            # FAILED: 根据是否短期机会决定
+            if is_short_term_opportunity:
+                failed_action = binding_policy.get('failed_short_term_action', 'cancel')
+                if failed_action == 'cancel':
+                    logger.info(
+                        f"[BindingPolicy] FAILED + short_term_opportunity: "
+                        f"{decision.value} → NO_TRADE (短期机会取消)"
+                    )
+                    return Decision.NO_TRADE
+            else:
+                # 长期信号
+                failed_action = binding_policy.get('failed_long_term_action', 'degrade')
+                if failed_action == 'cancel' or failed_action == 'deny':
+                    logger.info(f"[BindingPolicy] FAILED + long_term: {decision.value} → NO_TRADE")
+                    return Decision.NO_TRADE
+                # degrade: 通过，但标签已经添加了LTF_FAILED_CONFIRM（会导致DENY）
+                logger.debug(f"[BindingPolicy] FAILED + long_term + degrade: decision={decision.value}")
+            
+            return decision
+        
+        elif ltf_status == 'missing':
+            # MISSING: 数据缺失，降级处理（不取消决策，但会被DEGRADE）
+            logger.debug(f"[BindingPolicy] MISSING: decision={decision.value} with incomplete data")
+            return decision
+        
+        # 其他状态（context_denied等）: 标签已添加，正常返回
+        return decision
+    
+    # ========================================
+    # PR-DUAL: 双周期独立结论
+    # ========================================
+    
+    def on_new_tick_dual(self, symbol: str, data: Dict) -> 'DualTimeframeResult':
+        """
+        L1决策核心入口 - 双周期独立结论（PR-DUAL）
+        
+        同时输出短期（5m/15m）和中长期（1h/6h）两套独立结论，
+        并分析两者是否一致、是否可执行，以及冲突时的处理规则。
+        
+        Args:
+            symbol: 交易对符号（如 "BTC"）
+            data: 市场数据字典（需包含多周期数据）
+        
+        Returns:
+            DualTimeframeResult: 包含双周期独立结论的完整输出
+        """
+        from models.dual_timeframe_result import (
+            DualTimeframeResult, TimeframeConclusion, AlignmentAnalysis
+        )
+        from models.enums import Timeframe, AlignmentType, ConflictResolution
+        
+        logger.info(f"[{symbol}] Starting dual-timeframe L1 decision pipeline")
+        
+        # ===== Step 1: 数据验证（全局）=====
+        is_valid, normalized_data, fail_tag = self._validate_data(data)
+        global_risk_tags = []
+        
+        if not is_valid:
+            # 数据验证失败，返回双NO_TRADE
+            logger.warning(f"[{symbol}] Data validation failed, returning dual NO_TRADE")
+            global_risk_tags = [fail_tag] if fail_tag else [ReasonTag.INVALID_DATA]
+            return self._build_dual_no_trade_result(symbol, global_risk_tags)
+        
+        data = normalized_data
+        
+        # ===== Step 2: 全局风险评估（极端行情等）=====
+        regime, regime_tags = self._detect_market_regime(data)
+        
+        if regime == MarketRegime.EXTREME:
+            logger.warning(f"[{symbol}] EXTREME regime detected, returning dual NO_TRADE")
+            global_risk_tags.append(ReasonTag.EXTREME_REGIME)
+            return self._build_dual_no_trade_result(symbol, global_risk_tags, regime=regime)
+        
+        # 检查其他全局风险
+        risk_allowed, risk_tags = self._eval_risk_exposure_allowed(data, regime)
+        if not risk_allowed:
+            logger.warning(f"[{symbol}] Global risk denied: {[t.value for t in risk_tags]}")
+            global_risk_tags.extend(risk_tags)
+            return self._build_dual_no_trade_result(symbol, global_risk_tags, regime=regime, risk_allowed=False)
+        
+        # ===== Step 3: 短期评估（5m/15m）=====
+        short_term = self._evaluate_short_term(symbol, data, regime)
+        
+        # ===== Step 4: 中长期评估（1h/6h）=====
+        medium_term = self._evaluate_medium_term(symbol, data, regime)
+        
+        # ===== Step 5: 一致性分析 =====
+        alignment = self._analyze_alignment(short_term, medium_term)
+        
+        # ===== Step 6: 构造结果 =====
+        result = DualTimeframeResult(
+            short_term=short_term,
+            medium_term=medium_term,
+            alignment=alignment,
+            symbol=symbol,
+            timestamp=datetime.now(),
+            risk_exposure_allowed=risk_allowed,
+            global_risk_tags=global_risk_tags + regime_tags
+        )
+        
+        logger.info(f"[{symbol}] Dual-timeframe result: {result.get_summary()}")
+        
+        return result
+    
+    def _evaluate_short_term(
+        self, 
+        symbol: str, 
+        data: Dict, 
+        regime: MarketRegime
+    ) -> 'TimeframeConclusion':
+        """
+        短期评估（5m/15m）
+        
+        使用5分钟和15分钟的数据进行快速方向判断
+        """
+        from models.dual_timeframe_result import TimeframeConclusion
+        from models.enums import Timeframe
+        
+        reason_tags = []
+        
+        # 提取短期关键指标
+        price_change_5m = data.get('price_change_5m', 0) or 0
+        price_change_15m = data.get('price_change_15m', 0) or 0
+        taker_imbalance_5m = data.get('taker_imbalance_5m', 0) or 0
+        taker_imbalance_15m = data.get('taker_imbalance_15m', 0) or 0
+        volume_ratio_5m = data.get('volume_ratio_5m', 1.0) or 1.0
+        volume_ratio_15m = data.get('volume_ratio_15m', 1.0) or 1.0
+        
+        key_metrics = {
+            'price_change_5m': price_change_5m,
+            'price_change_15m': price_change_15m,
+            'taker_imbalance_5m': taker_imbalance_5m,
+            'taker_imbalance_15m': taker_imbalance_15m,
+            'volume_ratio_5m': volume_ratio_5m,
+            'volume_ratio_15m': volume_ratio_15m
+        }
+        
+        # 短期方向判断（使用配置中的短期阈值）
+        short_config = self.config.get('dual_timeframe', {}).get('short_term', {})
+        
+        # LONG 条件：价格上涨 + 买压 + 放量
+        long_signals = 0
+        if price_change_15m > short_config.get('min_price_change_15m', 0.003):
+            long_signals += 1
+        if taker_imbalance_15m > short_config.get('min_taker_imbalance', 0.40):
+            long_signals += 1
+        if volume_ratio_15m > short_config.get('min_volume_ratio', 1.2):
+            long_signals += 1
+        # 5m确认
+        if price_change_5m > 0 and taker_imbalance_5m > 0.30:
+            long_signals += 1
+        
+        # SHORT 条件：价格下跌 + 卖压 + 放量
+        short_signals = 0
+        if price_change_15m < -short_config.get('min_price_change_15m', 0.003):
+            short_signals += 1
+        if taker_imbalance_15m < -short_config.get('min_taker_imbalance', 0.40):
+            short_signals += 1
+        if volume_ratio_15m > short_config.get('min_volume_ratio', 1.2):
+            short_signals += 1
+        # 5m确认
+        if price_change_5m < 0 and taker_imbalance_5m < -0.30:
+            short_signals += 1
+        
+        # 决策判断
+        required_signals = short_config.get('required_signals', 3)
+        
+        if long_signals >= required_signals and long_signals > short_signals:
+            decision = Decision.LONG
+            reason_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
+            if price_change_15m > 0.01:
+                reason_tags.append(ReasonTag.SHORT_TERM_PRICE_SURGE)
+        elif short_signals >= required_signals and short_signals > long_signals:
+            decision = Decision.SHORT
+            reason_tags.append(ReasonTag.STRONG_SELL_PRESSURE)
+            if price_change_15m < -0.01:
+                reason_tags.append(ReasonTag.SHORT_TERM_PRICE_DROP)
+        else:
+            decision = Decision.NO_TRADE
+            reason_tags.append(ReasonTag.NO_CLEAR_DIRECTION)
+        
+        # 置信度计算
+        max_signals = max(long_signals, short_signals)
+        if max_signals >= 4:
+            confidence = Confidence.HIGH
+        elif max_signals >= 3:
+            confidence = Confidence.MEDIUM
+        else:
+            confidence = Confidence.LOW
+        
+        # 质量评估
+        if abs(taker_imbalance_15m) > 0.6 and volume_ratio_15m > 1.5:
+            quality = TradeQuality.GOOD
+        elif abs(taker_imbalance_15m) > 0.3:
+            quality = TradeQuality.UNCERTAIN
+        else:
+            quality = TradeQuality.POOR
+        
+        # 执行许可
+        exec_perm = self._compute_execution_permission(reason_tags)
+        
+        # 构造结论
+        conclusion = TimeframeConclusion(
+            timeframe=Timeframe.SHORT_TERM,
+            timeframe_label="5m/15m",
+            decision=decision,
+            confidence=confidence,
+            market_regime=regime,
+            trade_quality=quality,
+            execution_permission=exec_perm,
+            executable=self._compute_tf_executable(decision, confidence, exec_perm, quality),
+            reason_tags=reason_tags,
+            key_metrics=key_metrics
+        )
+        
+        logger.debug(f"[{symbol}] Short-term: {decision.value}, conf={confidence.value}, exec={conclusion.executable}")
+        
+        return conclusion
+    
+    def _evaluate_medium_term(
+        self, 
+        symbol: str, 
+        data: Dict, 
+        regime: MarketRegime
+    ) -> 'TimeframeConclusion':
+        """
+        中长期评估（1h/6h）
+        
+        使用1小时和6小时的数据进行趋势判断
+        """
+        from models.dual_timeframe_result import TimeframeConclusion
+        from models.enums import Timeframe
+        
+        reason_tags = []
+        
+        # 提取中长期关键指标
+        price_change_1h = data.get('price_change_1h', 0) or 0
+        price_change_6h = data.get('price_change_6h', 0) or 0
+        oi_change_1h = data.get('oi_change_1h', 0) or 0
+        oi_change_6h = data.get('oi_change_6h', 0) or 0
+        buy_sell_imbalance = data.get('buy_sell_imbalance', 0) or 0
+        funding_rate = data.get('funding_rate', 0) or 0
+        
+        key_metrics = {
+            'price_change_1h': price_change_1h,
+            'price_change_6h': price_change_6h,
+            'oi_change_1h': oi_change_1h,
+            'oi_change_6h': oi_change_6h,
+            'buy_sell_imbalance': buy_sell_imbalance,
+            'funding_rate': funding_rate
+        }
+        
+        # 中长期方向判断（复用现有的方向评估逻辑）
+        allow_long, long_tags = self._eval_long_direction(data, regime)
+        allow_short, short_tags = self._eval_short_direction(data, regime)
+        
+        # 添加方向标签
+        if allow_long:
+            reason_tags.extend(long_tags)
+        if allow_short:
+            reason_tags.extend(short_tags)
+        
+        # 决策判断
+        if allow_long and not allow_short:
+            decision = Decision.LONG
+        elif allow_short and not allow_long:
+            decision = Decision.SHORT
+        elif allow_long and allow_short:
+            # 冲突，保守处理
+            decision = Decision.NO_TRADE
+            reason_tags.append(ReasonTag.CONFLICTING_SIGNALS)
+        else:
+            decision = Decision.NO_TRADE
+            reason_tags.append(ReasonTag.NO_CLEAR_DIRECTION)
+        
+        # 质量评估
+        quality, quality_tags = self._eval_trade_quality(symbol, data, regime)
+        reason_tags.extend(quality_tags)
+        
+        # 置信度计算（复用现有逻辑）
+        confidence = self._compute_confidence(decision, regime, quality, reason_tags)
+        
+        # 执行许可
+        exec_perm = self._compute_execution_permission(reason_tags)
+        
+        # 构造结论
+        conclusion = TimeframeConclusion(
+            timeframe=Timeframe.MEDIUM_TERM,
+            timeframe_label="1h/6h",
+            decision=decision,
+            confidence=confidence,
+            market_regime=regime,
+            trade_quality=quality,
+            execution_permission=exec_perm,
+            executable=self._compute_tf_executable(decision, confidence, exec_perm, quality),
+            reason_tags=reason_tags,
+            key_metrics=key_metrics
+        )
+        
+        logger.debug(f"[{symbol}] Medium-term: {decision.value}, conf={confidence.value}, exec={conclusion.executable}")
+        
+        return conclusion
+    
+    def _compute_tf_executable(
+        self, 
+        decision: Decision, 
+        confidence: Confidence, 
+        exec_perm: ExecutionPermission,
+        quality: TradeQuality
+    ) -> bool:
+        """
+        计算单周期的可执行性
+        """
+        if decision == Decision.NO_TRADE:
+            return False
+        
+        if exec_perm == ExecutionPermission.DENY:
+            return False
+        
+        if quality == TradeQuality.POOR:
+            return False
+        
+        # 读取配置门槛
+        exec_config = self.config.get('executable_control', {})
+        min_conf_normal = self._string_to_confidence(exec_config.get('min_confidence_normal', 'HIGH'))
+        min_conf_reduced = self._string_to_confidence(exec_config.get('min_confidence_reduced', 'MEDIUM'))
+        
+        if exec_perm == ExecutionPermission.ALLOW:
+            return self._confidence_level(confidence) >= self._confidence_level(min_conf_normal)
+        elif exec_perm == ExecutionPermission.ALLOW_REDUCED:
+            return self._confidence_level(confidence) >= self._confidence_level(min_conf_reduced)
+        
+        return False
+    
+    def _analyze_alignment(
+        self, 
+        short_term: 'TimeframeConclusion', 
+        medium_term: 'TimeframeConclusion'
+    ) -> 'AlignmentAnalysis':
+        """
+        分析双周期一致性
+        
+        判断短期和中长期结论是否一致，并生成处理建议
+        """
+        from models.dual_timeframe_result import AlignmentAnalysis
+        from models.enums import AlignmentType, ConflictResolution
+        
+        short_dec = short_term.decision
+        medium_dec = medium_term.decision
+        
+        # 判断一致性类型
+        if short_dec == Decision.LONG and medium_dec == Decision.LONG:
+            alignment_type = AlignmentType.BOTH_LONG
+            is_aligned = True
+            has_conflict = False
+        elif short_dec == Decision.SHORT and medium_dec == Decision.SHORT:
+            alignment_type = AlignmentType.BOTH_SHORT
+            is_aligned = True
+            has_conflict = False
+        elif short_dec == Decision.NO_TRADE and medium_dec == Decision.NO_TRADE:
+            alignment_type = AlignmentType.BOTH_NO_TRADE
+            is_aligned = True
+            has_conflict = False
+        elif short_dec == Decision.LONG and medium_dec == Decision.SHORT:
+            alignment_type = AlignmentType.CONFLICT_LONG_SHORT
+            is_aligned = False
+            has_conflict = True
+        elif short_dec == Decision.SHORT and medium_dec == Decision.LONG:
+            alignment_type = AlignmentType.CONFLICT_SHORT_LONG
+            is_aligned = False
+            has_conflict = True
+        elif short_dec in [Decision.LONG, Decision.SHORT] and medium_dec == Decision.NO_TRADE:
+            alignment_type = AlignmentType.PARTIAL_LONG if short_dec == Decision.LONG else AlignmentType.PARTIAL_SHORT
+            is_aligned = False
+            has_conflict = False
+        elif medium_dec in [Decision.LONG, Decision.SHORT] and short_dec == Decision.NO_TRADE:
+            alignment_type = AlignmentType.PARTIAL_LONG if medium_dec == Decision.LONG else AlignmentType.PARTIAL_SHORT
+            is_aligned = False
+            has_conflict = False
+        else:
+            alignment_type = AlignmentType.BOTH_NO_TRADE
+            is_aligned = True
+            has_conflict = False
+        
+        # 读取冲突处理配置
+        conflict_config = self.config.get('dual_timeframe', {}).get('conflict_resolution', {})
+        default_strategy = conflict_config.get('default_strategy', 'no_trade')
+        
+        # 生成冲突处理建议
+        conflict_resolution = None
+        resolution_reason = ""
+        recommended_action = Decision.NO_TRADE
+        recommended_confidence = Confidence.LOW
+        recommendation_notes = ""
+        
+        if has_conflict:
+            # 方向冲突
+            conflict_resolution = ConflictResolution(default_strategy)
+            
+            if conflict_resolution == ConflictResolution.NO_TRADE:
+                resolution_reason = "短期与中长期方向冲突，保守选择不交易"
+                recommended_action = Decision.NO_TRADE
+                recommendation_notes = "⚠️ 周期冲突：建议等待方向一致后再操作"
+            elif conflict_resolution == ConflictResolution.FOLLOW_MEDIUM_TERM:
+                resolution_reason = "跟随中长期趋势，忽略短期波动"
+                recommended_action = medium_dec
+                recommended_confidence = medium_term.confidence
+                recommendation_notes = f"跟随中长期({medium_term.timeframe_label})方向：{medium_dec.value.upper()}"
+            elif conflict_resolution == ConflictResolution.FOLLOW_SHORT_TERM:
+                resolution_reason = "捕捉短期机会"
+                recommended_action = short_dec
+                recommended_confidence = short_term.confidence
+                recommendation_notes = f"跟随短期({short_term.timeframe_label})方向：{short_dec.value.upper()}"
+            elif conflict_resolution == ConflictResolution.FOLLOW_HIGHER_CONFIDENCE:
+                if self._confidence_level(short_term.confidence) > self._confidence_level(medium_term.confidence):
+                    resolution_reason = "短期置信度更高"
+                    recommended_action = short_dec
+                    recommended_confidence = short_term.confidence
+                else:
+                    resolution_reason = "中长期置信度更高"
+                    recommended_action = medium_dec
+                    recommended_confidence = medium_term.confidence
+                recommendation_notes = f"跟随置信度更高的周期"
+        
+        elif is_aligned:
+            # 一致
+            if alignment_type == AlignmentType.BOTH_LONG:
+                recommended_action = Decision.LONG
+                recommended_confidence = max(short_term.confidence, medium_term.confidence, key=lambda c: self._confidence_level(c))
+                recommendation_notes = "✅ 双周期一致看多，信号强度高"
+            elif alignment_type == AlignmentType.BOTH_SHORT:
+                recommended_action = Decision.SHORT
+                recommended_confidence = max(short_term.confidence, medium_term.confidence, key=lambda c: self._confidence_level(c))
+                recommendation_notes = "✅ 双周期一致看空，信号强度高"
+            else:
+                recommended_action = Decision.NO_TRADE
+                recommendation_notes = "双周期一致无交易机会"
+        
+        else:
+            # 部分一致（一方有信号，一方无）
+            if short_dec in [Decision.LONG, Decision.SHORT]:
+                recommended_action = short_dec
+                recommended_confidence = Confidence.LOW  # 降级置信度
+                recommendation_notes = f"⚠️ 仅短期有{short_dec.value.upper()}信号，中长期未确认，谨慎操作"
+            elif medium_dec in [Decision.LONG, Decision.SHORT]:
+                recommended_action = medium_dec
+                recommended_confidence = medium_term.confidence
+                recommendation_notes = f"中长期{medium_dec.value.upper()}信号，短期暂无确认"
+        
+        return AlignmentAnalysis(
+            is_aligned=is_aligned,
+            alignment_type=alignment_type,
+            has_conflict=has_conflict,
+            conflict_resolution=conflict_resolution,
+            resolution_reason=resolution_reason,
+            recommended_action=recommended_action,
+            recommended_confidence=recommended_confidence,
+            recommendation_notes=recommendation_notes
+        )
+    
+    def _build_dual_no_trade_result(
+        self,
+        symbol: str,
+        global_risk_tags: List[ReasonTag],
+        regime: MarketRegime = MarketRegime.RANGE,
+        risk_allowed: bool = True
+    ) -> 'DualTimeframeResult':
+        """
+        构造双周期NO_TRADE结果（用于全局风险拒绝等场景）
+        """
+        from models.dual_timeframe_result import (
+            DualTimeframeResult, TimeframeConclusion, AlignmentAnalysis
+        )
+        from models.enums import Timeframe, AlignmentType
+        
+        # 短期NO_TRADE
+        short_term = TimeframeConclusion(
+            timeframe=Timeframe.SHORT_TERM,
+            timeframe_label="5m/15m",
+            decision=Decision.NO_TRADE,
+            confidence=Confidence.LOW,
+            market_regime=regime,
+            trade_quality=TradeQuality.POOR,
+            execution_permission=ExecutionPermission.DENY,
+            executable=False,
+            reason_tags=global_risk_tags.copy(),
+            key_metrics={}
+        )
+        
+        # 中长期NO_TRADE
+        medium_term = TimeframeConclusion(
+            timeframe=Timeframe.MEDIUM_TERM,
+            timeframe_label="1h/6h",
+            decision=Decision.NO_TRADE,
+            confidence=Confidence.LOW,
+            market_regime=regime,
+            trade_quality=TradeQuality.POOR,
+            execution_permission=ExecutionPermission.DENY,
+            executable=False,
+            reason_tags=global_risk_tags.copy(),
+            key_metrics={}
+        )
+        
+        # 一致性（都是NO_TRADE）
+        alignment = AlignmentAnalysis(
+            is_aligned=True,
+            alignment_type=AlignmentType.BOTH_NO_TRADE,
+            has_conflict=False,
+            conflict_resolution=None,
+            resolution_reason="全局风险拒绝",
+            recommended_action=Decision.NO_TRADE,
+            recommended_confidence=Confidence.LOW,
+            recommendation_notes="⛔ 全局风险触发，双周期均不可交易"
+        )
+        
+        return DualTimeframeResult(
+            short_term=short_term,
+            medium_term=medium_term,
+            alignment=alignment,
+            symbol=symbol,
+            timestamp=datetime.now(),
+            risk_exposure_allowed=risk_allowed,
+            global_risk_tags=global_risk_tags
+        )

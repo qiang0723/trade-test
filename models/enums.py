@@ -83,3 +83,51 @@ class LTFStatus(Enum):
     FAILED = "failed"                    # 确认失败
     MISSING = "missing"                  # 数据缺失
     NOT_APPLICABLE = "not_applicable"    # Context不允许
+
+
+class Timeframe(Enum):
+    """
+    时间周期（PR-DUAL: 双周期独立结论）
+    
+    L1同时输出短期和中长期两套独立结论
+    """
+    SHORT_TERM = "short_term"      # 短期：5m/15m 数据驱动
+    MEDIUM_TERM = "medium_term"    # 中长期：1h/6h 数据驱动
+
+
+class AlignmentType(Enum):
+    """
+    双周期一致性类型（PR-DUAL）
+    
+    描述短期和中长期结论的关系：
+    - BOTH_LONG: 两者都看多
+    - BOTH_SHORT: 两者都看空
+    - BOTH_NO_TRADE: 两者都不交易
+    - CONFLICT_LONG_SHORT: 冲突 - 短期多/中长期空
+    - CONFLICT_SHORT_LONG: 冲突 - 短期空/中长期多
+    - PARTIAL_LONG: 一方看多，一方不交易
+    - PARTIAL_SHORT: 一方看空，一方不交易
+    """
+    BOTH_LONG = "both_long"                    # 一致看多
+    BOTH_SHORT = "both_short"                  # 一致看空
+    BOTH_NO_TRADE = "both_no_trade"            # 一致不交易
+    CONFLICT_LONG_SHORT = "conflict_long_short"  # 冲突：短期多/中长期空
+    CONFLICT_SHORT_LONG = "conflict_short_long"  # 冲突：短期空/中长期多
+    PARTIAL_LONG = "partial_long"              # 部分看多
+    PARTIAL_SHORT = "partial_short"            # 部分看空
+
+
+class ConflictResolution(Enum):
+    """
+    冲突处理策略（PR-DUAL）
+    
+    当短期和中长期结论冲突时的处理方式：
+    - FOLLOW_MEDIUM_TERM: 跟随中长期（更稳健）
+    - FOLLOW_SHORT_TERM: 跟随短期（更激进）
+    - NO_TRADE: 冲突时不交易（最保守）
+    - FOLLOW_HIGHER_CONFIDENCE: 跟随置信度更高的一方
+    """
+    FOLLOW_MEDIUM_TERM = "follow_medium_term"
+    FOLLOW_SHORT_TERM = "follow_short_term"
+    NO_TRADE = "no_trade"
+    FOLLOW_HIGHER_CONFIDENCE = "follow_higher_confidence"

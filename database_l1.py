@@ -69,12 +69,16 @@ class L1Database:
                     reason_tags TEXT NOT NULL,
                     execution_permission TEXT DEFAULT 'allow',
                     executable INTEGER DEFAULT 0,
+                    signal_decision TEXT,
                     created_at TEXT DEFAULT (datetime('now'))
                 )
             ''')
             
             # 迁移：为已存在的表添加 execution_permission 字段（向后兼容）
             self._migrate_add_execution_permission(cursor)
+            
+            # 迁移：为已存在的表添加 signal_decision 字段（PR-004）
+            self._migrate_add_signal_decision(cursor)
             
             # 创建索引（优化查询性能）
             cursor.execute('''
@@ -147,6 +151,34 @@ class L1Database:
             logger.error(f"Error during database migration: {e}")
             # 非致命错误，继续运行（新表创建时已包含该字段）
     
+    def _migrate_add_signal_decision(self, cursor):
+        """
+        数据库迁移：添加 signal_decision 字段（PR-004 信号透明化）
+        
+        向后兼容处理：
+        - 检测字段是否存在
+        - 如不存在，添加字段（可为NULL，因为NO_TRADE没有原始信号）
+        - 老数据自动获得NULL值
+        """
+        try:
+            # 检查字段是否存在
+            cursor.execute("PRAGMA table_info(l1_advisory_results)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if 'signal_decision' not in columns:
+                logger.info("Migrating database: adding signal_decision column")
+                cursor.execute('''
+                    ALTER TABLE l1_advisory_results 
+                    ADD COLUMN signal_decision TEXT
+                ''')
+                logger.info("✅ Database migration completed: signal_decision added")
+            else:
+                logger.debug("signal_decision column already exists, skipping migration")
+        
+        except Exception as e:
+            logger.error(f"Error during database migration: {e}")
+            # 非致命错误，继续运行（新表创建时已包含该字段）
+    
     def save_advisory_result(self, symbol: str, result: AdvisoryResult) -> int:
         """
         保存决策结果到数据库
@@ -165,8 +197,8 @@ class L1Database:
                 cursor.execute('''
                     INSERT INTO l1_advisory_results 
                     (symbol, timestamp, decision, confidence, market_regime, system_state, 
-                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable, signal_decision)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     symbol,
                     result.timestamp.isoformat(),
@@ -178,7 +210,8 @@ class L1Database:
                     result.trade_quality.value,
                     json.dumps([tag.value for tag in result.reason_tags]),
                     result.execution_permission.value,  # 方案D新增
-                    1 if result.executable else 0
+                    1 if result.executable else 0,
+                    result.signal_decision.value if result.signal_decision else None  # PR-004新增
                 ))
                 
                 conn.commit()
@@ -283,7 +316,7 @@ class L1Database:
                 cursor.execute('''
                     SELECT decision, confidence, market_regime, system_state,
                            risk_exposure_allowed, trade_quality, reason_tags, 
-                           execution_permission, executable, timestamp
+                           execution_permission, executable, signal_decision, timestamp
                     FROM l1_advisory_results
                     WHERE symbol = ?
                     ORDER BY timestamp DESC
@@ -302,7 +335,8 @@ class L1Database:
                         reason_tags=[ReasonTag(tag) for tag in json.loads(row[6])],
                         execution_permission=ExecutionPermission(row[7] or 'allow'),  # 向后兼容
                         executable=bool(row[8]),
-                        timestamp=datetime.fromisoformat(row[9])
+                        signal_decision=Decision(row[9]) if row[9] else None,  # PR-004新增
+                        timestamp=datetime.fromisoformat(row[10])
                     )
                 return None
         
@@ -336,7 +370,7 @@ class L1Database:
                 cursor.execute('''
                     SELECT decision, confidence, market_regime, system_state,
                            risk_exposure_allowed, trade_quality, reason_tags, 
-                           execution_permission, executable, timestamp
+                           execution_permission, executable, signal_decision, timestamp
                     FROM l1_advisory_results
                     WHERE symbol = ? AND timestamp >= ?
                     ORDER BY timestamp DESC
@@ -355,7 +389,8 @@ class L1Database:
                         'reason_tags': json.loads(row[6]),
                         'execution_permission': row[7] or 'allow',  # 向后兼容
                         'executable': bool(row[8]),
-                        'timestamp': row[9]
+                        'signal_decision': row[9],  # PR-004新增
+                        'timestamp': row[10]
                     })
                 
                 logger.info(f"Retrieved {len(results)} history records for {symbol}")
@@ -500,14 +535,15 @@ class L1Database:
                         result.trade_quality.value,
                         json.dumps([tag.value for tag in result.reason_tags]),
                         result.execution_permission.value,  # 方案D新增
-                        1 if result.executable else 0
+                        1 if result.executable else 0,
+                        result.signal_decision.value if result.signal_decision else None  # PR-004新增
                     ))
                 
                 cursor.executemany('''
                     INSERT INTO l1_advisory_results 
                     (symbol, timestamp, decision, confidence, market_regime, system_state, 
-                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     risk_exposure_allowed, trade_quality, reason_tags, execution_permission, executable, signal_decision)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', data)
                 
                 conn.commit()

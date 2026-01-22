@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交易信号通知测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+        .test-btn {
+            padding: 12px 24px;
+            margin: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .test-btn-long {
+            background: #10b981;
+            color: white;
+        }
+        .test-btn-long:hover {
+            background: #059669;
+        }
+        .test-btn-short {
+            background: #ef4444;
+            color: white;
+        }
+        .test-btn-short:hover {
+            background: #dc2626;
+        }
+        .test-btn-sound {
+            background: #2563eb;
+            color: white;
+        }
+        .test-btn-sound:hover {
+            background: #1e40af;
+        }
+        .test-btn-notification {
+            background: #f59e0b;
+            color: white;
+        }
+        .test-btn-notification:hover {
+            background: #d97706;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e0f2fe;
+            border-left: 4px solid #0284c7;
+            border-radius: 4px;
+        }
+        .info {
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        .permission-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .permission-granted {
+            background: #d1fae5;
+            color: #059669;
+        }
+        .permission-denied {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        .permission-default {
+            background: #fef3c7;
+            color: #d97706;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔔 交易信号通知功能测试</h1>
+        
+        <div class="test-section">
+            <h3>1. 浏览器通知权限</h3>
+            <p>
+                当前状态: 
+                <span id="permissionStatus" class="permission-status">检查中...</span>
+            </p>
+            <button class="test-btn test-btn-notification" onclick="requestPermission()">
+                请求通知权限
+            </button>
+            <div class="info">
+                💡 提示: 首次使用需要授权浏览器通知权限
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>2. 声音提示测试</h3>
+            <button class="test-btn test-btn-sound" onclick="testSound('long')">
+                🔊 测试做多提示音 (800Hz)
+            </button>
+            <button class="test-btn test-btn-sound" onclick="testSound('short')">
+                🔊 测试做空提示音 (600Hz)
+            </button>
+            <div class="info">
+                💡 提示: 不同信号使用不同音调
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>3. 浏览器通知测试</h3>
+            <button class="test-btn test-btn-long" onclick="testNotification('long')">
+                🟢 测试做多通知
+            </button>
+            <button class="test-btn test-btn-short" onclick="testNotification('short')">
+                🔴 测试做空通知
+            </button>
+            <div class="info">
+                💡 提示: 通知会在右上角或系统通知中心显示
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>4. 完整信号测试</h3>
+            <button class="test-btn test-btn-long" onclick="testFullSignal('long')">
+                🟢 模拟做多信号 (弹窗+声音+通知)
+            </button>
+            <button class="test-btn test-btn-short" onclick="testFullSignal('short')">
+                🔴 模拟做空信号 (弹窗+声音+通知)
+            </button>
+            <div class="info">
+                💡 提示: 完整体验包括页面弹窗、声音提示和浏览器通知
+            </div>
+        </div>
+
+        <div class="status" id="statusBox">
+            <strong>状态:</strong> 准备就绪
+        </div>
+    </div>
+
+    <script>
+        // 检查通知权限
+        function checkPermission() {
+            if (!("Notification" in window)) {
+                updateStatus('❌ 您的浏览器不支持通知功能', 'denied');
+                return;
+            }
+
+            const permission = Notification.permission;
+            const statusSpan = document.getElementById('permissionStatus');
+            
+            if (permission === 'granted') {
+                statusSpan.textContent = '✅ 已授权';
+                statusSpan.className = 'permission-status permission-granted';
+            } else if (permission === 'denied') {
+                statusSpan.textContent = '❌ 已拒绝';
+                statusSpan.className = 'permission-status permission-denied';
+            } else {
+                statusSpan.textContent = '⚠️ 未授权';
+                statusSpan.className = 'permission-status permission-default';
+            }
+        }
+
+        // 请求通知权限
+        async function requestPermission() {
+            if (!("Notification" in window)) {
+                updateStatus('❌ 您的浏览器不支持通知功能');
+                return;
+            }
+
+            try {
+                const permission = await Notification.requestPermission();
+                checkPermission();
+                
+                if (permission === 'granted') {
+                    updateStatus('✅ 通知权限已授权！');
+                    // 显示测试通知
+                    new Notification('权限授权成功', {
+                        body: '您现在可以接收交易信号通知了！',
+                        icon: '🎉'
+                    });
+                } else {
+                    updateStatus('⚠️ 通知权限被拒绝');
+                }
+            } catch (error) {
+                updateStatus('❌ 请求权限失败: ' + error.message);
+            }
+        }
+
+        // 测试声音
+        function testSound(decision) {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                // 不同信号使用不同音调
+                oscillator.frequency.value = decision === 'long' ? 800 : 600;
+                oscillator.type = 'sine';
+                
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 3.0);
+                
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 3.0);
+                
+                const label = decision === 'long' ? '做多 (800Hz)' : '做空 (600Hz)';
+                updateStatus(`🔊 播放${label}提示音`);
+            } catch (error) {
+                updateStatus('❌ 播放声音失败: ' + error.message);
+            }
+        }
+
+        // 测试浏览器通知
+        function testNotification(decision) {
+            if (!("Notification" in window)) {
+                updateStatus('❌ 您的浏览器不支持通知功能');
+                return;
+            }
+
+            if (Notification.permission !== 'granted') {
+                updateStatus('⚠️ 请先授权通知权限');
+                return;
+            }
+
+            const title = decision === 'long' ? 'BTC - 做多信号' : 'BTC - 做空信号';
+            const body = '置信度: high\n✓ 可执行';
+            const icon = decision === 'long' ? '🟢' : '🔴';
+
+            const notification = new Notification(title, {
+                body: body,
+                icon: icon,
+                badge: icon,
+                tag: `test-signal-${decision}`,
+                requireInteraction: false
+            });
+
+            notification.onclick = function() {
+                window.focus();
+                notification.close();
+                updateStatus('✅ 通知被点击');
+            };
+
+            setTimeout(() => notification.close(), 3000);
+            
+            const label = decision === 'long' ? '做多' : '做空';
+            updateStatus(`💻 显示${label}浏览器通知`);
+        }
+
+        // 测试完整信号
+        function testFullSignal(decision) {
+            const label = decision === 'long' ? '做多' : '做空';
+            
+            // 1. 播放声音
+            testSound(decision);
+            
+            // 2. 显示浏览器通知
+            setTimeout(() => {
+                testNotification(decision);
+            }, 100);
+            
+            // 3. 更新状态
+            updateStatus(`🎯 完整${label}信号测试: 声音 + 浏览器通知`);
+            
+            // 提示: 实际使用时还会有页面弹窗
+            setTimeout(() => {
+                updateStatus(`💡 提示: 在实际L1页面中，还会显示页面弹窗`);
+            }, 2000);
+        }
+
+        // 更新状态
+        function updateStatus(message) {
+            const statusBox = document.getElementById('statusBox');
+            statusBox.innerHTML = `<strong>状态:</strong> ${message}`;
+            console.log(message);
+        }
+
+        // 页面加载时检查权限
+        window.onload = function() {
+            checkPermission();
+            updateStatus('✅ 测试页面加载完成，请点击按钮测试功能');
+        };
+    </script>
+</body>
+</html>

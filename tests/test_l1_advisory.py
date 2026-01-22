@@ -495,7 +495,7 @@ def test_executable_compute_method():
         decision=Decision.LONG,
         confidence=Confidence.HIGH,
         market_regime=MarketRegime.TREND,
-        system_state=SystemState.LONG_ACTIVE,
+        system_state=SystemState.WAIT,
         risk_exposure_allowed=True,
         trade_quality=TradeQuality.GOOD,
         reason_tags=[ReasonTag.STRONG_BUY_PRESSURE],
@@ -523,7 +523,7 @@ def test_executable_compute_method():
         decision=Decision.LONG,
         confidence=Confidence.HIGH,
         market_regime=MarketRegime.TREND,
-        system_state=SystemState.LONG_ACTIVE,
+        system_state=SystemState.WAIT,
         risk_exposure_allowed=False,  # 风险被拒
         trade_quality=TradeQuality.GOOD,
         reason_tags=[],
@@ -537,7 +537,7 @@ def test_executable_compute_method():
         decision=Decision.LONG,
         confidence=Confidence.HIGH,
         market_regime=MarketRegime.TREND,
-        system_state=SystemState.LONG_ACTIVE,
+        system_state=SystemState.WAIT,
         risk_exposure_allowed=True,
         trade_quality=TradeQuality.POOR,  # 质量差
         reason_tags=[],

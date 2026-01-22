@@ -46,6 +46,17 @@
 
 ---
 
+### 4. PR-DUAL测试（双周期独立结论）
+```bash
+./quick-test-dual.sh
+```
+**功能**：
+- 验证双周期功能
+- 检查配置和API
+- 快速集成测试
+
+---
+
 ## 📋 常用命令速查
 
 ### 服务管理
@@ -94,10 +105,12 @@ python3 -m pytest tests/test_p0_volume_unit_bugfix.py -v
 
 ## 🔧 访问地址
 
-| 启动方式 | 地址 | 端口 |
-|---------|------|------|
-| 直接启动 | http://localhost:5001 | 5001 |
-| Docker启动 | http://localhost:8001 | 8001 |
+| 启动方式 | 地址 | 端口 | 说明 |
+|---------|------|------|------|
+| 直接启动 | http://localhost:5001 | 5001 | 单一决策页面 |
+| Docker启动 | http://localhost:8001 | 8001 | 单一决策页面 |
+| 双周期页面 | http://localhost:5001/dual | 5001 | PR-DUAL双周期决策 |
+| 双周期页面 | http://localhost:8001/dual | 8001 | PR-DUAL双周期决策 |
 
 ---
 

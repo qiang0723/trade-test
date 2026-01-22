@@ -22,6 +22,11 @@ let availableSymbols = []; // 可用币种列表
 let allDecisions = {};  // 所有币种的决策缓存
 let expandedSymbols = new Set();  // 已展开的币种
 
+// 交易信号提示相关
+let previousDecisions = {};  // 上一次的决策状态
+let signalNotificationEnabled = true;  // 是否启用信号通知
+let soundEnabled = true;  // 是否启用声音提示
+
 // 历史记录列表分页状态
 let allHistoryData = []; // 所有历史数据
 let filteredHistoryData = []; // 筛选后的数据
@@ -36,6 +41,9 @@ let totalPages = 1;
 document.addEventListener('DOMContentLoaded', function() {
     console.log('L1 Advisory Layer - Frontend initialized');
     
+    // 加载用户设置
+    loadUserSettings();
+    
     // 加载reason tag解释
     loadReasonTagExplanations();
     
@@ -44,7 +52,36 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 启动自动刷新
     startAutoRefresh();
+    
+    // 请求浏览器通知权限
+    requestNotificationPermission();
 });
+
+/**
+ * 加载用户设置
+ */
+function loadUserSettings() {
+    // 加载信号通知设置
+    const savedNotification = localStorage.getItem('signalNotificationEnabled');
+    if (savedNotification !== null) {
+        signalNotificationEnabled = savedNotification === 'true';
+    }
+    
+    // 加载声音设置
+    const savedSound = localStorage.getItem('soundEnabled');
+    if (savedSound !== null) {
+        soundEnabled = savedSound === 'true';
+    }
+}
+
+/**
+ * 请求浏览器通知权限
+ */
+function requestNotificationPermission() {
+    if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+}
 
 // ==========================================
 // API调用
@@ -133,6 +170,281 @@ async function loadAvailableMarkets() {
 }
 
 // ==========================================
+// 交易信号检测和提示
+// ==========================================
+
+/**
+ * 检测新的交易信号
+ */
+function checkForNewSignals(newDecisions) {
+    if (!signalNotificationEnabled) return;
+    
+    const newSignals = [];
+    
+    for (const symbol in newDecisions) {
+        const newAdvisory = newDecisions[symbol];
+        const oldAdvisory = previousDecisions[symbol];
+        
+        // 检测是否有新的LONG或SHORT信号
+        if (newAdvisory.decision === 'long' || newAdvisory.decision === 'short') {
+            // 如果是新信号（之前没有或之前是NO_TRADE）
+            if (!oldAdvisory || oldAdvisory.decision === 'no_trade') {
+                newSignals.push({
+                    symbol: symbol,
+                    decision: newAdvisory.decision,
+                    confidence: newAdvisory.confidence,
+                    executable: newAdvisory.executable,
+                    advisory: newAdvisory
+                });
+            }
+            // 如果方向改变（LONG → SHORT 或 SHORT → LONG）
+            else if (oldAdvisory.decision !== newAdvisory.decision) {
+                newSignals.push({
+                    symbol: symbol,
+                    decision: newAdvisory.decision,
+                    confidence: newAdvisory.confidence,
+                    executable: newAdvisory.executable,
+                    advisory: newAdvisory,
+                    isReversal: true
+                });
+            }
+        }
+    }
+    
+    // 更新历史记录
+    previousDecisions = { ...newDecisions };
+    
+    // 显示信号提示
+    if (newSignals.length > 0) {
+        showSignalNotifications(newSignals);
+    }
+}
+
+/**
+ * 显示交易信号通知
+ */
+function showSignalNotifications(signals) {
+    signals.forEach((signal, index) => {
+        // 延迟显示，避免多个弹窗重叠
+        setTimeout(() => {
+            showSignalPopup(signal);
+            
+            // 播放提示音
+            if (soundEnabled) {
+                playNotificationSound(signal.decision);
+            }
+            
+            // 浏览器通知（如果用户授权）
+            showBrowserNotification(signal);
+        }, index * 500);
+    });
+}
+
+/**
+ * 显示信号弹窗
+ */
+function showSignalPopup(signal) {
+    const { symbol, decision, confidence, executable, isReversal, advisory } = signal;
+    
+    // 创建弹窗容器
+    const popup = document.createElement('div');
+    popup.className = 'signal-popup';
+    popup.classList.add(decision === 'long' ? 'signal-long' : 'signal-short');
+    
+    // 决策图标
+    const icon = decision === 'long' ? '🟢' : '🔴';
+    const decisionLabel = decision === 'long' ? '做多信号' : '做空信号';
+    const reversalLabel = isReversal ? ' (方向反转)' : '';
+    
+    // 置信度标签
+    const confidenceLabel = {
+        'ultra': '极高',
+        'high': '高',
+        'medium': '中',
+        'low': '低'
+    }[confidence] || confidence;
+    
+    // 可执行标识
+    const execLabel = executable ? '✓ 可执行' : '✗ 不可执行';
+    const execClass = executable ? 'exec-yes' : 'exec-no';
+    
+    popup.innerHTML = `
+        <div class="signal-popup-header">
+            <span class="signal-icon">${icon}</span>
+            <span class="signal-title">${decisionLabel}${reversalLabel}</span>
+            <button class="signal-close" onclick="closeSignalPopup(this)">×</button>
+        </div>
+        <div class="signal-popup-body">
+            <div class="signal-info">
+                <div class="signal-symbol">${symbol}</div>
+                <div class="signal-details">
+                    <span class="signal-confidence">置信度: ${confidenceLabel}</span>
+                    <span class="signal-exec ${execClass}">${execLabel}</span>
+                </div>
+            </div>
+            <div class="signal-actions">
+                <button class="signal-btn signal-btn-detail" onclick="showDetailFromPopup('${symbol}')">
+                    查看详情
+                </button>
+                <button class="signal-btn signal-btn-close" onclick="closeSignalPopup(this)">
+                    关闭
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // 添加到页面
+    document.body.appendChild(popup);
+    
+    // 动画显示
+    setTimeout(() => popup.classList.add('show'), 10);
+    
+    // 10秒后自动关闭
+    setTimeout(() => {
+        if (popup.parentNode) {
+            closeSignalPopup(popup.querySelector('.signal-close'));
+        }
+    }, 10000);
+}
+
+/**
+ * 关闭信号弹窗
+ */
+function closeSignalPopup(button) {
+    const popup = button.closest('.signal-popup');
+    if (popup) {
+        popup.classList.remove('show');
+        setTimeout(() => {
+            if (popup.parentNode) {
+                popup.parentNode.removeChild(popup);
+            }
+        }, 300);
+    }
+}
+
+/**
+ * 从弹窗查看详情
+ */
+function showDetailFromPopup(symbol) {
+    const advisory = allDecisions[symbol];
+    if (advisory) {
+        showDetailModal(symbol, advisory);
+    }
+}
+
+/**
+ * 播放提示音
+ */
+function playNotificationSound(decision) {
+    try {
+        // 使用Web Audio API生成简单的提示音
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // 不同信号使用不同音调
+        oscillator.frequency.value = decision === 'long' ? 800 : 600;
+        oscillator.type = 'sine';
+        
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 3.0);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 3.0);
+    } catch (error) {
+        console.error('Failed to play notification sound:', error);
+    }
+}
+
+/**
+ * 显示浏览器通知
+ */
+function showBrowserNotification(signal) {
+    // 检查浏览器是否支持通知
+    if (!("Notification" in window)) {
+        return;
+    }
+    
+    // 检查权限
+    if (Notification.permission === "granted") {
+        createNotification(signal);
+    } else if (Notification.permission !== "denied") {
+        Notification.requestPermission().then(permission => {
+            if (permission === "granted") {
+                createNotification(signal);
+            }
+        });
+    }
+}
+
+/**
+ * 创建浏览器通知
+ */
+function createNotification(signal) {
+    const { symbol, decision, confidence, executable } = signal;
+    
+    const title = `${symbol} - ${decision === 'long' ? '做多' : '做空'}信号`;
+    const body = `置信度: ${confidence}\n${executable ? '✓ 可执行' : '✗ 不可执行'}`;
+    const icon = decision === 'long' ? '🟢' : '🔴';
+    
+    const notification = new Notification(title, {
+        body: body,
+        icon: '/static/favicon.ico',
+        badge: icon,
+        tag: `signal-${symbol}`,
+        requireInteraction: false
+    });
+    
+    // 点击通知时聚焦窗口
+    notification.onclick = function() {
+        window.focus();
+        notification.close();
+        
+        // 显示详情
+        const advisory = allDecisions[symbol];
+        if (advisory) {
+            showDetailModal(symbol, advisory);
+        }
+    };
+    
+    // 3秒后自动关闭
+    setTimeout(() => notification.close(), 3000);
+}
+
+/**
+ * 切换信号通知
+ */
+function toggleSignalNotification() {
+    signalNotificationEnabled = !signalNotificationEnabled;
+    const button = document.getElementById('toggleNotificationBtn');
+    if (button) {
+        button.textContent = signalNotificationEnabled ? '🔔 通知已开启' : '🔕 通知已关闭';
+        button.classList.toggle('disabled', !signalNotificationEnabled);
+    }
+    
+    // 保存到localStorage
+    localStorage.setItem('signalNotificationEnabled', signalNotificationEnabled);
+}
+
+/**
+ * 切换声音提示
+ */
+function toggleSound() {
+    soundEnabled = !soundEnabled;
+    const button = document.getElementById('toggleSoundBtn');
+    if (button) {
+        button.textContent = soundEnabled ? '🔊 声音已开启' : '🔇 声音已关闭';
+        button.classList.toggle('disabled', !soundEnabled);
+    }
+    
+    // 保存到localStorage
+    localStorage.setItem('soundEnabled', soundEnabled);
+}
+
+// ==========================================
 // UI 更新
 // ==========================================
 
@@ -163,13 +475,18 @@ async function refreshAdvisory() {
     
     const results = await Promise.all(promises);
     
-    // 更新决策缓存
-    allDecisions = {};
+    // 检测交易信号变化（在更新缓存前）
+    const newDecisions = {};
     results.forEach(({symbol, advisory}) => {
         if (advisory) {
-            allDecisions[symbol] = advisory;
+            newDecisions[symbol] = advisory;
         }
     });
+    
+    checkForNewSignals(newDecisions);
+    
+    // 更新决策缓存
+    allDecisions = newDecisions;
     
     // 更新所有币种的决策面板
     updateAllDecisionsPanel(allDecisions);
@@ -384,8 +701,8 @@ async function loadPipelineForSymbol(symbol) {
         const pipelineContainer = document.getElementById(`pipeline-${symbol}`);
         if (!pipelineContainer) return;
         
-        if (result.success && result.data && result.data.length > 0) {
-            pipelineContainer.innerHTML = result.data.map(step => {
+        if (result.success && result.data && result.data.steps && result.data.steps.length > 0) {
+            pipelineContainer.innerHTML = result.data.steps.map(step => {
                 const statusIcon = step.status === 'success' ? '✓' : 
                                   step.status === 'failed' ? '✗' : '⏳';
                 const statusClass = step.status === 'success' ? 'success' : 
@@ -831,7 +1148,7 @@ function renderHistoryTable(data) {
         
         row.innerHTML = `
             <td class="col-symbol">
-                <span class="symbol-badge">${item.symbol || currentSymbol}</span>
+                <span class="symbol-badge">${item.symbol || 'N/A'}</span>
             </td>
             <td class="col-time">${timeStr}</td>
             <td class="col-decision">

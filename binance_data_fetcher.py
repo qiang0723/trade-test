@@ -11,6 +11,7 @@ Binance数据获取器 - 为L1提供真实市场数据
 from binance.client import Client
 from data_cache import get_cache
 import logging
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -169,24 +170,31 @@ class BinanceDataFetcher:
             volume_15m = sum(float(k[5]) for k in klines[-15:]) if len(klines) >= 15 else None
             volume_1h = sum(float(k[5]) for k in klines[-60:]) if len(klines) >= 60 else None
             
-            # 计算24h平均volume（用于ratio计算）
-            # volume_24h 在ticker中，需要从外部传入或从klines推算
-            # 这里暂时用简化方式：假设1h的volume可以推算24h平均
-            # 更精确的方式需要额外API调用
+            # 计算历史平均volume（用于ratio计算）
+            # 使用前60根K线的平均，作为1h的历史基准
             eps = 1e-6  # 防止除零
             
-            # 计算expected volume（基于24h均值）
-            # expected_window = (volume_24h / 1440) * window_minutes
-            # 简化：用1h volume推算
-            if volume_1h and volume_1h > 0:
+            # 如果有足够的历史数据，使用前60根的均值作为基准
+            # 否则用当前1h作为基准（启动初期）
+            if len(klines) >= 120:
+                # 有2小时数据：用第1-60根作为历史均值
+                historical_1h = sum(float(k[5]) for k in klines[0:60])
+                avg_volume_per_min = historical_1h / 60
+            elif volume_1h and volume_1h > 0:
+                # 只有1小时数据：用当前1h的均值
                 avg_volume_per_min = volume_1h / 60
+            else:
+                avg_volume_per_min = None
+            
+            # 计算各周期的volume ratio
+            if avg_volume_per_min and avg_volume_per_min > 0:
                 expected_5m = avg_volume_per_min * 5
                 expected_15m = avg_volume_per_min * 15
-                expected_1h = volume_1h  # 自身
+                expected_1h = avg_volume_per_min * 60
                 
                 volume_ratio_5m = volume_5m / max(expected_5m, eps) if volume_5m else None
                 volume_ratio_15m = volume_15m / max(expected_15m, eps) if volume_15m else None
-                volume_ratio_1h = 1.0  # 1h与自身比为1
+                volume_ratio_1h = volume_1h / max(expected_1h, eps) if volume_1h else None
             else:
                 volume_ratio_5m = None
                 volume_ratio_15m = None
@@ -349,19 +357,23 @@ class BinanceDataFetcher:
         return self.cache.get_cache_info(symbol)
 
 
-# 全局fetcher实例（单例模式）
+# 全局fetcher实例（单例模式，线程安全）
 _global_fetcher = None
+_fetcher_lock = threading.Lock()
 
 def get_fetcher() -> BinanceDataFetcher:
     """
-    获取全局fetcher实例
+    获取全局fetcher实例（线程安全）
     
     Returns:
         BinanceDataFetcher实例
     """
     global _global_fetcher
     if _global_fetcher is None:
-        _global_fetcher = BinanceDataFetcher()
+        with _fetcher_lock:
+            # 双重检查锁定模式（Double-Checked Locking）
+            if _global_fetcher is None:
+                _global_fetcher = BinanceDataFetcher()
     return _global_fetcher
 
 

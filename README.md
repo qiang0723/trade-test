@@ -16,6 +16,7 @@
 - 📈 **信心评级系统** - ULTRA / HIGH / MEDIUM / LOW 四级评分
 - 🔄 **配置热更新** - 支持YAML配置文件实时重载
 - 🐳 **Docker支持** - 一键部署
+- 🔬 **回测框架** - 完整的策略回测和绩效分析系统（NEW!）
 
 ## 🚀 快速开始
 
@@ -174,6 +175,35 @@ pytest tests/test_pr_h_confidence_validation.py
 ## 📄 许可证
 
 MIT License
+
+---
+
+## 🔬 回测框架
+
+完整的策略回测系统，验证L1决策的有效性。
+
+### 快速开始
+
+```bash
+# 快速测试（使用模拟数据）
+python backtest/quick_test.py
+
+# 完整回测（使用真实历史数据）
+python backtest/run_backtest.py
+```
+
+### 功能特性
+
+- ✅ 历史数据加载（Binance API + 缓存）
+- ✅ 多周期指标计算（5m/15m/1h/6h）
+- ✅ 单一决策 vs 双周期决策对比
+- ✅ 详细绩效分析（收益、风险、交易统计）
+- ✅ HTML/CSV/JSON多格式报告
+- ✅ 多种平仓策略（信号反转、止损、固定时间）
+
+### 文档
+
+详见 [回测框架文档](backtest/README.md)
 
 ---
 

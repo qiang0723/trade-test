@@ -83,10 +83,14 @@ class AdvisoryResult:
         Returns:
             AdvisoryResult: 重构的对象
         
-        注意：为了向后兼容，execution_permission 字段可能不存在（旧数据），默认为 ALLOW
+        注意：为了向后兼容，execution_permission 和 signal_decision 字段可能不存在（旧数据）
         """
         # 向后兼容：旧数据没有 execution_permission 字段
         execution_permission_value = data.get('execution_permission', 'allow')
+        
+        # 向后兼容：旧数据没有 signal_decision 字段（PR-004）
+        signal_decision_value = data.get('signal_decision')
+        signal_decision = Decision(signal_decision_value) if signal_decision_value else None
         
         return cls(
             decision=Decision(data['decision']),
@@ -99,6 +103,7 @@ class AdvisoryResult:
             timestamp=datetime.fromisoformat(data['timestamp']),
             execution_permission=ExecutionPermission(execution_permission_value),
             executable=data.get('executable', False),
+            signal_decision=signal_decision,  # PR-004: 原始信号方向
         )
     
     def is_no_trade(self) -> bool:
@@ -106,8 +111,8 @@ class AdvisoryResult:
         return self.decision == Decision.NO_TRADE
     
     def is_high_confidence(self) -> bool:
-        """判断是否为高置信度"""
-        return self.confidence == Confidence.HIGH
+        """判断是否为高置信度（包含HIGH和ULTRA）"""
+        return self.confidence in [Confidence.HIGH, Confidence.ULTRA]
     
     def has_risk_denial(self) -> bool:
         """判断是否存在风险否决"""
