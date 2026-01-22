@@ -114,41 +114,41 @@ trade_quality:
     oi: 0.10                      # OI变化阈值（小数格式：0.10=10%）
 
 # ==================
-# 方向评估阈值 - 回测优化v2：目标20-50笔交易
+# 方向评估阈值 - 折中方案：目标30-50笔交易
 # ==================
 direction:
   # 趋势市
   trend:
     long:
-      imbalance: 0.25             # 买卖失衡阈值
-      oi_change: 0.025            # 1h OI增长阈值
+      imbalance: 0.12             # 买卖失衡阈值
+      oi_change: 0.02             # 1h OI增长阈值
       price_change: 0.004         # 1h价格上涨阈值
     short:
-      imbalance: 0.25             # 买卖失衡阈值
-      oi_change: 0.025            # 1h OI增长阈值
+      imbalance: 0.12             # 买卖失衡阈值
+      oi_change: 0.02             # 1h OI增长阈值
       price_change: 0.004         # 1h价格下跌阈值
   
   # 震荡市
   range:
     long:
-      imbalance: 0.30             # 失衡要求
-      oi_change: 0.04             # OI增长要求
+      imbalance: 0.15             # 失衡要求
+      oi_change: 0.025            # OI增长要求
     short:
-      imbalance: 0.30             # 失衡要求
-      oi_change: 0.04             # OI增长要求
+      imbalance: 0.15             # 失衡要求
+      oi_change: 0.025            # OI增长要求
     
     # 短期机会识别 - 3选1确认
     short_term_opportunity:
       long:
         min_price_change_1h: 0.005      # 1小时涨幅 > 0.5%
-        min_oi_change_1h: 0.04          # OI增长 > 4%
-        min_buy_sell_imbalance: 0.20    # 买压 > 20%
-        required_signals: 1             # 至少满足1个信号（3选1）
+        min_oi_change_1h: 0.03          # OI增长 > 3%
+        min_buy_sell_imbalance: 0.12    # 买压 > 12%
+        required_signals: 1             # 3选1
       short:
         max_price_change_1h: -0.005     # 1小时跌幅 < -0.5%
-        min_oi_change_1h: 0.04          # OI增长 > 4%
-        max_buy_sell_imbalance: -0.20   # 卖压 < -20%
-        required_signals: 1             # 至少满足1个信号（3选1）
+        min_oi_change_1h: 0.03          # OI增长 > 3%
+        max_buy_sell_imbalance: -0.12   # 卖压 < -12%
+        required_signals: 1             # 3选1
 
 # ==================
 # 置信度配置（PR-D混合模式）
@@ -326,25 +326,25 @@ dual_timeframe:
   # 短期评估（5m/15m）阈值
   short_term:
     # 15分钟价格变化阈值（动态阈值，根据市场环境自动调整）
-    # P0-动态阈值优化：降低30%以增加信号敏感度
+    # 平衡优化：适度提高阈值
     min_price_change_15m:
       dynamic: true                 # 启用动态阈值
-      trend: 0.002                  # TREND环境: 0.2%（优化前0.3%，降低33%）
-      range: 0.005                  # RANGE环境: 0.5%（优化前0.8%，降低37%）
-      extreme: 0.010                # EXTREME环境: 1.0%（优化前1.5%，降低33%）
-      default: 0.003                # 默认/降级: 0.3%（优化前0.5%，降低40%）
+      trend: 0.003                  # TREND环境: 0.3%
+      range: 0.006                  # RANGE环境: 0.6%
+      extreme: 0.012                # EXTREME环境: 1.2%
+      default: 0.004                # 默认/降级: 0.4%
     
-    # taker失衡阈值（买卖压力）- 优化：降低12.5%
-    min_taker_imbalance: 0.35      # 35%（优化前40%）
+    # taker失衡阈值（买卖压力）
+    min_taker_imbalance: 0.30      # 30%（中等水平）
     
-    # 放量比率阈值 - 优化：降低20%
-    min_volume_ratio: 1.2          # 1.2倍（优化前1.5倍）
+    # 放量比率阈值
+    min_volume_ratio: 1.3          # 1.3倍（中等水平）
     
-    # OI变化阈值（5维信号补充）- 优化：降低25%
-    min_oi_change_15m: 0.015       # 1.5%（优化前2%）
+    # OI变化阈值
+    min_oi_change_15m: 0.02        # 2%（中等水平）
     
-    # 满足信号数要求 - 关键优化：5选4 → 5选3
-    required_signals: 3            # 5维信号中至少3维满足（优化前4维）
+    # 满足信号数要求 - 5选3
+    required_signals: 3            # 5维信号中至少3维满足
   
   # 中长期评估（1h/6h）复用 direction 配置
   # medium_term 使用现有的 direction.trend/range 配置
