@@ -2606,21 +2606,29 @@ class L1AdvisoryEngine:
         
         if short_blocked:
             logger.info(f"[{symbol}] Short-term decision blocked by frequency control: {short_block_reason}")
-            # 短期被阻断，强制改为NO_TRADE
+            # PATCH-3: 频控不改写信号方向，只标记不可执行
+            # 保留原始决策（signal_decision），但设置 executable=False
             from models.dual_timeframe_result import TimeframeConclusion
             from models.enums import Timeframe
+            
+            # 保存原始信号
+            original_decision = short_term.decision
+            original_tags = short_term.reason_tags.copy()
+            
+            # 添加频控标签，但保留原始方向
             short_term = TimeframeConclusion(
                 timeframe=Timeframe.SHORT_TERM,
                 timeframe_label="5m/15m",
-                decision=Decision.NO_TRADE,
-                confidence=Confidence.LOW,
+                decision=original_decision,  # PATCH-3: 保留原始方向
+                confidence=short_term.confidence,  # 保留原始置信度
                 market_regime=regime,
-                trade_quality=TradeQuality.POOR,
-                execution_permission=ExecutionPermission.DENY,
-                executable=False,
-                reason_tags=[ReasonTag.MIN_INTERVAL_BLOCK],
+                trade_quality=short_term.trade_quality,
+                execution_permission=ExecutionPermission.DENY,  # 阻断执行
+                executable=False,  # 不可执行
+                reason_tags=original_tags + [ReasonTag.MIN_INTERVAL_BLOCK],  # 添加频控标签
                 key_metrics=short_term.key_metrics  # 保留原始指标
             )
+            logger.debug(f"[{symbol}] Short-term signal preserved: {original_decision.value}, but executable=False")
         
         # 5.5.2 检查中长期决策是否被频率控制阻断
         medium_blocked, medium_block_reason = self.dual_decision_memory.should_block_medium_term(
@@ -2629,21 +2637,28 @@ class L1AdvisoryEngine:
         
         if medium_blocked:
             logger.info(f"[{symbol}] Medium-term decision blocked by frequency control: {medium_block_reason}")
-            # 中长期被阻断，强制改为NO_TRADE
+            # PATCH-3: 频控不改写信号方向，只标记不可执行
             from models.dual_timeframe_result import TimeframeConclusion
             from models.enums import Timeframe
+            
+            # 保存原始信号
+            original_decision = medium_term.decision
+            original_tags = medium_term.reason_tags.copy()
+            
+            # 添加频控标签，但保留原始方向
             medium_term = TimeframeConclusion(
                 timeframe=Timeframe.MEDIUM_TERM,
                 timeframe_label="1h/6h",
-                decision=Decision.NO_TRADE,
-                confidence=Confidence.LOW,
+                decision=original_decision,  # PATCH-3: 保留原始方向
+                confidence=medium_term.confidence,  # 保留原始置信度
                 market_regime=regime,
-                trade_quality=TradeQuality.POOR,
-                execution_permission=ExecutionPermission.DENY,
-                executable=False,
-                reason_tags=[ReasonTag.MIN_INTERVAL_BLOCK],
+                trade_quality=medium_term.trade_quality,
+                execution_permission=ExecutionPermission.DENY,  # 阻断执行
+                executable=False,  # 不可执行
+                reason_tags=original_tags + [ReasonTag.MIN_INTERVAL_BLOCK],  # 添加频控标签
                 key_metrics=medium_term.key_metrics  # 保留原始指标
             )
+            logger.debug(f"[{symbol}] Medium-term signal preserved: {original_decision.value}, but executable=False")
         
         # 5.5.3 重新分析一致性（如果有周期被阻断）
         if short_blocked or medium_blocked:
