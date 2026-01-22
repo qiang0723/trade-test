@@ -325,11 +325,16 @@ class MarketDataCache:
         # 先存储当前数据
         self.store_tick(symbol, current_data)
         
-        # 计算变化率
+        # 计算变化率（包含PR-005新增的5m/15m）
         price_change_1h = self.calculate_price_change(symbol, hours=1.0)
         price_change_6h = self.calculate_price_change(symbol, hours=6.0)
+        price_change_15m = self.calculate_price_change(symbol, hours=0.25)  # PR-005: 15分钟
+        price_change_5m = self.calculate_price_change(symbol, hours=0.0833)  # PR-005: 5分钟
+        
         oi_change_1h = self.calculate_oi_change(symbol, hours=1.0)
         oi_change_6h = self.calculate_oi_change(symbol, hours=6.0)
+        oi_change_15m = self.calculate_oi_change(symbol, hours=0.25)  # PR-005: 15分钟
+        
         volume_1h = self.calculate_volume_1h(symbol)
         buy_sell_imbalance = self.calculate_buy_sell_imbalance(symbol, hours=1.0)
         
@@ -339,20 +344,32 @@ class MarketDataCache:
             if symbol in self.cache and len(self.cache[symbol]) > 0:
                 source_timestamp = self.cache[symbol][-1].timestamp
         
-        # 构造增强数据
+        # 构造增强数据（PR-005: 包含5m/15m变化率）
         enhanced_data = {
             'price': current_data.get('price', 0),
             'price_change_1h': price_change_1h if price_change_1h is not None else 0.0,
             'price_change_6h': price_change_6h if price_change_6h is not None else 0.0,
+            'price_change_15m': price_change_15m if price_change_15m is not None else None,  # PR-005
+            'price_change_5m': price_change_5m if price_change_5m is not None else None,  # PR-005
             'volume_1h': volume_1h if volume_1h is not None else 0.0,
             'volume_24h': current_data.get('volume_24h', 0),
             'buy_sell_imbalance': buy_sell_imbalance if buy_sell_imbalance is not None else 0.0,
             'funding_rate': current_data.get('funding_rate', 0),
             'oi_change_1h': oi_change_1h if oi_change_1h is not None else 0.0,
             'oi_change_6h': oi_change_6h if oi_change_6h is not None else 0.0,
+            'oi_change_15m': oi_change_15m if oi_change_15m is not None else None,  # PR-005
             # PR-002: 添加时间戳信息（用于新鲜度检查）
             'source_timestamp': source_timestamp,
             'computed_at': datetime.now(),
+            # PR-001/002: 从klines获取的多周期数据（直接传递）
+            'volume_5m': current_data.get('volume_5m'),
+            'volume_15m': current_data.get('volume_15m'),
+            'volume_ratio_5m': current_data.get('volume_ratio_5m'),
+            'volume_ratio_15m': current_data.get('volume_ratio_15m'),
+            'volume_ratio_1h': current_data.get('volume_ratio_1h'),
+            'taker_imbalance_5m': current_data.get('taker_imbalance_5m'),
+            'taker_imbalance_15m': current_data.get('taker_imbalance_15m'),
+            'taker_imbalance_1h': current_data.get('taker_imbalance_1h'),
             # PR-M (方案B): 元数据标注 - 声明百分比字段的输出格式
             '_metadata': {
                 'percentage_format': 'percent_point',  # 百分比字段为 percent-point 格式（已乘100）
