@@ -142,12 +142,14 @@ direction:
       long:
         min_price_change_1h: 0.005      # 1小时涨幅 > 0.5%
         min_oi_change_1h: 0.03          # OI增长 > 3%
-        min_buy_sell_imbalance: 0.12    # 买压 > 12%
+        min_taker_imbalance: 0.12       # PATCH-P0-05: 新键名（买压 > 12%）
+        min_buy_sell_imbalance: 0.12    # DEPRECATED: 旧键名（兼容）
         required_signals: 1             # 3选1
       short:
         max_price_change_1h: -0.005     # 1小时跌幅 < -0.5%
         min_oi_change_1h: 0.03          # OI增长 > 3%
-        max_buy_sell_imbalance: -0.12   # 卖压 < -12%
+        max_taker_imbalance: -0.12      # PATCH-P0-05: 新键名（卖压 < -12%）
+        max_buy_sell_imbalance: -0.12   # DEPRECATED: 旧键名（兼容）
         required_signals: 1             # 3选1
 
 # ==================

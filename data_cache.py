@@ -684,9 +684,16 @@ class MarketDataCache:
             }
         }
         
+        # PATCH-P0-03: None-safe日志输出 + 字段名对齐
+        price_change = enhanced_data.get('price_change_1h')
+        imbalance = enhanced_data.get('taker_imbalance_1h')
+        
+        price_change_str = f"{price_change:.2f}%" if price_change is not None else 'NA'
+        imbalance_str = f"{imbalance:.2f}" if imbalance is not None else 'NA'
+        
         logger.info(f"Enhanced data for {symbol}: "
-                   f"price_change_1h={enhanced_data['price_change_1h']:.2f}%, "
-                   f"imbalance={enhanced_data['buy_sell_imbalance']:.2f}")
+                   f"price_change_1h={price_change_str}, "
+                   f"taker_imbalance_1h={imbalance_str}")
         
         return enhanced_data
     
@@ -786,7 +793,8 @@ if __name__ == '__main__':
     print(f"\n1h价格变化: {cache.calculate_price_change('BTC', 1.0):.2f}%")
     print(f"2h价格变化: {cache.calculate_price_change('BTC', 2.0):.2f}%")
     print(f"1h持仓量变化: {cache.calculate_oi_change('BTC', 1.0):.2f}%")
-    print(f"买卖失衡度: {cache.calculate_buy_sell_imbalance('BTC', 1.0):.2f}")
+    # PATCH-P0-03: calculate_buy_sell_imbalance已弃用（DEPRECATED）
+    # print(f"买卖失衡度: {cache.calculate_buy_sell_imbalance('BTC', 1.0):.2f}")
     
     # PATCH-2: 测试 lookback coverage
     print("\nPATCH-2 Lookback Coverage:")

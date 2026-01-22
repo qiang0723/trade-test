@@ -1259,7 +1259,9 @@ class L1AdvisoryEngine:
                     # oi_growing标签在辅助信息中已有
                 
                 # 信号3: 强买压
-                if imbalance > short_term_config.get('min_buy_sell_imbalance', 0.65):
+                # PATCH-P0-05: 优先读取min_taker_imbalance，fallback到min_buy_sell_imbalance
+                min_imbalance_threshold = short_term_config.get('min_taker_imbalance') or short_term_config.get('min_buy_sell_imbalance', 0.65)
+                if imbalance > min_imbalance_threshold:
                     signals.append('strong_buy_pressure')
                     signal_tags.append(ReasonTag.SHORT_TERM_STRONG_BUY)
                 
@@ -1329,7 +1331,9 @@ class L1AdvisoryEngine:
                     # oi_growing标签在辅助信息中已有
                 
                 # 信号3: 强卖压
-                if imbalance < short_term_config.get('max_buy_sell_imbalance', -0.65):
+                # PATCH-P0-05: 优先读取max_taker_imbalance，fallback到max_buy_sell_imbalance
+                max_imbalance_threshold = short_term_config.get('max_taker_imbalance') or short_term_config.get('max_buy_sell_imbalance', -0.65)
+                if imbalance < max_imbalance_threshold:
                     signals.append('strong_sell_pressure')
                     signal_tags.append(ReasonTag.SHORT_TERM_STRONG_SELL)
                 
