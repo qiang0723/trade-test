@@ -78,6 +78,231 @@ class DecisionMemory:
         logger.debug(f"[{symbol}] Cleared decision memory")
 
 
+class DualDecisionMemory:
+    """
+    双周期决策记忆管理（PR-DUAL）
+    
+    职责：
+    - 管理短期（5m/15m）、中长期（1h/6h）、对齐类型三个独立计时器
+    - 防止短时间内重复输出相同决策
+    - 防止频繁方向翻转（LONG ↔ SHORT）
+    
+    设计原则：
+    - 三独立计时器：短期、中长期、对齐类型各自管理
+    - NO_TRADE不受频率控制（允许随时输出）
+    - 翻转冷却独立于决策间隔
+    """
+    
+    def __init__(self, config: Dict = None):
+        """
+        初始化双周期决策记忆
+        
+        Args:
+            config: 配置字典，包含 dual_decision_control 配置段
+        """
+        # 短期决策记忆 {symbol: {"time": datetime, "decision": Decision}}
+        self._short_term_memory = {}
+        
+        # 中长期决策记忆 {symbol: {"time": datetime, "decision": Decision}}
+        self._medium_term_memory = {}
+        
+        # 对齐类型记忆 {symbol: {"time": datetime, "alignment_type": AlignmentType}}
+        self._alignment_memory = {}
+        
+        # 从配置加载时间参数
+        if config:
+            dual_config = config.get('dual_decision_control', {})
+        else:
+            dual_config = {}
+        
+        # 短期决策控制参数
+        self.short_term_interval = dual_config.get('short_term_interval_seconds', 300)  # 5分钟
+        self.short_term_flip_cooldown = dual_config.get('short_term_flip_cooldown_seconds', 450)  # 7.5分钟
+        
+        # 中长期决策控制参数
+        self.medium_term_interval = dual_config.get('medium_term_interval_seconds', 1800)  # 30分钟
+        self.medium_term_flip_cooldown = dual_config.get('medium_term_flip_cooldown_seconds', 900)  # 15分钟
+        
+        # 对齐类型翻转冷却
+        self.alignment_flip_cooldown = dual_config.get('alignment_flip_cooldown_seconds', 900)  # 15分钟
+        
+        logger.info(f"DualDecisionMemory initialized: "
+                   f"short_term={self.short_term_interval}s/{self.short_term_flip_cooldown}s, "
+                   f"medium_term={self.medium_term_interval}s/{self.medium_term_flip_cooldown}s, "
+                   f"alignment_flip={self.alignment_flip_cooldown}s")
+    
+    def should_block_short_term(
+        self, 
+        symbol: str, 
+        new_decision: Decision, 
+        current_time: datetime
+    ) -> Tuple[bool, str]:
+        """
+        检查短期决策是否应被频率控制阻断
+        
+        规则：
+        1. NO_TRADE永远不阻断（允许随时输出）
+        2. 最小间隔检查：距离上次决策 < short_term_interval
+        3. 翻转冷却检查：LONG ↔ SHORT 切换需等待 flip_cooldown
+        
+        Args:
+            symbol: 币种符号
+            new_decision: 新决策
+            current_time: 当前时间
+        
+        Returns:
+            (should_block, reason): 是否阻断及原因
+        """
+        # NO_TRADE永不阻断
+        if new_decision == Decision.NO_TRADE:
+            return False, ""
+        
+        last_record = self._short_term_memory.get(symbol)
+        
+        if not last_record:
+            # 首次决策，不阻断
+            return False, ""
+        
+        last_time = last_record["time"]
+        last_decision = last_record["decision"]
+        time_elapsed = (current_time - last_time).total_seconds()
+        
+        # 检查1：最小间隔
+        if time_elapsed < self.short_term_interval:
+            reason = f"短期决策间隔不足 ({time_elapsed:.0f}s < {self.short_term_interval}s)"
+            logger.debug(f"[{symbol}] Short-term blocked: {reason}")
+            return True, reason
+        
+        # 检查2：翻转冷却（LONG ↔ SHORT）
+        if last_decision != Decision.NO_TRADE and new_decision != last_decision:
+            if time_elapsed < self.short_term_flip_cooldown:
+                reason = f"短期方向翻转冷却中 ({time_elapsed:.0f}s < {self.short_term_flip_cooldown}s)"
+                logger.debug(f"[{symbol}] Short-term flip blocked: {last_decision.value} → {new_decision.value}")
+                return True, reason
+        
+        return False, ""
+    
+    def should_block_medium_term(
+        self, 
+        symbol: str, 
+        new_decision: Decision, 
+        current_time: datetime
+    ) -> Tuple[bool, str]:
+        """
+        检查中长期决策是否应被频率控制阻断
+        
+        规则同 should_block_short_term，但使用中长期时间参数
+        """
+        # NO_TRADE永不阻断
+        if new_decision == Decision.NO_TRADE:
+            return False, ""
+        
+        last_record = self._medium_term_memory.get(symbol)
+        
+        if not last_record:
+            return False, ""
+        
+        last_time = last_record["time"]
+        last_decision = last_record["decision"]
+        time_elapsed = (current_time - last_time).total_seconds()
+        
+        # 检查1：最小间隔
+        if time_elapsed < self.medium_term_interval:
+            reason = f"中长期决策间隔不足 ({time_elapsed:.0f}s < {self.medium_term_interval}s)"
+            logger.debug(f"[{symbol}] Medium-term blocked: {reason}")
+            return True, reason
+        
+        # 检查2：翻转冷却
+        if last_decision != Decision.NO_TRADE and new_decision != last_decision:
+            if time_elapsed < self.medium_term_flip_cooldown:
+                reason = f"中长期方向翻转冷却中 ({time_elapsed:.0f}s < {self.medium_term_flip_cooldown}s)"
+                logger.debug(f"[{symbol}] Medium-term flip blocked: {last_decision.value} → {new_decision.value}")
+                return True, reason
+        
+        return False, ""
+    
+    def should_block_alignment_flip(
+        self, 
+        symbol: str, 
+        new_alignment_type: 'AlignmentType', 
+        current_time: datetime
+    ) -> Tuple[bool, str]:
+        """
+        检查对齐类型翻转是否应被阻断
+        
+        规则：
+        - 仅阻断重大翻转：BOTH_LONG ↔ BOTH_SHORT
+        - 其他类型变化不阻断（如 BOTH_LONG → PARTIAL_LONG）
+        
+        Args:
+            symbol: 币种符号
+            new_alignment_type: 新的对齐类型
+            current_time: 当前时间
+        
+        Returns:
+            (should_block, reason): 是否阻断及原因
+        """
+        from models.enums import AlignmentType
+        
+        # 定义重大翻转对（双向）
+        major_flips = {
+            (AlignmentType.BOTH_LONG, AlignmentType.BOTH_SHORT),
+            (AlignmentType.BOTH_SHORT, AlignmentType.BOTH_LONG),
+        }
+        
+        last_record = self._alignment_memory.get(symbol)
+        
+        if not last_record:
+            return False, ""
+        
+        last_time = last_record["time"]
+        last_alignment = last_record["alignment_type"]
+        time_elapsed = (current_time - last_time).total_seconds()
+        
+        # 检查是否是重大翻转
+        flip_pair = (last_alignment, new_alignment_type)
+        if flip_pair in major_flips:
+            if time_elapsed < self.alignment_flip_cooldown:
+                reason = f"对齐类型重大翻转冷却中 ({time_elapsed:.0f}s < {self.alignment_flip_cooldown}s)"
+                logger.debug(f"[{symbol}] Alignment flip blocked: {last_alignment.value} → {new_alignment_type.value}")
+                return True, reason
+        
+        return False, ""
+    
+    def update_short_term(self, symbol: str, decision: Decision, timestamp: datetime):
+        """更新短期决策记忆（仅LONG/SHORT）"""
+        if decision in [Decision.LONG, Decision.SHORT]:
+            self._short_term_memory[symbol] = {
+                "time": timestamp,
+                "decision": decision
+            }
+            logger.debug(f"[{symbol}] Updated short-term memory: {decision.value}")
+    
+    def update_medium_term(self, symbol: str, decision: Decision, timestamp: datetime):
+        """更新中长期决策记忆（仅LONG/SHORT）"""
+        if decision in [Decision.LONG, Decision.SHORT]:
+            self._medium_term_memory[symbol] = {
+                "time": timestamp,
+                "decision": decision
+            }
+            logger.debug(f"[{symbol}] Updated medium-term memory: {decision.value}")
+    
+    def update_alignment(self, symbol: str, alignment_type: 'AlignmentType', timestamp: datetime):
+        """更新对齐类型记忆"""
+        self._alignment_memory[symbol] = {
+            "time": timestamp,
+            "alignment_type": alignment_type
+        }
+        logger.debug(f"[{symbol}] Updated alignment memory: {alignment_type.value}")
+    
+    def clear(self, symbol: str):
+        """清除指定币种的所有记忆"""
+        self._short_term_memory.pop(symbol, None)
+        self._medium_term_memory.pop(symbol, None)
+        self._alignment_memory.pop(symbol, None)
+        logger.debug(f"[{symbol}] Cleared dual decision memory")
+
+
 class L1AdvisoryEngine:
     """
     L1 决策层核心引擎
@@ -126,6 +351,9 @@ class L1AdvisoryEngine:
         
         # 决策记忆管理（PR-C）
         self.decision_memory = DecisionMemory()
+        
+        # 双周期决策记忆管理（PR-DUAL）
+        self.dual_decision_memory = DualDecisionMemory(self.config)
         
         logger.info(f"L1AdvisoryEngine initialized with {len(self.thresholds)} thresholds")
     
@@ -2256,13 +2484,96 @@ class L1AdvisoryEngine:
         # ===== Step 5: 一致性分析 =====
         alignment = self._analyze_alignment(short_term, medium_term)
         
+        # ===== Step 5.5: 频率控制（PR-DUAL）=====
+        current_time = datetime.now()
+        
+        # 5.5.1 检查短期决策是否被频率控制阻断
+        short_blocked, short_block_reason = self.dual_decision_memory.should_block_short_term(
+            symbol, short_term.decision, current_time
+        )
+        
+        if short_blocked:
+            logger.info(f"[{symbol}] Short-term decision blocked by frequency control: {short_block_reason}")
+            # 短期被阻断，强制改为NO_TRADE
+            from models.dual_timeframe_result import TimeframeConclusion
+            from models.enums import Timeframe
+            short_term = TimeframeConclusion(
+                timeframe=Timeframe.SHORT_TERM,
+                timeframe_label="5m/15m",
+                decision=Decision.NO_TRADE,
+                confidence=Confidence.LOW,
+                market_regime=regime,
+                trade_quality=TradeQuality.POOR,
+                execution_permission=ExecutionPermission.DENY,
+                executable=False,
+                reason_tags=[ReasonTag.MIN_INTERVAL_BLOCK],
+                key_metrics=short_term.key_metrics  # 保留原始指标
+            )
+        
+        # 5.5.2 检查中长期决策是否被频率控制阻断
+        medium_blocked, medium_block_reason = self.dual_decision_memory.should_block_medium_term(
+            symbol, medium_term.decision, current_time
+        )
+        
+        if medium_blocked:
+            logger.info(f"[{symbol}] Medium-term decision blocked by frequency control: {medium_block_reason}")
+            # 中长期被阻断，强制改为NO_TRADE
+            from models.dual_timeframe_result import TimeframeConclusion
+            from models.enums import Timeframe
+            medium_term = TimeframeConclusion(
+                timeframe=Timeframe.MEDIUM_TERM,
+                timeframe_label="1h/6h",
+                decision=Decision.NO_TRADE,
+                confidence=Confidence.LOW,
+                market_regime=regime,
+                trade_quality=TradeQuality.POOR,
+                execution_permission=ExecutionPermission.DENY,
+                executable=False,
+                reason_tags=[ReasonTag.MIN_INTERVAL_BLOCK],
+                key_metrics=medium_term.key_metrics  # 保留原始指标
+            )
+        
+        # 5.5.3 重新分析一致性（如果有周期被阻断）
+        if short_blocked or medium_blocked:
+            alignment = self._analyze_alignment(short_term, medium_term)
+            logger.debug(f"[{symbol}] Alignment re-analyzed after frequency control: {alignment.alignment_type.value}")
+        
+        # 5.5.4 检查对齐类型翻转是否被阻断
+        alignment_blocked, alignment_block_reason = self.dual_decision_memory.should_block_alignment_flip(
+            symbol, alignment.alignment_type, current_time
+        )
+        
+        if alignment_blocked:
+            logger.info(f"[{symbol}] Alignment flip blocked: {alignment_block_reason}")
+            # 对齐翻转被阻断，保持为BOTH_NO_TRADE（最保守策略）
+            from models.dual_timeframe_result import AlignmentAnalysis
+            from models.enums import AlignmentType
+            alignment = AlignmentAnalysis(
+                is_aligned=True,
+                alignment_type=AlignmentType.BOTH_NO_TRADE,
+                has_conflict=False,
+                conflict_resolution=None,
+                resolution_reason="对齐类型翻转频率控制",
+                recommended_action=Decision.NO_TRADE,
+                recommended_confidence=Confidence.LOW,
+                recommendation_notes="⏸️ 对齐类型翻转冷却中，暂不输出"
+            )
+        
+        # 5.5.5 更新决策记忆
+        if not short_blocked:
+            self.dual_decision_memory.update_short_term(symbol, short_term.decision, current_time)
+        if not medium_blocked:
+            self.dual_decision_memory.update_medium_term(symbol, medium_term.decision, current_time)
+        if not alignment_blocked:
+            self.dual_decision_memory.update_alignment(symbol, alignment.alignment_type, current_time)
+        
         # ===== Step 6: 构造结果 =====
         result = DualTimeframeResult(
             short_term=short_term,
             medium_term=medium_term,
             alignment=alignment,
             symbol=symbol,
-            timestamp=datetime.now(),
+            timestamp=current_time,
             risk_exposure_allowed=risk_allowed,
             global_risk_tags=global_risk_tags + regime_tags
         )

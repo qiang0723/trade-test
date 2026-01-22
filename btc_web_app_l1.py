@@ -499,6 +499,13 @@ def get_advisory_dual(symbol):
         # 2. L1双周期决策
         result = advisory_engine.on_new_tick_dual(symbol, market_data_dict)
         
+        # 2.5 保存到数据库（PR-DUAL）
+        try:
+            db.save_dual_advisory_result(symbol, result)
+        except Exception as e:
+            logger.warning(f"Failed to save dual advisory result to database: {e}")
+            # 数据库保存失败不影响API返回
+        
         # 3. 返回结果
         return jsonify({
             'success': True,
@@ -508,6 +515,120 @@ def get_advisory_dual(symbol):
     
     except Exception as e:
         logger.error(f'Error in get_advisory_dual: {str(e)}', exc_info=True)
+        return jsonify({
+            'success': False,
+            'data': None,
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/l1/history-dual/<symbol>')
+def get_history_dual(symbol):
+    """
+    获取指定币种的双周期决策历史记录（PR-DUAL）
+    
+    GET /api/l1/history-dual/BTC?hours=24&limit=1500
+    
+    Query Parameters:
+    - hours: 回溯小时数（默认24）
+    - limit: 返回条数（默认1500）
+    
+    Response:
+    {
+      "success": true,
+      "data": [
+        {
+          "short_term": {...},
+          "medium_term": {...},
+          "alignment": {...},
+          ...
+        },
+        ...
+      ]
+    }
+    """
+    try:
+        # 验证 symbol 有效性
+        config = advisory_engine.config
+        symbol_universe = config.get('symbol_universe', {})
+        enabled_symbols = symbol_universe.get('enabled_symbols', [])
+        
+        if symbol not in enabled_symbols:
+            logger.warning(f"Invalid symbol requested for dual history: {symbol}")
+            return jsonify({
+                'success': False,
+                'data': None,
+                'message': f'Invalid symbol: {symbol}. Enabled symbols: {", ".join(enabled_symbols)}'
+            }), 400
+        
+        hours = int(request.args.get('hours', 24))
+        limit = int(request.args.get('limit', 1500))
+        
+        # 从数据库获取历史记录
+        history = db.get_dual_advisory_history(symbol, hours=hours, limit=limit)
+        
+        return jsonify({
+            'success': True,
+            'data': history,
+            'message': None
+        })
+    
+    except Exception as e:
+        logger.error(f'Error in get_history_dual: {str(e)}', exc_info=True)
+        return jsonify({
+            'success': False,
+            'data': None,
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/l1/stats-dual/<symbol>')
+def get_stats_dual(symbol):
+    """
+    获取指定币种的双周期决策统计信息（PR-DUAL）
+    
+    GET /api/l1/stats-dual/BTC
+    
+    Response:
+    {
+      "success": true,
+      "data": {
+        "symbol": "BTC",
+        "alignment_type_distribution": {
+          "both_long": {"count": 10, "percentage": 20.0},
+          "both_no_trade": {"count": 30, "percentage": 60.0},
+          ...
+        },
+        "short_term_decision_distribution": {...},
+        "medium_term_decision_distribution": {...}
+      }
+    }
+    """
+    try:
+        # 验证 symbol 有效性
+        config = advisory_engine.config
+        symbol_universe = config.get('symbol_universe', {})
+        enabled_symbols = symbol_universe.get('enabled_symbols', [])
+        
+        if symbol not in enabled_symbols:
+            logger.warning(f"Invalid symbol requested for dual stats: {symbol}")
+            return jsonify({
+                'success': False,
+                'data': None,
+                'message': f'Invalid symbol: {symbol}. Enabled symbols: {", ".join(enabled_symbols)}'
+            }), 400
+        
+        # 从数据库获取统计信息
+        stats = db.get_dual_decision_stats(symbol)
+        
+        return jsonify({
+            'success': True,
+            'data': stats,
+            'message': None
+        })
+    
+    except Exception as e:
+        logger.error(f'Error in get_stats_dual: {str(e)}', exc_info=True)
         return jsonify({
             'success': False,
             'data': None,

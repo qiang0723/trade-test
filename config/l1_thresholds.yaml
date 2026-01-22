@@ -364,3 +364,23 @@ dual_timeframe:
     
     # 双周期一致时，是否放宽执行门槛
     relax_executable_threshold: false
+
+# ==================
+# 双周期决策频率控制（PR-DUAL）
+# ==================
+dual_decision_control:
+  # 短期决策控制（5m/15m）
+  short_term_interval_seconds: 300        # 最小决策间隔：5分钟
+  short_term_flip_cooldown_seconds: 450   # 方向翻转冷却：7.5分钟（LONG ↔ SHORT）
+  
+  # 中长期决策控制（1h/6h）
+  medium_term_interval_seconds: 1800      # 最小决策间隔：30分钟
+  medium_term_flip_cooldown_seconds: 900  # 方向翻转冷却：15分钟（LONG ↔ SHORT）
+  
+  # 对齐类型翻转冷却
+  alignment_flip_cooldown_seconds: 900    # 重大翻转冷却：15分钟（BOTH_LONG ↔ BOTH_SHORT）
+  
+  # 说明：
+  # - NO_TRADE决策不受频率控制（允许随时输出）
+  # - 翻转冷却时间应 >= 决策间隔时间
+  # - 对齐类型仅阻断重大翻转（双向一致态互换）

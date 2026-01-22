@@ -120,8 +120,59 @@ class L1Database:
                 ON l1_pipeline_steps(symbol, timestamp DESC)
             ''')
             
+            # PR-DUAL: 创建双周期独立结论表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS l1_dual_advisory_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    
+                    -- 短期结论（5m/15m）
+                    short_term_decision TEXT NOT NULL,
+                    short_term_confidence TEXT NOT NULL,
+                    short_term_executable INTEGER NOT NULL,
+                    short_term_regime TEXT NOT NULL,
+                    short_term_quality TEXT NOT NULL,
+                    
+                    -- 中长期结论（1h/6h）
+                    medium_term_decision TEXT NOT NULL,
+                    medium_term_confidence TEXT NOT NULL,
+                    medium_term_executable INTEGER NOT NULL,
+                    medium_term_regime TEXT NOT NULL,
+                    medium_term_quality TEXT NOT NULL,
+                    
+                    -- 一致性分析
+                    alignment_type TEXT NOT NULL,
+                    is_aligned INTEGER NOT NULL,
+                    has_conflict INTEGER NOT NULL,
+                    recommended_action TEXT NOT NULL,
+                    recommended_confidence TEXT NOT NULL,
+                    
+                    -- 完整JSON（便于查询和分析）
+                    full_json TEXT NOT NULL,
+                    
+                    -- 元数据
+                    risk_exposure_allowed INTEGER NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now'))
+                )
+            ''')
+            
+            # 双周期表索引
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_l1_dual_symbol_timestamp 
+                ON l1_dual_advisory_results(symbol, timestamp DESC)
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_l1_dual_alignment_type 
+                ON l1_dual_advisory_results(alignment_type)
+            ''')
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_l1_dual_created_at 
+                ON l1_dual_advisory_results(created_at DESC)
+            ''')
+            
             conn.commit()
-            logger.info("Database tables initialized")
+            logger.info("Database tables initialized (including PR-DUAL)")
     
     def _migrate_add_execution_permission(self, cursor):
         """
@@ -558,6 +609,193 @@ class L1Database:
     def close(self):
         """关闭数据库连接（实际上使用with语句管理连接，此方法预留）"""
         pass
+    
+    # ========================================
+    # PR-DUAL: 双周期独立结论数据库操作
+    # ========================================
+    
+    def save_dual_advisory_result(self, symbol: str, result) -> int:
+        """
+        保存双周期独立结论到数据库
+        
+        Args:
+            symbol: 交易对符号
+            result: DualTimeframeResult 双周期结论
+        
+        Returns:
+            result_id: 插入记录的ID
+        """
+        try:
+            short = result.short_term
+            medium = result.medium_term
+            align = result.alignment
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    INSERT INTO l1_dual_advisory_results (
+                        symbol, timestamp,
+                        short_term_decision, short_term_confidence, short_term_executable,
+                        short_term_regime, short_term_quality,
+                        medium_term_decision, medium_term_confidence, medium_term_executable,
+                        medium_term_regime, medium_term_quality,
+                        alignment_type, is_aligned, has_conflict,
+                        recommended_action, recommended_confidence,
+                        full_json, risk_exposure_allowed
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    symbol,
+                    result.timestamp.isoformat(),
+                    short.decision.value,
+                    short.confidence.value,
+                    1 if short.executable else 0,
+                    short.market_regime.value,
+                    short.trade_quality.value,
+                    medium.decision.value,
+                    medium.confidence.value,
+                    1 if medium.executable else 0,
+                    medium.market_regime.value,
+                    medium.trade_quality.value,
+                    align.alignment_type.value,
+                    1 if align.is_aligned else 0,
+                    1 if align.has_conflict else 0,
+                    align.recommended_action.value,
+                    align.recommended_confidence.value,
+                    json.dumps(result.to_dict()),
+                    1 if result.risk_exposure_allowed else 0
+                ))
+                
+                conn.commit()
+                result_id = cursor.lastrowid
+                
+                logger.debug(f"[{symbol}] Saved dual advisory result: id={result_id}")
+                return result_id
+        
+        except Exception as e:
+            logger.error(f"Error saving dual advisory result: {e}")
+            return 0
+    
+    def get_dual_advisory_history(
+        self, 
+        symbol: str, 
+        hours: int = 24, 
+        limit: int = 1500
+    ) -> List[Dict]:
+        """
+        获取双周期独立结论历史记录
+        
+        Args:
+            symbol: 交易对符号
+            hours: 回溯小时数
+            limit: 最大返回条数
+        
+        Returns:
+            历史记录列表（从新到旧）
+        """
+        try:
+            time_cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+            
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT * FROM l1_dual_advisory_results
+                    WHERE symbol = ? AND timestamp >= ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                ''', (symbol, time_cutoff, limit))
+                
+                rows = cursor.fetchall()
+                
+                results = []
+                for row in rows:
+                    # 解析full_json字段
+                    full_data = json.loads(row['full_json'])
+                    results.append(full_data)
+                
+                logger.debug(f"[{symbol}] Retrieved {len(results)} dual advisory records ({hours}h)")
+                return results
+        
+        except Exception as e:
+            logger.error(f"Error getting dual advisory history: {e}")
+            return []
+    
+    def get_dual_decision_stats(self, symbol: str) -> Dict:
+        """
+        获取双周期决策统计信息
+        
+        Args:
+            symbol: 交易对符号
+        
+        Returns:
+            统计信息字典，包含alignment_type分布、决策分布等
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 统计1: alignment_type分布
+                cursor.execute('''
+                    SELECT 
+                        alignment_type,
+                        COUNT(*) as count,
+                        COUNT(*) * 100.0 / (SELECT COUNT(*) FROM l1_dual_advisory_results WHERE symbol = ?) as percentage
+                    FROM l1_dual_advisory_results
+                    WHERE symbol = ?
+                    GROUP BY alignment_type
+                    ORDER BY count DESC
+                ''', (symbol, symbol))
+                
+                alignment_stats = {}
+                for row in cursor.fetchall():
+                    alignment_stats[row[0]] = {
+                        'count': row[1],
+                        'percentage': round(row[2], 2)
+                    }
+                
+                # 统计2: 短期决策分布
+                cursor.execute('''
+                    SELECT 
+                        short_term_decision,
+                        COUNT(*) as count
+                    FROM l1_dual_advisory_results
+                    WHERE symbol = ?
+                    GROUP BY short_term_decision
+                ''', (symbol,))
+                
+                short_term_stats = {}
+                for row in cursor.fetchall():
+                    short_term_stats[row[0]] = row[1]
+                
+                # 统计3: 中长期决策分布
+                cursor.execute('''
+                    SELECT 
+                        medium_term_decision,
+                        COUNT(*) as count
+                    FROM l1_dual_advisory_results
+                    WHERE symbol = ?
+                    GROUP BY medium_term_decision
+                ''', (symbol,))
+                
+                medium_term_stats = {}
+                for row in cursor.fetchall():
+                    medium_term_stats[row[0]] = row[1]
+                
+                stats = {
+                    'symbol': symbol,
+                    'alignment_type_distribution': alignment_stats,
+                    'short_term_decision_distribution': short_term_stats,
+                    'medium_term_decision_distribution': medium_term_stats
+                }
+                
+                logger.debug(f"[{symbol}] Retrieved dual decision stats")
+                return stats
+        
+        except Exception as e:
+            logger.error(f"Error getting dual decision stats: {e}")
+            return {}
 
 
 # 测试代码
