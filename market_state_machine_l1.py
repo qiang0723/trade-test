@@ -3105,6 +3105,7 @@ class L1AdvisoryEngine:
             alignment=alignment,
             symbol=symbol,
             timestamp=datetime.now(),
+            price=data.get('price'),
             risk_exposure_allowed=risk_allowed,
             global_risk_tags=global_risk_tags
         )

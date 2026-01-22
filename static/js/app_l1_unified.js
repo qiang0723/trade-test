@@ -986,8 +986,42 @@ function renderHistoryTable(data) {
             <td class="col-reason">${reasonText || '无'}</td>
         `;
         
+        // 添加点击事件显示详情
+        row.onclick = () => showHistoryDetailModal(item);
+        row.style.cursor = 'pointer';
+        
         tbody.appendChild(row);
     });
+}
+
+/**
+ * 显示历史记录详情（模态框）
+ */
+function showHistoryDetailModal(item) {
+    const allTags = (item.reason_tags || []).map(tag => {
+        const tagData = reasonTagExplanations[tag];
+        return tagData ? `• ${tagData.explanation} (${tag})` : `• ${tag}`;
+    }).join('\n');
+    
+    const priceInfo = item.price ? `\n💰 价格: $${item.price.toLocaleString()}` : '';
+    
+    const detail = `
+📊 决策详情
+
+交易对: ${item.symbol}
+周期: ${item.timeframe_label || 'N/A'}
+时间: ${new Date(item.timestamp).toLocaleString('zh-CN')}${priceInfo}
+
+【核心决策】
+决策: ${item.decision.toUpperCase()}
+置信度: ${item.confidence.toUpperCase()}
+可执行: ${item.executable ? '是' : '否'}
+
+【决策依据】
+${allTags || '无'}
+    `.trim();
+    
+    alert(detail);
 }
 
 function updateHistoryStats(data) {
