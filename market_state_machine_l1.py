@@ -399,7 +399,8 @@ class L1AdvisoryEngine:
                 reason_tags=[fail_tag] if fail_tag else [ReasonTag.INVALID_DATA],
                 regime=MarketRegime.RANGE,
                 risk_allowed=False,
-                quality=TradeQuality.POOR
+                quality=TradeQuality.POOR,
+                price=data.get('price')  # 尝试从原始data获取
             )
         
         # 使用规范化后的数据（后续所有步骤都用这个）
@@ -411,6 +412,24 @@ class L1AdvisoryEngine:
             'result': 'Valid',
             'normalization_trace': norm_trace  # PATCH-1: 添加 trace
         })
+        
+        # ===== Step 1.5: Lookback Coverage 检查（PATCH-2）=====
+        coverage_ok, coverage_tags = self._check_lookback_coverage(data)
+        if not coverage_ok:
+            logger.warning(f"[{symbol}] Lookback coverage check failed: {[t.value for t in coverage_tags]}")
+            self.last_pipeline_steps.append({
+                'step': 1.5, 'name': 'check_coverage', 'status': 'failed',
+                'message': f'Lookback coverage检查失败：{[t.value for t in coverage_tags]}',
+                'result': None
+            })
+            # 任何关键窗口缺失都返回 NO_TRADE
+            return self._build_no_trade_result(
+                reason_tags=coverage_tags,
+                regime=MarketRegime.RANGE,
+                risk_allowed=False,
+                quality=TradeQuality.POOR,
+                price=data.get('price')
+            )
         
         # ===== Step 2: 市场环境识别 =====
         regime, regime_tags = self._detect_market_regime(data)
@@ -442,7 +461,8 @@ class L1AdvisoryEngine:
                 reason_tags=reason_tags,
                 regime=regime,
                 risk_allowed=False,
-                quality=TradeQuality.POOR
+                quality=TradeQuality.POOR,
+                price=data.get('price')
             )
         
         # ===== Step 4: 交易质量评估（第二道闸门）=====
@@ -462,7 +482,8 @@ class L1AdvisoryEngine:
                 reason_tags=reason_tags,
                 regime=regime,
                 risk_allowed=True,
-                quality=TradeQuality.POOR
+                quality=TradeQuality.POOR,
+                price=data.get('price')
             )
         
         # ===== Step 5: 方向评估（SHORT优先）=====
@@ -692,11 +713,18 @@ class L1AdvisoryEngine:
                     )
                     return False, data, ReasonTag.DATA_STALE, None
         
+        # PATCH-2: 保存 coverage（normalize 会移除 _metadata）
+        lookback_coverage = data.get('_metadata', {}).get('lookback_coverage')
+        
         # 指标口径规范化（PATCH-1增强：含 trace）
         normalized_data, is_valid, error_msg, norm_trace = normalize_metrics_with_trace(data)
         if not is_valid:
             logger.error(f"Metrics normalization failed: {error_msg}")
             return False, data, ReasonTag.INVALID_DATA, norm_trace.to_dict()
+        
+        # PATCH-2: 恢复 coverage（用于后续检查）
+        if lookback_coverage:
+            normalized_data['_metadata'] = {'lookback_coverage': lookback_coverage}
         
         # 规范化成功，记录 trace
         logger.debug(
@@ -715,6 +743,55 @@ class L1AdvisoryEngine:
             return False, normalized_data, ReasonTag.INVALID_DATA, norm_trace.to_dict()
         
         return True, normalized_data, None, norm_trace.to_dict()
+    
+    def _check_lookback_coverage(self, data: Dict) -> Tuple[bool, List[ReasonTag]]:
+        """
+        检查 lookback coverage（PATCH-2）
+        
+        从 _metadata.lookback_coverage 读取各窗口的 lookback 结果，
+        检查关键窗口是否存在数据缺口。
+        
+        Args:
+            data: 市场数据字典（包含 _metadata）
+        
+        Returns:
+            (是否通过检查, 失败原因tags列表)
+        """
+        metadata = data.get('_metadata', {})
+        coverage = metadata.get('lookback_coverage', {})
+        
+        if not coverage or not coverage.get('has_data'):
+            # 没有 coverage 信息（可能是旧版数据源），不检查
+            logger.debug("No lookback_coverage in metadata, skipping coverage check")
+            return True, []
+        
+        windows = coverage.get('windows', {})
+        failed_tags = []
+        
+        # 检查各窗口
+        window_tag_map = {
+            '5m': ReasonTag.DATA_GAP_5M,
+            '15m': ReasonTag.DATA_GAP_15M,
+            '1h': ReasonTag.DATA_GAP_1H,
+            '6h': ReasonTag.DATA_GAP_6H,
+        }
+        
+        for window_key, tag in window_tag_map.items():
+            window_info = windows.get(window_key, {})
+            if not window_info.get('is_valid', True):  # 默认 True 避免误报
+                error_reason = window_info.get('error_reason', 'UNKNOWN')
+                gap_seconds = window_info.get('gap_seconds')
+                logger.warning(
+                    f"Lookback failed for {window_key}: {error_reason} "
+                    f"(gap={gap_seconds}s)" if gap_seconds else f"Lookback failed for {window_key}: {error_reason}"
+                )
+                failed_tags.append(tag)
+        
+        # 如果有任何窗口失败，返回失败
+        if failed_tags:
+            return False, failed_tags
+        
+        return True, []
     
     # ========================================
     # Step 2: 市场环境识别
@@ -1581,7 +1658,8 @@ class L1AdvisoryEngine:
         reason_tags: List[ReasonTag],
         regime: MarketRegime,
         risk_allowed: bool,
-        quality: TradeQuality
+        quality: TradeQuality,
+        price: Optional[float] = None
     ) -> AdvisoryResult:
         """
         构造 NO_TRADE 结果
@@ -1591,6 +1669,7 @@ class L1AdvisoryEngine:
             regime: 市场环境
             risk_allowed: 风险是否允许
             quality: 交易质量
+            price: 当前价格（可选）
         
         Returns:
             AdvisoryResult: NO_TRADE决策结果
@@ -1607,7 +1686,7 @@ class L1AdvisoryEngine:
             execution_permission=ExecutionPermission.DENY,  # NO_TRADE → DENY
             executable=False,
             signal_decision=None,  # PR-004: NO_TRADE场景无原始信号
-            price=data.get('price')  # 添加价格信息
+            price=price  # 添加价格信息
         )
         # NO_TRADE的executable永远是False，无需重新计算
         return result
@@ -2478,6 +2557,20 @@ class L1AdvisoryEngine:
             return self._build_dual_no_trade_result(symbol, global_risk_tags)
         
         data = normalized_data
+        
+        # ===== Step 1.5: Lookback Coverage 检查（PATCH-2）=====
+        coverage_ok, coverage_tags = self._check_lookback_coverage(data)
+        if not coverage_ok:
+            logger.warning(f"[{symbol}] Lookback coverage check failed: {[t.value for t in coverage_tags]}")
+            # 对于短期决策关键的窗口（5m/15m）缺失，直接返回 NO_TRADE
+            critical_gaps = [ReasonTag.DATA_GAP_5M, ReasonTag.DATA_GAP_15M]
+            if any(tag in coverage_tags for tag in critical_gaps):
+                logger.warning(f"[{symbol}] Critical window data gap, returning dual NO_TRADE")
+                return self._build_dual_no_trade_result(symbol, coverage_tags, regime=MarketRegime.RANGE)
+            else:
+                # 非关键窗口缺失（1h/6h），记录但继续（可能降级）
+                global_risk_tags.extend(coverage_tags)
+                logger.info(f"[{symbol}] Non-critical window gap, continuing with degraded quality")
         
         # ===== Step 2: 全局风险评估（极端行情等）=====
         regime, regime_tags = self._detect_market_regime(data)

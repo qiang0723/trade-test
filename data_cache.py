@@ -1,5 +1,5 @@
 """
-L1 Advisory Layer - 市场数据缓存机制
+L1 Advisory Layer - 市场数据缓存机制（PATCH-2增强版）
 
 负责：
 1. 存储历史tick数据（最少6小时）
@@ -8,6 +8,11 @@ L1 Advisory Layer - 市场数据缓存机制
 4. 计算1h成交量
 5. 提供数据查询接口
 
+PATCH-2 改进：
+- ✅ Floor查找：只允许 timestamp <= target_time（禁止未来点）
+- ✅ Gap guardrail：定义容忍阈值，超过则返回 None
+- ✅ Coverage输出：记录实际查到的点、gap秒数、缺失窗口
+
 使用内存缓存（简单dict），未来可扩展为Redis
 """
 
@@ -15,9 +20,31 @@ import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from collections import deque
+from dataclasses import dataclass, field
 import threading
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LookbackResult:
+    """Lookback查询结果（PATCH-2）"""
+    tick: Optional['TickData']              # 查到的tick（None表示未找到）
+    target_time: datetime                   # 目标时间
+    actual_time: Optional[datetime]         # 实际查到的时间
+    gap_seconds: Optional[float]            # gap秒数（实际时间与目标时间的差）
+    is_valid: bool                          # 是否在容忍范围内
+    error_reason: Optional[str] = None      # 失败原因
+    
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            'target_time': self.target_time.isoformat() if self.target_time else None,
+            'actual_time': self.actual_time.isoformat() if self.actual_time else None,
+            'gap_seconds': self.gap_seconds,
+            'is_valid': self.is_valid,
+            'error_reason': self.error_reason
+        }
 
 
 class TickData:
@@ -46,11 +73,19 @@ class TickData:
 
 class MarketDataCache:
     """
-    市场数据缓存
+    市场数据缓存（PATCH-2增强版）
     
     使用内存deque存储，自动清理6小时以前的数据
     线程安全
     """
+    
+    # PATCH-2: Gap容忍阈值配置（秒）
+    GAP_TOLERANCE = {
+        '5m': 90,      # 5分钟窗口：容忍90秒（1.5分钟）
+        '15m': 300,    # 15分钟窗口：容忍5分钟
+        '1h': 600,     # 1小时窗口：容忍10分钟
+        '6h': 1800,    # 6小时窗口：容忍30分钟
+    }
     
     def __init__(self, max_hours: int = 6):
         """
@@ -65,7 +100,7 @@ class MarketDataCache:
         # 线程锁
         self.lock = threading.Lock()
         
-        logger.info(f"MarketDataCache initialized (max_hours={max_hours})")
+        logger.info(f"MarketDataCache initialized (max_hours={max_hours}, PATCH-2 enabled)")
     
     def store_tick(self, symbol: str, data: dict, timestamp: datetime = None):
         """
@@ -146,9 +181,84 @@ class MarketDataCache:
             # 过滤符合时间范围的数据
             return [tick for tick in self.cache[symbol] if tick.timestamp >= cutoff_time]
     
+    def _find_floor_tick(self, symbol: str, target_time: datetime, tolerance_seconds: float) -> LookbackResult:
+        """
+        查找 floor tick（PATCH-2核心改进）
+        
+        规则：
+        1. 只允许 tick.timestamp <= target_time（禁止未来点）
+        2. 选择最接近 target_time 的历史点
+        3. 如果 gap > tolerance，返回 None 并记录原因
+        
+        Args:
+            symbol: 币种符号
+            target_time: 目标时间
+            tolerance_seconds: gap容忍阈值（秒）
+        
+        Returns:
+            LookbackResult
+        """
+        if symbol not in self.cache or len(self.cache[symbol]) == 0:
+            return LookbackResult(
+                tick=None,
+                target_time=target_time,
+                actual_time=None,
+                gap_seconds=None,
+                is_valid=False,
+                error_reason='NO_DATA'
+            )
+        
+        # 找到 timestamp <= target_time 的最近点（floor）
+        floor_tick = None
+        min_gap = None
+        
+        for tick in self.cache[symbol]:
+            if tick.timestamp <= target_time:  # ✅ PATCH-2: 只允许历史点
+                gap = (target_time - tick.timestamp).total_seconds()
+                if min_gap is None or gap < min_gap:
+                    min_gap = gap
+                    floor_tick = tick
+        
+        # 未找到任何历史点
+        if floor_tick is None:
+            return LookbackResult(
+                tick=None,
+                target_time=target_time,
+                actual_time=None,
+                gap_seconds=None,
+                is_valid=False,
+                error_reason='NO_HISTORICAL_DATA'
+            )
+        
+        # 检查 gap 是否在容忍范围内
+        gap_seconds = (target_time - floor_tick.timestamp).total_seconds()
+        is_valid = gap_seconds <= tolerance_seconds
+        
+        if not is_valid:
+            return LookbackResult(
+                tick=None,  # gap超出范围，不返回tick
+                target_time=target_time,
+                actual_time=floor_tick.timestamp,
+                gap_seconds=gap_seconds,
+                is_valid=False,
+                error_reason=f'GAP_TOO_LARGE (gap={gap_seconds:.0f}s > tolerance={tolerance_seconds}s)'
+            )
+        
+        # 成功
+        return LookbackResult(
+            tick=floor_tick,
+            target_time=target_time,
+            actual_time=floor_tick.timestamp,
+            gap_seconds=gap_seconds,
+            is_valid=True,
+            error_reason=None
+        )
+    
     def _find_closest_tick(self, symbol: str, target_time: datetime) -> Optional[TickData]:
         """
-        查找最接近目标时间的tick
+        查找最接近目标时间的tick（向后兼容旧接口）
+        
+        ⚠️  已弃用：请使用 _find_floor_tick 以获得 PATCH-2 增强功能
         
         Args:
             symbol: 币种符号
@@ -174,7 +284,7 @@ class MarketDataCache:
     
     def calculate_price_change(self, symbol: str, hours: float) -> Optional[float]:
         """
-        计算价格变化率
+        计算价格变化率（PATCH-2增强：使用 floor 查找）
         
         Args:
             symbol: 币种符号
@@ -190,9 +300,19 @@ class MarketDataCache:
             current_tick = self.cache[symbol][-1]
             target_time = current_tick.timestamp - timedelta(hours=hours)
             
-            past_tick = self._find_closest_tick(symbol, target_time)
+            # PATCH-2: 使用 floor 查找，带 gap tolerance
+            window_key = self._hours_to_window_key(hours)
+            tolerance = self.GAP_TOLERANCE.get(window_key, 600)  # 默认10分钟
             
-            if past_tick is None or past_tick.price == 0:
+            result = self._find_floor_tick(symbol, target_time, tolerance)
+            
+            if not result.is_valid or result.tick is None:
+                logger.debug(f"Price change lookback failed for {symbol} ({hours}h): {result.error_reason}")
+                return None
+            
+            past_tick = result.tick
+            
+            if past_tick.price == 0:
                 return None
             
             change_percent = ((current_tick.price - past_tick.price) / past_tick.price) * 100
@@ -201,7 +321,7 @@ class MarketDataCache:
     
     def calculate_oi_change(self, symbol: str, hours: float) -> Optional[float]:
         """
-        计算持仓量变化率
+        计算持仓量变化率（PATCH-2增强：使用 floor 查找）
         
         Args:
             symbol: 币种符号
@@ -217,14 +337,37 @@ class MarketDataCache:
             current_tick = self.cache[symbol][-1]
             target_time = current_tick.timestamp - timedelta(hours=hours)
             
-            past_tick = self._find_closest_tick(symbol, target_time)
+            # PATCH-2: 使用 floor 查找
+            window_key = self._hours_to_window_key(hours)
+            tolerance = self.GAP_TOLERANCE.get(window_key, 600)
             
-            if past_tick is None or past_tick.open_interest == 0:
+            result = self._find_floor_tick(symbol, target_time, tolerance)
+            
+            if not result.is_valid or result.tick is None:
+                logger.debug(f"OI change lookback failed for {symbol} ({hours}h): {result.error_reason}")
+                return None
+            
+            past_tick = result.tick
+            
+            if past_tick.open_interest == 0:
                 return None
             
             change_percent = ((current_tick.open_interest - past_tick.open_interest) / past_tick.open_interest) * 100
             
             return change_percent
+    
+    def _hours_to_window_key(self, hours: float) -> str:
+        """将小时数转换为窗口key"""
+        if abs(hours - 0.0833) < 0.01:  # ~5分钟
+            return '5m'
+        elif abs(hours - 0.25) < 0.01:  # 15分钟
+            return '15m'
+        elif abs(hours - 1.0) < 0.01:
+            return '1h'
+        elif abs(hours - 6.0) < 0.01:
+            return '6h'
+        else:
+            return '1h'  # 默认
     
     def calculate_price_change_15m(self, symbol: str) -> Optional[float]:
         """
@@ -294,10 +437,15 @@ class MarketDataCache:
             # 获取最新tick和1小时前的tick
             current_tick = self.cache[symbol][-1]
             target_time = current_tick.timestamp - timedelta(hours=1.0)
-            past_tick = self._find_closest_tick(symbol, target_time)
             
-            if past_tick is None:
+            # PATCH-2: 使用 floor 查找
+            result = self._find_floor_tick(symbol, target_time, self.GAP_TOLERANCE['1h'])
+            
+            if not result.is_valid or result.tick is None:
+                logger.debug(f"Volume 1h lookback failed for {symbol}: {result.error_reason}")
                 return None
+            
+            past_tick = result.tick
             
             # P0-BugFix-2: volume是24h累计量，必须取差值
             # 不能累加，否则会高估几十倍
@@ -344,6 +492,59 @@ class MarketDataCache:
         
         return imbalance
     
+    def get_lookback_coverage(self, symbol: str) -> dict:
+        """
+        获取 lookback 覆盖信息（PATCH-2新增）
+        
+        用于诊断和可观测性，返回各个窗口的 lookback 结果
+        
+        Args:
+            symbol: 币种符号
+        
+        Returns:
+            coverage信息字典
+        """
+        with self.lock:
+            if symbol not in self.cache or len(self.cache[symbol]) == 0:
+                return {
+                    'has_data': False,
+                    'windows': {}
+                }
+            
+            current_tick = self.cache[symbol][-1]
+            current_time = current_tick.timestamp
+            
+            windows = {}
+            for window_key, tolerance in self.GAP_TOLERANCE.items():
+                if window_key == '5m':
+                    hours = 5/60
+                elif window_key == '15m':
+                    hours = 0.25
+                elif window_key == '1h':
+                    hours = 1.0
+                elif window_key == '6h':
+                    hours = 6.0
+                else:
+                    continue
+                
+                target_time = current_time - timedelta(hours=hours)
+                result = self._find_floor_tick(symbol, target_time, tolerance)
+                
+                windows[window_key] = {
+                    'target_time': target_time.isoformat(),
+                    'actual_time': result.actual_time.isoformat() if result.actual_time else None,
+                    'gap_seconds': result.gap_seconds,
+                    'is_valid': result.is_valid,
+                    'error_reason': result.error_reason
+                }
+            
+            return {
+                'has_data': True,
+                'current_time': current_time.isoformat(),
+                'cache_size': len(self.cache[symbol]),
+                'windows': windows
+            }
+    
     def get_enhanced_market_data(self, symbol: str, current_data: dict) -> dict:
         """
         基于当前数据和历史缓存，生成增强的市场数据（包含所有L1需要的字段）
@@ -368,7 +569,7 @@ class MarketDataCache:
             current_data: 当前tick数据（来自Binance API）
         
         Returns:
-            增强的市场数据字典（包含price_change_1h等计算字段 + _metadata）
+            增强的市场数据字典（包含price_change_1h等计算字段 + _metadata + PATCH-2 coverage）
         """
         # 先存储当前数据
         self.store_tick(symbol, current_data)
@@ -386,6 +587,9 @@ class MarketDataCache:
         
         volume_1h = self.calculate_volume_1h(symbol)
         buy_sell_imbalance = self.calculate_buy_sell_imbalance(symbol, hours=1.0)
+        
+        # PATCH-2: 获取 lookback coverage
+        coverage = self.get_lookback_coverage(symbol)
         
         # 获取源时间戳（来自最新tick）
         source_timestamp = None
@@ -424,7 +628,8 @@ class MarketDataCache:
             '_metadata': {
                 'percentage_format': 'percent_point',  # 百分比字段为 percent-point 格式（已乘100）
                 'source': 'market_data_cache',
-                'version': '1.0'
+                'version': '1.1',  # PATCH-2
+                'lookback_coverage': coverage  # PATCH-2: 添加 coverage 信息
             }
         }
         
@@ -506,7 +711,7 @@ if __name__ == '__main__':
     
     # 模拟存储一些tick数据
     print("=" * 60)
-    print("Testing MarketDataCache")
+    print("Testing MarketDataCache (PATCH-2)")
     print("=" * 60)
     
     base_time = datetime.now() - timedelta(hours=2)
@@ -532,6 +737,12 @@ if __name__ == '__main__':
     print(f"1h持仓量变化: {cache.calculate_oi_change('BTC', 1.0):.2f}%")
     print(f"买卖失衡度: {cache.calculate_buy_sell_imbalance('BTC', 1.0):.2f}")
     
+    # PATCH-2: 测试 lookback coverage
+    print("\nPATCH-2 Lookback Coverage:")
+    coverage = cache.get_lookback_coverage('BTC')
+    for window, info in coverage.get('windows', {}).items():
+        print(f"  {window}: valid={info['is_valid']}, gap={info['gap_seconds']}s, reason={info['error_reason']}")
+    
     # 测试增强数据
     print("\n测试增强数据生成：")
     current_data = {
@@ -545,6 +756,7 @@ if __name__ == '__main__':
     }
     
     enhanced = cache.get_enhanced_market_data('BTC', current_data)
-    print(f"增强数据: {enhanced}")
+    print(f"增强数据: price_change_1h={enhanced['price_change_1h']:.2f}%")
+    print(f"Coverage: {enhanced['_metadata']['lookback_coverage']['has_data']}")
     
     print("\n测试完成！")
