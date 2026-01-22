@@ -106,8 +106,42 @@ class BacktestEngine:
         # L1引擎
         self.engine = L1AdvisoryEngine()
         
+        # ==================
+        # 回测模式特殊配置
+        # ==================
+        
+        # 1. 禁用数据时效性检查（历史数据必然"过期"）
+        self.engine.thresholds['data_max_staleness_seconds'] = 315360000  # 10年
+        
+        # 2. 禁用决策频率控制（回测中每个tick都应独立评估）
+        # 修改引擎配置
+        self.engine.config['decision_control'] = {
+            'min_decision_interval_seconds': 0,  # 禁用最小间隔
+            'flip_cooldown_seconds': 0,           # 禁用翻转冷却
+            'enable_min_interval': False,
+            'enable_flip_cooldown': False
+        }
+        
+        # 3. 禁用双周期频率控制
+        self.engine.config['dual_decision_control'] = {
+            'short_term_interval_seconds': 0,
+            'short_term_flip_cooldown_seconds': 0,
+            'medium_term_interval_seconds': 0,
+            'medium_term_flip_cooldown_seconds': 0,
+            'alignment_flip_cooldown_seconds': 0
+        }
+        
+        # 4. 更新双周期决策记忆的参数
+        self.engine.dual_decision_memory.short_term_interval = 0
+        self.engine.dual_decision_memory.short_term_flip_cooldown = 0
+        self.engine.dual_decision_memory.medium_term_interval = 0
+        self.engine.dual_decision_memory.medium_term_flip_cooldown = 0
+        self.engine.dual_decision_memory.alignment_flip_cooldown = 0
+        
         logger.info(f"BacktestEngine initialized: capital={initial_capital}, "
                    f"position_size={position_size}, commission={commission_rate}")
+        logger.info("Backtest mode: data staleness check disabled")
+        logger.info("Backtest mode: decision frequency control disabled")
     
     def run_backtest(
         self,
@@ -339,12 +373,28 @@ class BacktestEngine:
             Dict: 绩效指标
         """
         if not self.trades:
+            # Buy & Hold 基准（即使没有交易也要计算）
+            if market_data_list:
+                start_price = market_data_list[0]['price']
+                end_price = market_data_list[-1]['price']
+                buy_hold_return = (end_price - start_price) / start_price
+            else:
+                buy_hold_return = 0.0
+                
             return {
                 'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
                 'win_rate': 0.0,
+                'avg_win': 0.0,
+                'avg_loss': 0.0,
+                'profit_factor': 0.0,
                 'total_return': 0.0,
+                'buy_hold_return': buy_hold_return,
+                'excess_return': 0.0 - buy_hold_return,
                 'sharpe_ratio': 0.0,
-                'max_drawdown': 0.0
+                'max_drawdown': 0.0,
+                'final_capital': self.capital
             }
         
         # 基础统计

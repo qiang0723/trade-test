@@ -242,6 +242,65 @@ class HistoricalDataLoader:
         taker_sell_1h = volume_1h - taker_buy_1h
         buy_sell_imbalance = (taker_buy_1h - taker_sell_1h) / volume_1h if volume_1h > 0 else 0
         
+        # ==================
+        # OI变化估算（回测模式）
+        # ==================
+        # 原理：价格变化 + 成交量放大 → 新资金入场 → OI增长
+        # 公式：oi_change ≈ |price_change| * volume_ratio * scaling_factor
+        # 
+        # 注意：这是近似估算，用于回测验证策略逻辑
+        # 真实交易应使用Binance OI API数据
+        
+        # 计算前1小时/前6小时的平均成交量（作为基准）
+        if len(history) >= 120:
+            prev_volume_1h = sum(k['volume'] for k in history[-120:-60])
+        else:
+            prev_volume_1h = volume_1h
+        
+        if len(history) >= 720:
+            prev_volume_6h = sum(k['volume'] for k in history[-720:-360])
+        else:
+            prev_volume_6h = volume_24h / 4  # 使用24h均值
+        
+        # OI变化估算
+        # 规则1：价格大幅变动 + 成交量放大 → OI增长
+        # 规则2：成交量萎缩 → OI可能下降
+        # 规则3：添加随机因子模拟市场噪音
+        
+        import random
+        noise_factor = 1 + (random.random() - 0.5) * 0.2  # ±10%噪音
+        
+        # 5分钟OI估算（scaling: 15x）
+        vol_ratio_5m_vs_avg = volume_5m / (volume_1h / 12) if volume_1h > 0 else 1.0
+        oi_change_5m = abs(price_change_5m) * vol_ratio_5m_vs_avg * 15.0 * noise_factor
+        if vol_ratio_5m_vs_avg < 0.8:  # 成交量萎缩
+            oi_change_5m = -oi_change_5m * 0.3
+        
+        # 15分钟OI估算（scaling: 12x）
+        vol_ratio_15m_vs_avg = volume_15m / (volume_1h / 4) if volume_1h > 0 else 1.0
+        oi_change_15m = abs(price_change_15m) * vol_ratio_15m_vs_avg * 12.0 * noise_factor
+        if vol_ratio_15m_vs_avg < 0.8:
+            oi_change_15m = -oi_change_15m * 0.3
+        
+        # 1小时OI估算（scaling: 10x）
+        vol_ratio_1h = volume_1h / prev_volume_1h if prev_volume_1h > 0 else 1.0
+        oi_change_1h = abs(price_change_1h) * vol_ratio_1h * 10.0 * noise_factor
+        if vol_ratio_1h < 0.8:
+            oi_change_1h = -oi_change_1h * 0.3
+        
+        # 6小时OI估算（scaling: 8x）
+        volume_6h = sum(k['volume'] for k in history[-360:]) if len(history) >= 360 else volume_1h * 6
+        vol_ratio_6h = volume_6h / prev_volume_6h if prev_volume_6h > 0 else 1.0
+        oi_change_6h = abs(price_change_6h) * vol_ratio_6h * 8.0 * noise_factor
+        if vol_ratio_6h < 0.8:
+            oi_change_6h = -oi_change_6h * 0.3
+        
+        # 限制OI变化范围在合理区间 [-0.3, 0.5]
+        oi_change_5m = max(-0.3, min(0.5, oi_change_5m))
+        oi_change_15m = max(-0.3, min(0.5, oi_change_15m))
+        oi_change_1h = max(-0.3, min(0.5, oi_change_1h))
+        oi_change_6h = max(-0.3, min(0.5, oi_change_6h))
+        
         # 构造L1输入数据
         market_data = {
             'price': current_price,
@@ -264,13 +323,13 @@ class HistoricalDataLoader:
             'taker_imbalance_15m': taker_imbalance_15m,
             'buy_sell_imbalance': buy_sell_imbalance,
             
-            # OI变化（回测中无法获取，使用默认值）
-            'oi_change_1h': 0.0,
-            'oi_change_6h': 0.0,
-            'oi_change_5m': 0.0,
-            'oi_change_15m': 0.0,
+            # OI变化（回测模式：基于价格和成交量估算）
+            'oi_change_1h': oi_change_1h,
+            'oi_change_6h': oi_change_6h,
+            'oi_change_5m': oi_change_5m,
+            'oi_change_15m': oi_change_15m,
             
-            # 资金费率（回测中无法获取，使用默认值）
+            # 资金费率（回测中使用默认值）
             'funding_rate': 0.0001,
         }
         

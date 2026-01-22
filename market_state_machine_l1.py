@@ -661,11 +661,23 @@ class L1AdvisoryEngine:
         if 'timestamp' in data or 'source_timestamp' in data:
             data_time = data.get('source_timestamp') or data.get('timestamp')
             if data_time is not None:
-                # 计算数据年龄
+                # 计算数据年龄，统一转换为datetime对象
                 if isinstance(data_time, str):
                     data_time = datetime.fromisoformat(data_time)
+                elif isinstance(data_time, int):
+                    # 毫秒时间戳转换为datetime
+                    data_time = datetime.fromtimestamp(data_time / 1000)
+                elif not isinstance(data_time, datetime):
+                    # 其他类型尝试转换
+                    try:
+                        data_time = datetime.fromtimestamp(int(data_time) / 1000)
+                    except:
+                        pass  # 无法转换，跳过时效性检查
                 
-                staleness_seconds = (datetime.now() - data_time).total_seconds()
+                if isinstance(data_time, datetime):
+                    staleness_seconds = (datetime.now() - data_time).total_seconds()
+                else:
+                    staleness_seconds = 0  # 无效时间，不检查时效性
                 max_staleness = self.thresholds.get('data_max_staleness_seconds', 120)
                 
                 if staleness_seconds > max_staleness:

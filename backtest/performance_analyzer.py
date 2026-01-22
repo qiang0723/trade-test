@@ -34,6 +34,25 @@ class PerformanceAnalyzer:
         if not trades:
             return {
                 'total_trades': 0,
+                'long_trades': 0,
+                'short_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'long_win_rate': 0,
+                'short_win_rate': 0,
+                'total_profit': 0,
+                'total_loss': 0,
+                'net_profit': 0,
+                'avg_win': 0,
+                'avg_loss': 0,
+                'max_win': 0,
+                'max_loss': 0,
+                'profit_factor': 0,
+                'avg_hold_time_minutes': 0,
+                'exit_reasons': {},
+                'max_consecutive_wins': 0,
+                'max_consecutive_losses': 0,
                 'message': 'No trades executed'
             }
         

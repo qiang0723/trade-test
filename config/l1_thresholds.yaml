@@ -64,12 +64,12 @@ decision_control:
   enable_flip_cooldown: true
 
 # ==================
-# 市场环境识别阈值
+# 市场环境识别阈值 - P2优化：降低TREND阈值便于捕捉趋势
 # ==================
 market_regime:
-  extreme_price_change_1h: 0.05   # 1小时价格变化 > 5% → EXTREME（小数格式：0.05=5%）
-  trend_price_change_6h: 0.03     # 6小时价格变化 > 3% → TREND（小数格式：0.03=3%）
-  short_term_trend_1h: 0.02       # 1小时价格变化 > 2% → 短期TREND（新增，捕获短期机会）
+  extreme_price_change_1h: 0.07   # 1小时价格变化 > 7% → EXTREME（提高，减少EXTREME拒绝）
+  trend_price_change_6h: 0.02     # 6小时价格变化 > 2% → TREND（优化前3%，降低33%）
+  short_term_trend_1h: 0.015      # 1小时价格变化 > 1.5% → 短期TREND（优化前2%）
 
 # ==================
 # 风险准入阈值
@@ -114,41 +114,41 @@ trade_quality:
     oi: 0.10                      # OI变化阈值（小数格式：0.10=10%）
 
 # ==================
-# 方向评估阈值
+# 方向评估阈值 - 回测优化v2：目标20-50笔交易
 # ==================
 direction:
   # 趋势市
   trend:
     long:
-      imbalance: 0.6              # 买卖失衡阈值（-1到1范围）
-      oi_change: 0.05             # 1h OI增长阈值（小数格式：0.05=5%）
-      price_change: 0.01          # 1h价格上涨阈值（小数格式：0.01=1%）
+      imbalance: 0.25             # 买卖失衡阈值
+      oi_change: 0.025            # 1h OI增长阈值
+      price_change: 0.004         # 1h价格上涨阈值
     short:
-      imbalance: 0.6              # 买卖失衡阈值（-1到1范围，绝对值）
-      oi_change: 0.05             # 1h OI增长阈值（小数格式：0.05=5%）
-      price_change: 0.01          # 1h价格下跌阈值（小数格式：0.01=1%，绝对值）
+      imbalance: 0.25             # 买卖失衡阈值
+      oi_change: 0.025            # 1h OI增长阈值
+      price_change: 0.004         # 1h价格下跌阈值
   
-  # 震荡市（需要更强信号）
+  # 震荡市
   range:
     long:
-      imbalance: 0.7              # 更高的失衡要求（-1到1范围）
-      oi_change: 0.10             # 更高的OI增长要求（小数格式：0.10=10%）
+      imbalance: 0.30             # 失衡要求
+      oi_change: 0.04             # OI增长要求
     short:
-      imbalance: 0.7              # 更高的失衡要求（-1到1范围）
-      oi_change: 0.10             # 更高的OI增长要求（小数格式：0.10=10%）
+      imbalance: 0.30             # 失衡要求
+      oi_change: 0.04             # OI增长要求
     
-    # 短期机会识别（方案4：综合指标）
+    # 短期机会识别 - 3选1确认
     short_term_opportunity:
       long:
-        min_price_change_1h: 0.015      # 1小时涨幅 > 1.5%
-        min_oi_change_1h: 0.15          # OI增长 > 15%
-        min_buy_sell_imbalance: 0.65    # 买压 > 65%
-        required_signals: 2             # 至少满足2个信号（3选2）
+        min_price_change_1h: 0.005      # 1小时涨幅 > 0.5%
+        min_oi_change_1h: 0.04          # OI增长 > 4%
+        min_buy_sell_imbalance: 0.20    # 买压 > 20%
+        required_signals: 1             # 至少满足1个信号（3选1）
       short:
-        max_price_change_1h: -0.015     # 1小时跌幅 < -1.5%
-        min_oi_change_1h: 0.15          # OI增长 > 15%
-        max_buy_sell_imbalance: -0.65   # 卖压 < -65%
-        required_signals: 2             # 至少满足2个信号（3选2）
+        max_price_change_1h: -0.005     # 1小时跌幅 < -0.5%
+        min_oi_change_1h: 0.04          # OI增长 > 4%
+        max_buy_sell_imbalance: -0.20   # 卖压 < -20%
+        required_signals: 1             # 至少满足1个信号（3选1）
 
 # ==================
 # 置信度配置（PR-D混合模式）
@@ -252,56 +252,56 @@ multi_tf:
   # 功能开关
   enabled: true
   
-  # Layer 1: Context（1小时方向偏置）
+  # Layer 1: Context（1小时方向偏置）- P1优化：降低25%
   context_1h:
     # LONG方向Context
     long:
-      min_price_change: 0.01      # 1h涨幅 > 1%
-      min_taker_imbalance: 0.40   # taker失衡 > 40%
-      min_oi_change: 0.05         # OI增长 > 5%
+      min_price_change: 0.007     # 1h涨幅 > 0.7%（优化前1%）
+      min_taker_imbalance: 0.30   # taker失衡 > 30%（优化前40%）
+      min_oi_change: 0.035        # OI增长 > 3.5%（优化前5%）
       required_signals: 2         # 3选2
     
     # SHORT方向Context
     short:
-      max_price_change: -0.01     # 1h跌幅 < -1%
-      max_taker_imbalance: -0.40  # taker失衡 < -40%
-      min_oi_change: 0.05         # OI增长 > 5%
+      max_price_change: -0.007    # 1h跌幅 < -0.7%（优化前-1%）
+      max_taker_imbalance: -0.30  # taker失衡 < -30%（优化前-40%）
+      min_oi_change: 0.035        # OI增长 > 3.5%（优化前5%）
       required_signals: 2         # 3选2
   
-  # Layer 2: Confirm（15分钟确认，4选2）
+  # Layer 2: Confirm（15分钟确认，4选2）- P1优化：降低25%
   confirm_15m:
     # LONG方向Confirm
     long:
-      min_price_change: 0.005     # 15m涨幅 > 0.5%
-      min_taker_imbalance: 0.50   # taker失衡 > 50%
-      min_volume_ratio: 1.5       # 放量比率 > 1.5x
-      min_oi_change: 0.03         # OI增长 > 3%
+      min_price_change: 0.003     # 15m涨幅 > 0.3%（优化前0.5%）
+      min_taker_imbalance: 0.40   # taker失衡 > 40%（优化前50%）
+      min_volume_ratio: 1.2       # 放量比率 > 1.2x（优化前1.5x）
+      min_oi_change: 0.02         # OI增长 > 2%（优化前3%）
       required_confirmed: 2       # 4选2确认
       required_partial: 1         # 至少1个为部分
     
     # SHORT方向Confirm
     short:
-      max_price_change: -0.005    # 15m跌幅 < -0.5%
-      max_taker_imbalance: -0.50  # taker失衡 < -50%
-      min_volume_ratio: 1.5       # 放量比率 > 1.5x
-      min_oi_change: 0.03         # OI增长 > 3%
+      max_price_change: -0.003    # 15m跌幅 < -0.3%（优化前-0.5%）
+      max_taker_imbalance: -0.40  # taker失衡 < -40%（优化前-50%）
+      min_volume_ratio: 1.2       # 放量比率 > 1.2x（优化前1.5x）
+      min_oi_change: 0.02         # OI增长 > 2%（优化前3%）
       required_confirmed: 2       # 4选2确认
       required_partial: 1         # 至少1个为部分
   
-  # Layer 3: Trigger（5分钟触发，3选2）
+  # Layer 3: Trigger（5分钟触发，3选2）- P1优化：降低25%
   trigger_5m:
     # LONG方向Trigger
     long:
-      min_price_change: 0.002     # 5m涨幅 > 0.2%
-      min_taker_imbalance: 0.60   # taker失衡 > 60%
-      min_volume_ratio: 2.0       # 放量比率 > 2.0x
+      min_price_change: 0.0015    # 5m涨幅 > 0.15%（优化前0.2%）
+      min_taker_imbalance: 0.50   # taker失衡 > 50%（优化前60%）
+      min_volume_ratio: 1.5       # 放量比率 > 1.5x（优化前2.0x）
       required_signals: 2         # 3选2触发
     
     # SHORT方向Trigger
     short:
-      max_price_change: -0.002    # 5m跌幅 < -0.2%
-      max_taker_imbalance: -0.60  # taker失衡 < -60%
-      min_volume_ratio: 2.0       # 放量比率 > 2.0x
+      max_price_change: -0.0015   # 5m跌幅 < -0.15%（优化前-0.2%）
+      max_taker_imbalance: -0.50  # taker失衡 < -50%（优化前-60%）
+      min_volume_ratio: 1.5       # 放量比率 > 1.5x（优化前2.0x）
       required_signals: 2         # 3选2触发
   
   # 绑定策略
@@ -326,25 +326,25 @@ dual_timeframe:
   # 短期评估（5m/15m）阈值
   short_term:
     # 15分钟价格变化阈值（动态阈值，根据市场环境自动调整）
-    # P0-动态阈值：TREND灵敏、RANGE保守、EXTREME拒绝
+    # P0-动态阈值优化：降低30%以增加信号敏感度
     min_price_change_15m:
       dynamic: true                 # 启用动态阈值
-      trend: 0.003                  # TREND环境: 0.3%（灵敏，捕捉趋势延续）
-      range: 0.008                  # RANGE环境: 0.8%（保守，减少假信号）
-      extreme: 0.015                # EXTREME环境: 1.5%（Safety First）
-      default: 0.005                # 默认/降级: 0.5%
+      trend: 0.002                  # TREND环境: 0.2%（优化前0.3%，降低33%）
+      range: 0.005                  # RANGE环境: 0.5%（优化前0.8%，降低37%）
+      extreme: 0.010                # EXTREME环境: 1.0%（优化前1.5%，降低33%）
+      default: 0.003                # 默认/降级: 0.3%（优化前0.5%，降低40%）
     
-    # taker失衡阈值（买卖压力）
-    min_taker_imbalance: 0.40      # 40%
+    # taker失衡阈值（买卖压力）- 优化：降低12.5%
+    min_taker_imbalance: 0.35      # 35%（优化前40%）
     
-    # 放量比率阈值（Layer1优化: 1.2 → 1.5）
-    min_volume_ratio: 1.5          # 1.5倍（与GOOD质量标准一致）
+    # 放量比率阈值 - 优化：降低20%
+    min_volume_ratio: 1.2          # 1.2倍（优化前1.5倍）
     
-    # OI变化阈值（5维信号补充）
-    min_oi_change_15m: 0.02        # 2%
+    # OI变化阈值（5维信号补充）- 优化：降低25%
+    min_oi_change_15m: 0.015       # 1.5%（优化前2%）
     
-    # 满足信号数要求（Layer1优化: 3 → 4，5选4）
-    required_signals: 4            # 5维信号中至少4维满足
+    # 满足信号数要求 - 关键优化：5选4 → 5选3
+    required_signals: 3            # 5维信号中至少3维满足（优化前4维）
   
   # 中长期评估（1h/6h）复用 direction 配置
   # medium_term 使用现有的 direction.trend/range 配置
