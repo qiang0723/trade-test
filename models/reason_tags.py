@@ -174,6 +174,12 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.STRONG_SELL_PRESSURE: ExecutabilityLevel.ALLOW,
     ReasonTag.OI_GROWING: ExecutabilityLevel.ALLOW,
     ReasonTag.OI_DECLINING: ExecutabilityLevel.ALLOW,
+    
+    # 三层触发状态类（PR-005新增）
+    ReasonTag.LTF_CONFIRMED: ExecutabilityLevel.ALLOW,         # 三层确认，正常执行
+    ReasonTag.LTF_PARTIAL_CONFIRM: ExecutabilityLevel.DEGRADE, # 部分确认，降级执行
+    ReasonTag.LTF_FAILED_CONFIRM: ExecutabilityLevel.BLOCK,    # 确认失败，阻断执行
+    ReasonTag.LTF_CONTEXT_DENIED: ExecutabilityLevel.BLOCK,    # Context拒绝，阻断执行
 }
 
 
