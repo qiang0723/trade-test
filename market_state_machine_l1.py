@@ -28,6 +28,14 @@ from models.reason_tags import ReasonTag
 from metrics_normalizer import normalize_metrics, normalize_metrics_with_trace
 import logging
 
+# PR-ARCH-03: 强类型配置编译器
+from l1_engine.threshold_compiler import ThresholdCompiler, ConfigValidationError
+from models.thresholds import Thresholds
+
+# PR-ARCH-01: 特征生成管道
+from l1_engine.feature_builder import FeatureBuilder, build_features_from_cache
+from models.feature_snapshot import FeatureSnapshot
+
 # PR-DUAL: 类型检查导入（避免循环导入）
 if TYPE_CHECKING:
     from models.dual_timeframe_result import (
@@ -459,7 +467,7 @@ class L1AdvisoryEngine:
     
     def __init__(self, config_path: str = None):
         """
-        初始化L1引擎
+        初始化L1引擎 (PR-ARCH-03增强：集成ThresholdCompiler)
         
         Args:
             config_path: 配置文件路径，默认为 config/l1_thresholds.yaml
@@ -468,6 +476,16 @@ class L1AdvisoryEngine:
         if config_path is None:
             config_path = os.path.join(os.path.dirname(__file__), 'config', 'l1_thresholds.yaml')
         
+        # PR-ARCH-03: 编译配置为强类型对象
+        try:
+            compiler = ThresholdCompiler()
+            self.thresholds_typed = compiler.compile(config_path)
+            logger.info(f"✅ Thresholds compiled (version: {self.thresholds_typed.version[:16]}...)")
+        except ConfigValidationError as e:
+            logger.error(f"❌ Config validation failed: {e}")
+            raise
+        
+        # 向后兼容：保留旧的config字典（渐进式迁移）
         self.config = self._load_config(config_path)
         
         # ⚠️ 启动时校验：防止配置错误（P1-3, PR-H）
@@ -476,6 +494,7 @@ class L1AdvisoryEngine:
         self._validate_reason_tag_spelling(self.config)        # 3. ReasonTag拼写校验（P1-3）
         self._validate_confidence_values(self.config)          # 4. Confidence值拼写校验（PR-H）
         
+        # 旧阈值字典（向后兼容）
         self.thresholds = self._flatten_thresholds(self.config)
         
         # 状态机状态
@@ -493,6 +512,9 @@ class L1AdvisoryEngine:
         
         # 双周期决策记忆管理（PR-DUAL）
         self.dual_decision_memory = DualDecisionMemory(self.config)
+        
+        # PR-ARCH-01: 特征生成器
+        self.feature_builder = FeatureBuilder(enable_trace=False)  # 线上环境关闭trace
         
         logger.info(f"L1AdvisoryEngine initialized with {len(self.thresholds)} thresholds")
     
@@ -996,6 +1018,9 @@ class L1AdvisoryEngine:
         - None-safe：缺6h时使用1h/15m退化判定
         - 使用_num/_abs helper
         
+        PR-ARCH-03改进：
+        - 使用强类型配置 thresholds_typed.market_regime.xxx
+        
         Args:
             data: 市场数据
         
@@ -1009,22 +1034,25 @@ class L1AdvisoryEngine:
         price_change_6h = self._num(data, 'price_change_6h')
         price_change_15m = self._num(data, 'price_change_15m')  # fallback
         
+        # PR-ARCH-03: 使用强类型配置
+        regime_thresholds = self.thresholds_typed.market_regime
+        
         # 1. EXTREME: 极端波动（优先级最高）
         if price_change_1h is not None:
             price_change_1h_abs = abs(price_change_1h)
-            if price_change_1h_abs > self.thresholds['extreme_price_change_1h']:
+            if price_change_1h_abs > regime_thresholds.extreme_price_change_1h:
                 return MarketRegime.EXTREME, regime_tags
         
         # 2. TREND: 趋势市
         # 2.1 中期趋势（6小时）
         if price_change_6h is not None:
             price_change_6h_abs = abs(price_change_6h)
-            if price_change_6h_abs > self.thresholds['trend_price_change_6h']:
+            if price_change_6h_abs > regime_thresholds.trend_price_change_6h:
                 return MarketRegime.TREND, regime_tags
         elif price_change_15m is not None:
             # PATCH-P0-02: 缺6h时使用15m退化判定（更保守阈值）
             price_change_15m_abs = abs(price_change_15m)
-            fallback_threshold = self.thresholds['trend_price_change_6h'] * 0.5  # 15m用更低阈值
+            fallback_threshold = regime_thresholds.trend_price_change_6h * 0.5  # 15m用更低阈值
             if price_change_15m_abs > fallback_threshold:
                 regime_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)  # 标记退化
                 logger.debug("Regime detection using 15m fallback (6h missing)")
@@ -1033,7 +1061,7 @@ class L1AdvisoryEngine:
         # 2.2 短期趋势（1小时）- 方案1: 捕获短期机会
         if price_change_1h is not None:
             price_change_1h_abs = abs(price_change_1h)
-            if price_change_1h_abs > self.thresholds.get('short_term_trend_1h', 0.02):
+            if price_change_1h_abs > regime_thresholds.short_term_trend_1h:
                 regime_tags.append(ReasonTag.SHORT_TERM_TREND)
                 return MarketRegime.TREND, regime_tags
         
@@ -1067,6 +1095,9 @@ class L1AdvisoryEngine:
         - None-safe：关键字段缺失时跳过规则（不误DENY）
         - 使用_num/_abs/_compare helper
         
+        PR-ARCH-03改进：
+        - 使用强类型配置 thresholds_typed.risk_exposure.xxx
+        
         Args:
             data: 市场数据
             regime: 市场环境
@@ -1075,6 +1106,9 @@ class L1AdvisoryEngine:
             (是否允许风险敞口, 原因标签列表)
         """
         tags = []
+        
+        # PR-ARCH-03: 使用强类型配置
+        risk_thresholds = self.thresholds_typed.risk_exposure
         
         # 1. 极端行情
         if regime == MarketRegime.EXTREME:
@@ -1086,8 +1120,8 @@ class L1AdvisoryEngine:
         oi_change_1h = self._num(data, 'oi_change_1h')
         
         if price_change_1h is not None and oi_change_1h is not None:
-            if (abs(price_change_1h) > self.thresholds['liquidation_price_change'] and 
-                oi_change_1h < self.thresholds['liquidation_oi_drop']):
+            if (abs(price_change_1h) > risk_thresholds.liquidation.price_change and 
+                oi_change_1h < risk_thresholds.liquidation.oi_drop):
                 tags.append(ReasonTag.LIQUIDATION_PHASE)
                 return False, tags
         else:
@@ -1101,8 +1135,8 @@ class L1AdvisoryEngine:
         
         if funding_rate_value is not None and oi_change_6h is not None:
             funding_rate_abs = abs(funding_rate_value)
-            if (funding_rate_abs > self.thresholds['crowding_funding_abs'] and 
-                oi_change_6h > self.thresholds['crowding_oi_growth']):
+            if (funding_rate_abs > risk_thresholds.crowding.funding_abs and 
+                oi_change_6h > risk_thresholds.crowding.oi_growth):
                 tags.append(ReasonTag.CROWDING_RISK)
                 return False, tags
         else:
@@ -1116,7 +1150,7 @@ class L1AdvisoryEngine:
         
         if volume_1h is not None and volume_24h is not None and volume_24h > 0:
             volume_avg = volume_24h / 24
-            if volume_1h > volume_avg * self.thresholds['extreme_volume_multiplier']:
+            if volume_1h > volume_avg * risk_thresholds.extreme_volume.multiplier:
                 tags.append(ReasonTag.EXTREME_VOLUME)
                 return False, tags
         else:
@@ -1149,6 +1183,9 @@ class L1AdvisoryEngine:
         - None-safe：关键字段缺失时最多降级到UNCERTAIN（不直接POOR）
         - 使用_num/_abs helper
         
+        PR-ARCH-03改进：
+        - 使用强类型配置 thresholds_typed.trade_quality.xxx
+        
         Args:
             data: 市场数据
             regime: 市场环境
@@ -1158,6 +1195,9 @@ class L1AdvisoryEngine:
         """
         tags = []
         
+        # PR-ARCH-03: 使用强类型配置
+        quality_thresholds = self.thresholds_typed.trade_quality
+        
         # 1. 吸纳风险（PATCH-P0-02: None-safe）
         imbalance_value = self._num(data, 'taker_imbalance_1h')
         volume_1h = self._num(data, 'volume_1h')
@@ -1166,8 +1206,8 @@ class L1AdvisoryEngine:
         if imbalance_value is not None and volume_1h is not None and volume_24h is not None and volume_24h > 0:
             imbalance_abs = abs(imbalance_value)
             volume_avg = volume_24h / 24
-            if (imbalance_abs > self.thresholds['absorption_imbalance'] and 
-                volume_1h < volume_avg * self.thresholds['absorption_volume_ratio']):
+            if (imbalance_abs > quality_thresholds.absorption.imbalance and 
+                volume_1h < volume_avg * quality_thresholds.absorption.volume_ratio):
                 tags.append(ReasonTag.ABSORPTION_RISK)
                 return TradeQuality.POOR, tags
         elif imbalance_value is None or volume_1h is None or volume_24h is None:
@@ -1193,8 +1233,8 @@ class L1AdvisoryEngine:
             if is_first_call:
                 logger.debug(f"[{symbol}] First call for noise detection, funding_rate history initialized")
             
-            if (funding_volatility > self.thresholds['noisy_funding_volatility'] and 
-                abs(funding_rate) < self.thresholds['noisy_funding_abs']):
+            if (funding_volatility > quality_thresholds.noise.funding_volatility and 
+                abs(funding_rate) < quality_thresholds.noise.funding_abs):
                 tags.append(ReasonTag.NOISY_MARKET)
                 return TradeQuality.UNCERTAIN, tags
         else:
@@ -1205,10 +1245,10 @@ class L1AdvisoryEngine:
         oi_change_1h = self._num(data, 'oi_change_1h')
         
         if price_change_1h is not None and oi_change_1h is not None:
-            if ((price_change_1h > self.thresholds['rotation_price_threshold'] and 
-                 oi_change_1h < -self.thresholds['rotation_oi_threshold']) or
-                (price_change_1h < -self.thresholds['rotation_price_threshold'] and 
-                 oi_change_1h > self.thresholds['rotation_oi_threshold'])):
+            if ((price_change_1h > quality_thresholds.rotation.price_threshold and 
+                 oi_change_1h < -quality_thresholds.rotation.oi_threshold) or
+                (price_change_1h < -quality_thresholds.rotation.price_threshold and 
+                 oi_change_1h > quality_thresholds.rotation.oi_threshold)):
                 tags.append(ReasonTag.ROTATION_RISK)
                 return TradeQuality.POOR, tags
         else:
@@ -1222,8 +1262,8 @@ class L1AdvisoryEngine:
             oi_change_1h_abs = self._abs(oi_change_1h) if oi_change_1h is not None else None
             
             if imbalance_abs is not None and oi_change_1h_abs is not None:
-                if (imbalance_abs < self.thresholds['range_weak_imbalance'] and 
-                    oi_change_1h_abs < self.thresholds['range_weak_oi']):
+                if (imbalance_abs < quality_thresholds.range_weak.imbalance and 
+                    oi_change_1h_abs < quality_thresholds.range_weak.oi):
                     tags.append(ReasonTag.WEAK_SIGNAL_IN_RANGE)
                     return TradeQuality.UNCERTAIN, tags
             else:
@@ -2827,6 +2867,32 @@ class L1AdvisoryEngine:
         
         logger.info(f"[{symbol}] Starting dual-timeframe L1 decision pipeline")
         
+        # ===== PR-ARCH-01: Step 0.5: 特征生成（FeatureBuilder）=====
+        try:
+            # 获取data_cache实例（单例）
+            from data_cache import get_cache
+            data_cache = get_cache()
+            
+            # 构建FeatureSnapshot
+            feature_snapshot = self.feature_builder.build(symbol, data, data_cache=data_cache)
+            logger.debug(f"[{symbol}] FeatureSnapshot built: version={feature_snapshot.metadata.feature_version.value}")
+            
+            # 向后兼容：将FeatureSnapshot转换为dict（旧代码仍使用dict）
+            # TODO: 后续可直接使用feature_snapshot，不需要转换
+            data_from_snapshot = feature_snapshot.to_legacy_format()
+            
+            # 保留原始data中的非特征字段（如source_timestamp等）
+            for key, value in data.items():
+                if key not in data_from_snapshot and not key.startswith('_'):
+                    data_from_snapshot[key] = value
+            
+            # 使用FeatureBuilder生成的数据（已经规范化为decimal格式）
+            data = data_from_snapshot
+            
+        except Exception as e:
+            logger.error(f"[{symbol}] FeatureBuilder failed: {e}, falling back to old flow")
+            # Fallback: 如果FeatureBuilder失败，继续使用旧流程
+        
         # ===== Step 1: 数据验证（全局）=====
         is_valid, normalized_data, fail_tag, norm_trace = self._validate_data(data)
         global_risk_tags = []
@@ -2841,22 +2907,31 @@ class L1AdvisoryEngine:
         
         data = normalized_data
         
-        # ===== Step 1.5: Lookback Coverage 检查（PATCH-2）=====
+        # ===== Step 1.5: Lookback Coverage 检查（PATCH-2 + P0-CodeFix-1）=====
         coverage_ok, coverage_tags = self._check_lookback_coverage(data)
         if not coverage_ok:
             logger.warning(f"[{symbol}] Lookback coverage check failed: {[t.value for t in coverage_tags]}")
-            # 对于短期决策关键的窗口（5m/15m）缺失，直接返回 NO_TRADE
-            critical_gaps = [ReasonTag.DATA_GAP_5M, ReasonTag.DATA_GAP_15M]
-            if any(tag in coverage_tags for tag in critical_gaps):
-                logger.warning(f"[{symbol}] Critical window data gap, returning dual NO_TRADE")
-                return self._build_dual_no_trade_result(symbol, coverage_tags, regime=MarketRegime.RANGE)
-            else:
-                # 非关键窗口缺失（1h/6h），记录但继续（可能降级）
-                global_risk_tags.extend(coverage_tags)
-                logger.info(f"[{symbol}] Non-critical window gap, continuing with degraded quality")
+            # P0-CodeFix-1: 移除全局短路，改为记录标签，让后续独立评估处理
+            
+            # 对于短期关键窗口缺失（5m/15m），记录但不全局短路
+            critical_gaps_ltf = [ReasonTag.DATA_GAP_5M, ReasonTag.DATA_GAP_15M]
+            if any(tag in coverage_tags for tag in critical_gaps_ltf):
+                logger.warning(f"[{symbol}] Short-term window data gap detected, will block short_term only")
+                # 记录gap标签，后续short_term评估会检测到并返回NO_TRADE
+                global_risk_tags.extend([tag for tag in coverage_tags if tag in critical_gaps_ltf])
+                # P0-CodeFix-1: 不return，让medium_term有机会评估
+            
+            # 对于中期窗口缺失（1h/6h），记录以供降级逻辑使用
+            critical_gaps_mtf = [ReasonTag.DATA_GAP_1H, ReasonTag.DATA_GAP_6H]
+            if any(tag in coverage_tags for tag in critical_gaps_mtf):
+                logger.info(f"[{symbol}] Medium-term window data gap detected, may degrade to 1h-only")
+                # 记录gap标签，后续medium_term评估会检测到并降级或NO_TRADE
+                global_risk_tags.extend([tag for tag in coverage_tags if tag in critical_gaps_mtf])
+                # P0-CodeFix-1: 不return，让降级逻辑处理
         
-        # ===== Step 1.6: Critical Fields 检查（P0-03重构：独立标记，不过度短路）=====
+        # ===== Step 1.6: Critical Fields 检查（P0-03 + P0-CodeFix-1增强）=====
         # P0-03改进：short和medium独立检查，不相互短路
+        # P0-CodeFix-1增强：同时检查字段缺失和coverage gap
         
         # 检查短期关键字段（5m/15m）
         critical_short_fields = ['price_change_5m', 'price_change_15m', 'oi_change_5m', 'oi_change_15m',
@@ -2864,9 +2939,13 @@ class L1AdvisoryEngine:
         missing_short = [f for f in critical_short_fields if data.get(f) is None]
         
         has_short_data = True
-        if missing_short:
-            logger.warning(f"[{symbol}] Short-term critical fields missing: {missing_short}")
-            global_risk_tags.append(ReasonTag.DATA_INCOMPLETE_LTF)
+        # P0-CodeFix-1: 同时检查字段缺失和coverage gap标签
+        has_ltf_gap = any(tag in global_risk_tags for tag in [ReasonTag.DATA_GAP_5M, ReasonTag.DATA_GAP_15M])
+        
+        if missing_short or has_ltf_gap:
+            logger.warning(f"[{symbol}] Short-term evaluation blocked: fields={missing_short}, has_gap={has_ltf_gap}")
+            if ReasonTag.DATA_INCOMPLETE_LTF not in global_risk_tags:
+                global_risk_tags.append(ReasonTag.DATA_INCOMPLETE_LTF)
             has_short_data = False
             # P0-03: 不立即返回，让medium_term有机会评估
         
@@ -2875,11 +2954,28 @@ class L1AdvisoryEngine:
         missing_medium = [f for f in critical_medium_fields if data.get(f) is None]
         
         has_medium_data = True
-        if missing_medium:
-            logger.info(f"[{symbol}] Medium-term critical fields missing: {missing_medium}")
-            global_risk_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
+        has_medium_6h_data = True  # P0-CodeFix-2: 新增6h数据标志
+        
+        # P0-CodeFix-2: 区分1h和6h缺失，支持降级
+        missing_1h = [f for f in ['price_change_1h', 'oi_change_1h'] if data.get(f) is None]
+        missing_6h = [f for f in ['price_change_6h', 'oi_change_6h'] if data.get(f) is None]
+        has_1h_gap = ReasonTag.DATA_GAP_1H in global_risk_tags
+        has_6h_gap = ReasonTag.DATA_GAP_6H in global_risk_tags
+        
+        if missing_1h or has_1h_gap:
+            # 1h缺失 → 完全无法评估medium-term
+            logger.warning(f"[{symbol}] Medium-term evaluation blocked: 1h data missing (fields={missing_1h}, gap={has_1h_gap})")
+            if ReasonTag.DATA_INCOMPLETE_MTF not in global_risk_tags:
+                global_risk_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
             has_medium_data = False
+            has_medium_6h_data = False
             # P0-03: 不立即返回，让short_term有机会评估（如果有数据）
+        elif missing_6h or has_6h_gap:
+            # 6h缺失但1h完整 → 可降级评估
+            logger.info(f"[{symbol}] Medium-term will degrade to 1h-only: 6h data missing (fields={missing_6h}, gap={has_6h_gap})")
+            has_medium_6h_data = False
+            # P0-CodeFix-2: has_medium_data=True（可降级评估），但has_medium_6h_data=False（标记降级）
+            # 不添加DATA_INCOMPLETE_MTF，因为可以降级评估
         
         # P0-03: 只有两者都缺数据时才全局短路
         if not has_short_data and not has_medium_data:
@@ -3249,7 +3345,7 @@ class L1AdvisoryEngine:
         regime: MarketRegime
     ) -> 'TimeframeConclusion':
         """
-        中长期评估（1h/6h）- P0-01: None-safe重构
+        中长期评估（1h/6h）- P0-01 + P0-CodeFix-2
         
         使用1小时和6小时的数据进行趋势判断
         
@@ -3257,6 +3353,11 @@ class L1AdvisoryEngine:
         - 禁止None→0伪中性
         - 关键字段缺失显性标记DATA_INCOMPLETE_MTF
         - 使用None-safe读取
+        
+        P0-CodeFix-2改进：
+        - 6h缺失时降级为1h-only评估（不硬失败）
+        - 仅1h缺失时才硬失败NO_TRADE
+        - 降级时标记MTF_DEGRADED_TO_1H
         """
         from models.dual_timeframe_result import TimeframeConclusion
         from models.enums import Timeframe
@@ -3271,23 +3372,24 @@ class L1AdvisoryEngine:
         taker_imbalance_1h = self._num(data, 'taker_imbalance_1h')  # P0-02: 统一字段
         funding_rate = self._num(data, 'funding_rate')
         
-        # P0-01: 检查关键字段完整性
-        critical_fields = {
-            'price_change_1h': price_change_1h,
-            'price_change_6h': price_change_6h,
-            'oi_change_1h': oi_change_1h,
-            'oi_change_6h': oi_change_6h,
-            'taker_imbalance_1h': taker_imbalance_1h
-        }
+        # P0-CodeFix-2: 区分1h和6h缺失，支持降级
+        missing_1h = []
+        if price_change_1h is None:
+            missing_1h.append('price_change_1h')
+        if oi_change_1h is None:
+            missing_1h.append('oi_change_1h')
         
-        missing_fields = [k for k, v in critical_fields.items() if v is None]
+        missing_6h = []
+        if price_change_6h is None:
+            missing_6h.append('price_change_6h')
+        if oi_change_6h is None:
+            missing_6h.append('oi_change_6h')
         
-        if missing_fields:
-            # 显性标记：中期关键字段缺失
-            logger.warning(f"[{symbol}] Medium-term critical fields missing: {missing_fields}")
+        # P0-CodeFix-2: 1h缺失 → 完全无法评估（硬失败）
+        if missing_1h:
+            logger.warning(f"[{symbol}] Medium-term blocked: 1h critical fields missing: {missing_1h}")
             reason_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
             
-            # 构造NO_TRADE结论（不伪装成"无变化"）
             return TimeframeConclusion(
                 timeframe=Timeframe.MEDIUM_TERM,
                 timeframe_label="1h/6h",
@@ -3298,18 +3400,187 @@ class L1AdvisoryEngine:
                 execution_permission=ExecutionPermission.DENY,
                 executable=False,
                 reason_tags=reason_tags,
-                key_metrics={'missing_fields': missing_fields}
+                key_metrics={
+                    'missing_1h_fields': missing_1h,
+                    'evaluation_mode': '1h_missing_hard_fail'
+                }
             )
         
-        # P0-01: key_metrics使用实际值（可能为None，但不伪装成0）
-        # funding_rate可以缺失（非关键），使用0.0作为默认
+        # P0-CodeFix-2: 6h缺失但1h完整 → 降级评估
+        is_6h_degraded = False
+        if missing_6h:
+            logger.info(f"[{symbol}] Medium-term degrading to 1h-only: 6h fields missing: {missing_6h}")
+            is_6h_degraded = True
+            reason_tags.append(ReasonTag.MTF_DEGRADED_TO_1H)
+            reason_tags.append(ReasonTag.DATA_GAP_6H)
+        
+        # ===== 评估模式选择 =====
+        if is_6h_degraded:
+            # P0-CodeFix-2: 1h-only降级评估
+            decision, confidence, eval_tags, key_metrics = self._evaluate_medium_term_1h_only(
+                symbol, data, regime,
+                price_change_1h, oi_change_1h, taker_imbalance_1h, funding_rate
+            )
+            reason_tags.extend(eval_tags)
+            
+            # 降级约束
+            exec_perm = ExecutionPermission.ALLOW_REDUCED  # 强制降级执行
+            
+            # 降级置信度上限：不超过HIGH
+            if confidence == Confidence.ULTRA:
+                confidence = Confidence.HIGH
+                logger.debug(f"[{symbol}] Confidence capped to HIGH due to 6h degradation")
+            
+            key_metrics['evaluation_mode'] = '1h_only_degraded'
+            timeframe_label = "1h-only(degraded)"
+        else:
+            # 完整评估（1h+6h）
+            decision, confidence, eval_tags, key_metrics = self._evaluate_medium_term_full(
+                symbol, data, regime,
+                price_change_1h, price_change_6h,
+                oi_change_1h, oi_change_6h,
+                taker_imbalance_1h, funding_rate
+            )
+            reason_tags.extend(eval_tags)
+            exec_perm = self._compute_execution_permission(reason_tags)
+            
+            key_metrics['evaluation_mode'] = 'full_1h_6h'
+            timeframe_label = "1h/6h"
+        
+        # 质量评估
+        quality, quality_tags = self._eval_trade_quality(symbol, data, regime)
+        reason_tags.extend(quality_tags)
+        
+        # 构造结论
+        conclusion = TimeframeConclusion(
+            timeframe=Timeframe.MEDIUM_TERM,
+            timeframe_label=timeframe_label,
+            decision=decision,
+            confidence=confidence,
+            market_regime=regime,
+            trade_quality=quality,
+            execution_permission=exec_perm,
+            executable=self._compute_tf_executable(decision, confidence, exec_perm, quality),
+            reason_tags=reason_tags,
+            key_metrics=key_metrics
+        )
+        
+        logger.debug(f"[{symbol}] Medium-term: {decision.value}, mode={key_metrics['evaluation_mode']}, conf={confidence.value}")
+        
+        return conclusion
+    
+    def _evaluate_medium_term_1h_only(
+        self,
+        symbol: str,
+        data: Dict,
+        regime: MarketRegime,
+        price_change_1h: float,
+        oi_change_1h: float,
+        taker_imbalance_1h: Optional[float],
+        funding_rate: Optional[float]
+    ) -> Tuple[Decision, Confidence, List[ReasonTag], Dict]:
+        """
+        P0-CodeFix-2: 1h-only降级评估（6h缺失时使用）
+        
+        最小规则：
+        - 仅使用1h指标
+        - 降级confidence上限
+        - 标记降级状态
+        
+        Returns:
+            (decision, confidence, reason_tags, key_metrics)
+        """
+        medium_config = self.config.get('dual_timeframe', {}).get('medium_term', {})
+        
+        # 1h阈值（比完整模式更保守）
+        min_price_change = medium_config.get('min_price_change_1h', 0.015)  # 1.5%
+        min_oi_change = medium_config.get('min_oi_change_1h', 0.04)  # 4%
+        min_taker_imbalance = medium_config.get('min_taker_imbalance', 0.55)  # 55%
+        
+        # None-safe处理（非关键字段可用默认值）
+        if taker_imbalance_1h is None:
+            taker_imbalance_1h = 0.5  # 中性默认值
+        if funding_rate is None:
+            funding_rate = 0.0
+        
+        reason_tags = []
+        
+        # LONG信号（降级模式：需要2/3信号）
+        long_signals = 0
+        if price_change_1h > min_price_change:
+            long_signals += 1
+        if oi_change_1h > min_oi_change:
+            long_signals += 1
+        if taker_imbalance_1h > min_taker_imbalance:
+            long_signals += 1
+        
+        # SHORT信号
+        short_signals = 0
+        if price_change_1h < -min_price_change:
+            short_signals += 1
+        if oi_change_1h > min_oi_change:  # OI增长（空头增仓）
+            short_signals += 1
+        if taker_imbalance_1h < -min_taker_imbalance:
+            short_signals += 1
+        
+        # 决策（降级模式：需要2/3信号）
+        required_signals = 2
+        
+        if long_signals >= required_signals and long_signals > short_signals:
+            decision = Decision.LONG
+            confidence = Confidence.MEDIUM if long_signals == 2 else Confidence.HIGH
+            reason_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
+        elif short_signals >= required_signals and short_signals > long_signals:
+            decision = Decision.SHORT
+            confidence = Confidence.MEDIUM if short_signals == 2 else Confidence.HIGH
+            reason_tags.append(ReasonTag.STRONG_SELL_PRESSURE)
+        else:
+            decision = Decision.NO_TRADE
+            confidence = Confidence.LOW
+            reason_tags.append(ReasonTag.NO_CLEAR_DIRECTION)
+        
         key_metrics = {
-            'price_change_1h': price_change_1h,  # 此时已确保非None
+            'price_change_1h': price_change_1h,
+            'oi_change_1h': oi_change_1h,
+            'taker_imbalance_1h': taker_imbalance_1h,
+            'funding_rate': funding_rate,
+            'long_signals': long_signals,
+            'short_signals': short_signals,
+            'required_signals': required_signals
+        }
+        
+        logger.debug(f"[{symbol}] 1h-only eval: LONG={long_signals}/3, SHORT={short_signals}/3, decision={decision.value}")
+        
+        return decision, confidence, reason_tags, key_metrics
+    
+    def _evaluate_medium_term_full(
+        self,
+        symbol: str,
+        data: Dict,
+        regime: MarketRegime,
+        price_change_1h: float,
+        price_change_6h: float,
+        oi_change_1h: float,
+        oi_change_6h: float,
+        taker_imbalance_1h: Optional[float],
+        funding_rate: Optional[float]
+    ) -> Tuple[Decision, Confidence, List[ReasonTag], Dict]:
+        """
+        完整模式：使用1h+6h数据（原有逻辑）
+        
+        Returns:
+            (decision, confidence, reason_tags, key_metrics)
+        """
+        reason_tags = []
+        
+        # 构造key_metrics
+        key_metrics = {
+            'price_change_1h': price_change_1h,
             'price_change_6h': price_change_6h,
             'oi_change_1h': oi_change_1h,
             'oi_change_6h': oi_change_6h,
-            'taker_imbalance_1h': taker_imbalance_1h,  # P0-02: 统一字段名
-            'funding_rate': funding_rate if funding_rate is not None else 0.0  # 非关键字段可默认
+            'taker_imbalance_1h': taker_imbalance_1h,
+            'funding_rate': funding_rate if funding_rate is not None else 0.0
         }
         
         # 中长期方向判断（复用现有的方向评估逻辑）
@@ -3335,33 +3606,21 @@ class L1AdvisoryEngine:
             decision = Decision.NO_TRADE
             reason_tags.append(ReasonTag.NO_CLEAR_DIRECTION)
         
-        # 质量评估
-        quality, quality_tags = self._eval_trade_quality(symbol, data, regime)
-        reason_tags.extend(quality_tags)
+        # 置信度计算（简化版，基于信号强度）
+        # 这里可以根据1h+6h综合信号强度计算
+        if decision != Decision.NO_TRADE:
+            # 检查6h趋势强度
+            strong_6h = abs(price_change_6h) > 0.03 and abs(oi_change_6h) > 0.06
+            if strong_6h:
+                confidence = Confidence.ULTRA
+            else:
+                confidence = Confidence.HIGH
+        else:
+            confidence = Confidence.LOW
         
-        # 置信度计算（复用现有逻辑）
-        confidence = self._compute_confidence(decision, regime, quality, reason_tags)
+        logger.debug(f"[{symbol}] Full eval (1h+6h): decision={decision.value}, conf={confidence.value}")
         
-        # 执行许可
-        exec_perm = self._compute_execution_permission(reason_tags)
-        
-        # 构造结论
-        conclusion = TimeframeConclusion(
-            timeframe=Timeframe.MEDIUM_TERM,
-            timeframe_label="1h/6h",
-            decision=decision,
-            confidence=confidence,
-            market_regime=regime,
-            trade_quality=quality,
-            execution_permission=exec_perm,
-            executable=self._compute_tf_executable(decision, confidence, exec_perm, quality),
-            reason_tags=reason_tags,
-            key_metrics=key_metrics
-        )
-        
-        logger.debug(f"[{symbol}] Medium-term: {decision.value}, conf={confidence.value}, exec={conclusion.executable}")
-        
-        return conclusion
+        return decision, confidence, reason_tags, key_metrics
     
     def _compute_tf_executable(
         self, 

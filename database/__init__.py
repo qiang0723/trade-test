@@ -51,6 +51,30 @@ class L1DatabaseModular:
         self.dual_advisory = DualAdvisoryRepository(self.connection)
         self.pipeline = PipelineRepository(self.connection)
     
+    # ========================================
+    # 向后兼容方法（兼容旧API）
+    # ========================================
+    
+    def save_advisory_result(self, symbol: str, result):
+        """兼容旧API：保存单周期决策结果"""
+        return self.advisory.save(symbol, result)
+    
+    def save_dual_advisory_result(self, symbol: str, result):
+        """兼容旧API：保存双周期决策结果"""
+        return self.dual_advisory.save(symbol, result)
+    
+    def save_pipeline_steps(self, advisory_id: int, symbol: str, steps: list):
+        """兼容旧API：保存管道步骤"""
+        return self.pipeline.save(advisory_id, symbol, steps)
+    
+    def get_advisory_history(self, symbol: str, hours: int = 24, limit: int = 1000):
+        """兼容旧API：获取单周期历史"""
+        return self.advisory.get_history(symbol, hours, limit)
+    
+    def get_dual_advisory_history(self, symbol: str, hours: int = 24, limit: int = 1000):
+        """兼容旧API：获取双周期历史"""
+        return self.dual_advisory.get_history(symbol, hours, limit)
+    
     def close(self):
         """关闭数据库连接"""
         self.connection.close()

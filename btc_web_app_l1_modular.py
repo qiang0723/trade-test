@@ -11,7 +11,7 @@ L1 Advisory Layer - Flask Web Application (模块化版本)
 from flask import Flask, jsonify, render_template
 from flask_cors import CORS
 from market_state_machine_l1 import L1AdvisoryEngine
-from database_l1 import L1Database
+from database import L1DatabaseModular  # 使用新模块化数据库
 from binance_data_fetcher import get_fetcher
 import logging
 from datetime import datetime
@@ -30,7 +30,7 @@ CORS(app)
 
 # 初始化核心组件
 advisory_engine = L1AdvisoryEngine()
-l1_db = L1Database()
+l1_db = L1DatabaseModular()  # 使用新模块化数据库
 binance_fetcher = get_fetcher()
 
 logger.info("Flask app (modular) initialized with L1 Advisory Engine")
@@ -128,19 +128,13 @@ logger.info("✅ All API routes registered (modular)")
 
 @app.route('/')
 def index():
-    """L1 Advisory主页 - 双周期统一界面"""
-    return render_template('index_l1_unified.html')
-
-
-@app.route('/single')
-def index_single():
-    """L1 Advisory单周期页面（旧版）"""
-    return render_template('index_l1.html')
+    """L1 Advisory主页 - 双周期决策页面"""
+    return render_template('index_l1_dual.html')
 
 
 @app.route('/dual')
 def index_dual():
-    """L1 Advisory双周期决策页面（独立版）"""
+    """L1 Advisory双周期决策页面（别名）"""
     return render_template('index_l1_dual.html')
 
 
