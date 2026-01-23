@@ -146,17 +146,14 @@ class SchedulerService:
                     else:
                         break
                 
-                # 生成L1决策并保存
+                # 生成L1双周期决策并保存
                 try:
-                    result = self.advisory_engine.on_new_tick(symbol, market_data)
-                    advisory_id = self.l1_db.save_advisory_result(symbol, result)
-                    
-                    if hasattr(self.advisory_engine, 'last_pipeline_steps'):
-                        self.l1_db.save_pipeline_steps(advisory_id, symbol, self.advisory_engine.last_pipeline_steps)
+                    result = self.advisory_engine.on_new_tick_dual(symbol, market_data)
+                    self.l1_db.save_dual_advisory_result(symbol, result)
                     
                     logger.info(
-                        f"✅ Periodic update saved: {symbol} → {result.decision.value} "
-                        f"(confidence: {result.confidence.value}, executable: {result.executable})"
+                        f"✅ Periodic update saved: {symbol} → {result.alignment.recommended_action.value} "
+                        f"(short: {result.short_term.decision.value}, medium: {result.medium_term.decision.value})"
                     )
                 
                 except Exception as e:

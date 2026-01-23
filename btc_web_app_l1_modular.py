@@ -99,21 +99,18 @@ config_observer = config_watcher.start()
 # 注册API路由（模块化）
 # ========================================
 
-from api.l1_advisory_routes import init_routes as init_l1_routes
 from api.dual_advisory_routes import init_routes as init_dual_routes
 from api.history_routes import init_routes as init_history_routes
 from api.config_routes import init_routes as init_config_routes
 from api.market_routes import init_routes as init_market_routes
 
 # 初始化所有路由（依赖注入）
-l1_advisory_bp = init_l1_routes(advisory_engine, l1_db, binance_fetcher)
 dual_advisory_bp = init_dual_routes(advisory_engine, l1_db, binance_fetcher)
 history_bp = init_history_routes(advisory_engine, l1_db)
 config_bp = init_config_routes(advisory_engine)
 market_bp = init_market_routes(advisory_engine)
 
 # 注册蓝图
-app.register_blueprint(l1_advisory_bp, url_prefix='/api/l1')
 app.register_blueprint(dual_advisory_bp, url_prefix='/api/l1')
 app.register_blueprint(history_bp, url_prefix='/api/l1')
 app.register_blueprint(config_bp, url_prefix='/api/l1')
