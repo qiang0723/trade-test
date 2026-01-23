@@ -6,6 +6,9 @@
 2. 计算多周期指标（5m/15m/1h/6h）
 3. 数据缓存和增量更新
 4. 数据质量验证
+
+PR-ARCH-01改进：
+- 集成FeatureBuilder，确保回测与线上特征口径一致
 """
 
 import os
@@ -14,6 +17,12 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import logging
+
+# PR-ARCH-01: 导入FeatureBuilder
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from l1_engine.feature_builder import build_features_from_dict
+from models.feature_snapshot import FeatureSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -301,8 +310,8 @@ class HistoricalDataLoader:
         oi_change_1h = max(-0.3, min(0.5, oi_change_1h))
         oi_change_6h = max(-0.3, min(0.5, oi_change_6h))
         
-        # 构造L1输入数据
-        market_data = {
+        # 构造原始特征数据（decimal格式）
+        raw_features = {
             'price': current_price,
             'timestamp': timestamp,
             
@@ -321,6 +330,7 @@ class HistoricalDataLoader:
             # 买卖失衡
             'taker_imbalance_5m': taker_imbalance_5m,
             'taker_imbalance_15m': taker_imbalance_15m,
+            'taker_imbalance_1h': buy_sell_imbalance,
             'buy_sell_imbalance': buy_sell_imbalance,
             
             # OI变化（回测模式：基于价格和成交量估算）
@@ -331,7 +341,29 @@ class HistoricalDataLoader:
             
             # 资金费率（回测中使用默认值）
             'funding_rate': 0.0001,
+            'open_interest': 0,
+            
+            # 元数据
+            '_metadata': {
+                'percentage_format': 'decimal',
+                'source': 'backtest',
+                'version': '1.0'
+            }
         }
+        
+        # PR-ARCH-01: 使用FeatureBuilder规范化（确保与线上口径一致）
+        try:
+            feature_snapshot = build_features_from_dict(
+                symbol="BACKTEST",
+                features_dict=raw_features,
+                coverage_dict=None
+            )
+            market_data = feature_snapshot.to_legacy_format()
+            market_data['timestamp'] = timestamp
+            market_data['price'] = current_price
+        except Exception as e:
+            logger.warning(f"FeatureBuilder failed in backtest: {e}, using raw features")
+            market_data = raw_features
         
         return market_data
     
