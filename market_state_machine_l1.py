@@ -2878,6 +2878,34 @@ class L1AdvisoryEngine:
         
         logger.info(f"[{symbol}] Starting dual-timeframe L1 decision pipeline")
         
+        # ===== PR-ARCH-02: 新架构使用示例（TODO: 完全切换到新架构）=====
+        # 
+        # 新架构流程（3步）：
+        # 1. FeatureBuilder生成特征 ✅（已集成）
+        # 2. DecisionCore评估决策 ⚠️（待切换）
+        # 3. DecisionGate应用频控 ⚠️（待切换）
+        # 
+        # 示例代码：
+        # try:
+        #     # Step 1: 特征生成（已完成）
+        #     from data_cache import get_cache
+        #     feature_snapshot = self.feature_builder.build(symbol, data, get_cache())
+        #     
+        #     # Step 2: DecisionCore评估（纯函数）
+        #     draft = self.decision_core.evaluate_dual(
+        #         feature_snapshot, self.thresholds_typed, symbol
+        #     )
+        #     
+        #     # Step 3: DecisionGate应用（频控）
+        #     final = self.decision_gate.apply_dual(
+        #         draft, symbol, datetime.now(), self.thresholds_typed
+        #     )
+        #     
+        #     # Step 4: 转换为DualTimeframeResult
+        #     # return self._convert_final_to_result(final, symbol, feature_snapshot)
+        # except Exception as e:
+        #     logger.warning(f"[{symbol}] New architecture failed: {e}, using legacy flow")
+        
         # ===== PR-ARCH-01: Step 0.5: 特征生成（FeatureBuilder）=====
         try:
             # 获取data_cache实例（单例）
