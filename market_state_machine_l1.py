@@ -516,6 +516,17 @@ class L1AdvisoryEngine:
         # PR-ARCH-01: 特征生成器
         self.feature_builder = FeatureBuilder(enable_trace=False)  # 线上环境关闭trace
         
+        # PR-ARCH-02: DecisionCore（纯函数）+ DecisionGate（频控）
+        from l1_engine.decision_core import DecisionCore
+        from l1_engine.decision_gate import DecisionGate
+        from l1_engine.state_store import create_state_store
+        
+        self.decision_core = DecisionCore  # 纯静态方法类，无需实例化
+        self.decision_gate = DecisionGate(
+            state_store=create_state_store("dual")  # 双周期独立频控
+        )
+        logger.info("✅ PR-ARCH-02: DecisionCore and DecisionGate initialized")
+        
         logger.info(f"L1AdvisoryEngine initialized with {len(self.thresholds)} thresholds")
     
     def on_new_tick(self, symbol: str, data: Dict) -> AdvisoryResult:
