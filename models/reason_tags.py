@@ -34,6 +34,7 @@ class ReasonTag(Enum):
     DATA_GAP_15M = "data_gap_15m"              # PATCH-2: 15分钟窗口数据缺口过大
     DATA_GAP_1H = "data_gap_1h"                # PATCH-2: 1小时窗口数据缺口过大
     DATA_GAP_6H = "data_gap_6h"                # PATCH-2: 6小时窗口数据缺口过大
+    MTF_DEGRADED_TO_1H = "mtf_degraded_to_1h"  # P0-CodeFix-2: 中期降级为1h-only评估（6h缺失）
     
     # ===== 风险否决类 =====
     EXTREME_REGIME = "extreme_regime"
@@ -91,6 +92,7 @@ REASON_TAG_EXPLANATIONS = {
     "data_gap_15m": "⏳ 15分钟数据缺口：历史点与目标时间gap过大，lookback失败",
     "data_gap_1h": "⏳ 1小时数据缺口：历史点与目标时间gap过大，lookback失败",
     "data_gap_6h": "⏳ 6小时数据缺口：历史点与目标时间gap过大，lookback失败",
+    "mtf_degraded_to_1h": "⚠️ 中期降级：6h数据缺失，降级为1h-only评估（置信度受限）",
     
     # 风险否决类
     "extreme_regime": "🚨 极端行情：市场波动超过安全阈值，暂停交易",
@@ -164,6 +166,7 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.DATA_GAP_15M: ExecutabilityLevel.BLOCK,     # PATCH-2: 15分钟数据缺口阻断短期决策
     ReasonTag.DATA_GAP_1H: ExecutabilityLevel.DEGRADE,    # PATCH-2: 1小时数据缺口降级（不完全阻断）
     ReasonTag.DATA_GAP_6H: ExecutabilityLevel.DEGRADE,    # PATCH-2: 6小时数据缺口降级
+    ReasonTag.MTF_DEGRADED_TO_1H: ExecutabilityLevel.DEGRADE,  # P0-CodeFix-2: 中期降级为1h-only
     
     # 风险否决类 - 全部阻断
     ReasonTag.EXTREME_REGIME: ExecutabilityLevel.BLOCK,
