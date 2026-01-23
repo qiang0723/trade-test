@@ -3912,6 +3912,113 @@ class L1AdvisoryEngine:
         )
     
     # ========================================
+    # PR-ARCH-02: 新架构主流程
+    # ========================================
+    
+    def _on_new_tick_dual_new_arch(
+        self,
+        symbol: str,
+        data: Dict
+    ) -> 'DualTimeframeResult':
+        """
+        双周期决策主流程（新架构）
+        
+        PR-ARCH-02: 使用DecisionCore + DecisionGate的新架构
+        
+        流程：
+        1. FeatureBuilder生成特征（PR-ARCH-01）
+        2. DecisionCore评估决策（纯函数）
+        3. DecisionGate应用频控（独立频控）
+        4. 转换为DualTimeframeResult（向后兼容）
+        
+        Args:
+            symbol: 交易对符号
+            data: 市场数据字典
+        
+        Returns:
+            DualTimeframeResult: 双周期决策结果
+        """
+        from data_cache import get_cache
+        
+        logger.info(f"[{symbol}] Starting NEW ARCH dual-timeframe pipeline")
+        
+        # ===== Step 1: 特征生成（PR-ARCH-01）=====
+        try:
+            data_cache = get_cache()
+            feature_snapshot = self.feature_builder.build(symbol, data, data_cache=data_cache)
+            logger.debug(f"[{symbol}] FeatureSnapshot built (version: {feature_snapshot.metadata.feature_version.value})")
+        except Exception as e:
+            logger.error(f"[{symbol}] FeatureBuilder failed: {e}")
+            # Fallback：如果特征生成失败，返回NO_TRADE
+            from models.reason_tags import ReasonTag
+            return self._build_dual_no_trade_result(
+                symbol, 
+                [ReasonTag.INVALID_DATA],
+                price=data.get('price')
+            )
+        
+        # ===== Step 2: DecisionCore评估（纯函数）=====
+        try:
+            # 使用DecisionCore.evaluate_dual进行双周期评估
+            draft = self.decision_core.evaluate_dual(
+                feature_snapshot,
+                self.thresholds_typed,
+                symbol
+            )
+            logger.debug(
+                f"[{symbol}] DecisionCore evaluated: "
+                f"short={draft.short_term.decision.value}, "
+                f"medium={draft.medium_term.decision.value}"
+            )
+        except Exception as e:
+            logger.error(f"[{symbol}] DecisionCore failed: {e}")
+            # Fallback：如果决策评估失败，返回NO_TRADE
+            from models.reason_tags import ReasonTag
+            return self._build_dual_no_trade_result(
+                symbol,
+                [ReasonTag.INVALID_DATA],
+                price=feature_snapshot.features.price.current_price if feature_snapshot.features.price else None
+            )
+        
+        # ===== Step 3: DecisionGate应用（频控）=====
+        try:
+            final = self.decision_gate.apply_dual(
+                draft,
+                symbol,
+                datetime.now(),
+                self.thresholds_typed
+            )
+            logger.debug(
+                f"[{symbol}] DecisionGate applied: "
+                f"short_exec={final.short_term.executable}, "
+                f"medium_exec={final.medium_term.executable}"
+            )
+        except Exception as e:
+            logger.error(f"[{symbol}] DecisionGate failed: {e}")
+            # Fallback：如果频控失败，返回NO_TRADE
+            from models.reason_tags import ReasonTag
+            return self._build_dual_no_trade_result(
+                symbol,
+                [ReasonTag.INVALID_DATA],
+                price=feature_snapshot.features.price.current_price if feature_snapshot.features.price else None
+            )
+        
+        # ===== Step 4: 转换为DualTimeframeResult（向后兼容）=====
+        try:
+            result = self._convert_final_to_result(final, symbol, feature_snapshot)
+            logger.info(f"[{symbol}] NEW ARCH result: {result.alignment.recommended_action.value}")
+            return result
+        except Exception as e:
+            logger.error(f"[{symbol}] Result conversion failed: {e}")
+            # Fallback：如果转换失败，返回NO_TRADE
+            from models.reason_tags import ReasonTag
+            return self._build_dual_no_trade_result(
+                symbol,
+                [ReasonTag.INVALID_DATA],
+                price=feature_snapshot.features.price.current_price if feature_snapshot.features.price else None
+            )
+    
+    # ========================================
     # PR-ARCH-02: 新架构转换方法
     # ========================================
     
