@@ -80,47 +80,48 @@ class DecisionCore:
         Returns:
             TimeframeDecisionDraft: 决策草稿
         """
-        # TODO: Step 1: 数据验证
+        # Step 1: 数据验证（简化版本，TODO：添加更完善的coverage检查）
         # 检查features.coverage.short_evaluable或medium_evaluable
-        # 缺失关键数据时返回create_no_trade_draft([ReasonTag.DATA_INCOMPLETE])
+        # if not features.coverage.short_evaluable and not features.coverage.medium_evaluable:
+        #     return create_no_trade_draft([ReasonTag.DATA_INCOMPLETE], MarketRegime.RANGE)
         
-        # TODO: Step 2: 市场环境识别
+        # Step 2: 市场环境识别 ✅
         regime, regime_tags = DecisionCore._detect_market_regime(features, thresholds)
         
-        # TODO: Step 3: 风险准入评估（第一道闸门）
+        # Step 3: 风险准入评估（第一道闸门） ✅
         risk_ok, risk_tags = DecisionCore._eval_risk_exposure(features, regime, thresholds)
         if not risk_ok:
             return create_no_trade_draft(risk_tags, regime)
         
-        # TODO: Step 4: 交易质量评估（第二道闸门）
+        # Step 4: 交易质量评估（第二道闸门） ✅
         quality, quality_tags = DecisionCore._eval_trade_quality(features, regime, thresholds, symbol)
         if quality == TradeQuality.POOR:
             return create_no_trade_draft(quality_tags, regime)
         
-        # TODO: Step 5: 方向评估
+        # Step 5: 方向评估 ✅（简化版本，TODO：完善短期机会识别）
         allow_long, long_tags = DecisionCore._eval_long_direction(features, regime, thresholds)
         allow_short, short_tags = DecisionCore._eval_short_direction(features, regime, thresholds)
         
-        # TODO: Step 6: 决策优先级
+        # Step 6: 决策优先级 ✅
         decision, direction_tags = DecisionCore._decide_priority(allow_short, allow_long)
         
-        # TODO: Step 7: 资金费率降级
+        # Step 7: 资金费率降级（TODO：实现完整逻辑）
         decision, funding_tags = DecisionCore._apply_funding_rate_downgrade(
             decision, features, thresholds
         )
         
-        # TODO: Step 8: 执行权限判断（策略层）
+        # Step 8: 执行权限判断（策略层） ✅（简化版本）
         execution_permission = DecisionCore._determine_execution_permission(
             regime, quality, decision, thresholds
         )
         
-        # TODO: Step 9: 置信度计算
+        # Step 9: 置信度计算（TODO：实现PR-D混合模式）
         all_tags = regime_tags + risk_tags + quality_tags + long_tags + short_tags + direction_tags + funding_tags
         confidence = DecisionCore._compute_confidence(
             decision, regime, quality, all_tags, thresholds
         )
         
-        # TODO: Step 10: 组装DecisionDraft
+        # Step 10: 组装DecisionDraft ✅
         return TimeframeDecisionDraft(
             decision=decision,
             confidence=confidence,
@@ -128,7 +129,7 @@ class DecisionCore:
             trade_quality=quality,
             execution_permission=execution_permission,
             reason_tags=all_tags,
-            key_metrics={}  # TODO: 添加关键指标
+            key_metrics={}  # TODO: 添加关键指标（price_change_1h等）
         )
     
     # ========================================
@@ -180,12 +181,17 @@ class DecisionCore:
         """
         识别市场环境（纯函数）
         
-        TODO: 从market_state_machine_l1.py._detect_market_regime()提取
+        提取自: market_state_machine_l1.py._detect_market_regime() (PR-ARCH-02 M3-Step1)
         
         逻辑：
-        1. EXTREME: price_change_1h > extreme_threshold
-        2. TREND: price_change_6h > trend_threshold 或 price_change_1h > short_term_trend_threshold
-        3. RANGE: 默认
+        1. EXTREME: price_change_1h > extreme_threshold（优先级最高）
+        2. TREND: 
+           - 中期趋势：price_change_6h > trend_threshold
+           - 退化判定：缺6h时使用15m（更保守阈值）
+           - 短期趋势：price_change_1h > short_term_trend_threshold
+        3. RANGE: 默认（保守）
+        
+        None-safe: 关键字段缺失时使用退化逻辑或默认RANGE
         
         Args:
             features: 特征快照
@@ -194,8 +200,51 @@ class DecisionCore:
         Returns:
             (MarketRegime, 原因标签列表)
         """
-        # TODO: 实现逻辑
-        return MarketRegime.RANGE, []
+        regime_tags = []
+        
+        # 提取price features（None-safe）
+        price_change_1h = features.features.price.price_change_1h
+        price_change_6h = features.features.price.price_change_6h
+        price_change_15m = features.features.price.price_change_15m  # fallback
+        
+        # 获取阈值配置
+        regime_thresholds = thresholds.market_regime
+        
+        # 1. EXTREME: 极端波动（优先级最高）
+        if price_change_1h is not None:
+            price_change_1h_abs = abs(price_change_1h)
+            if price_change_1h_abs > regime_thresholds.extreme_price_change_1h:
+                return MarketRegime.EXTREME, regime_tags
+        
+        # 2. TREND: 趋势市
+        # 2.1 中期趋势（6小时）
+        if price_change_6h is not None:
+            price_change_6h_abs = abs(price_change_6h)
+            if price_change_6h_abs > regime_thresholds.trend_price_change_6h:
+                return MarketRegime.TREND, regime_tags
+        elif price_change_15m is not None:
+            # PATCH-P0-02: 缺6h时使用15m退化判定（更保守阈值）
+            price_change_15m_abs = abs(price_change_15m)
+            fallback_threshold = regime_thresholds.trend_price_change_6h * 0.5  # 15m用更低阈值
+            if price_change_15m_abs > fallback_threshold:
+                regime_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)  # 标记退化
+                logger.debug("Regime detection using 15m fallback (6h missing)")
+                return MarketRegime.TREND, regime_tags
+        
+        # 2.2 短期趋势（1小时）- 方案1: 捕获短期机会
+        if price_change_1h is not None:
+            price_change_1h_abs = abs(price_change_1h)
+            if price_change_1h_abs > regime_thresholds.short_term_trend_1h:
+                regime_tags.append(ReasonTag.SHORT_TERM_TREND)
+                return MarketRegime.TREND, regime_tags
+        
+        # 3. RANGE: 震荡市（默认）
+        # PATCH-P0-02: 如果关键字段全缺失，标记但仍返回RANGE（保守）
+        if price_change_1h is None and price_change_6h is None:
+            regime_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
+            logger.debug("Regime defaults to RANGE (price_change data missing)")
+        
+        return MarketRegime.RANGE, regime_tags
     
     # ========================================
     # Step 3: 风险准入评估
@@ -210,13 +259,15 @@ class DecisionCore:
         """
         风险准入评估（纯函数）
         
-        TODO: 从market_state_machine_l1.py._eval_risk_exposure_allowed()提取
+        提取自: market_state_machine_l1.py._eval_risk_exposure_allowed() (PR-ARCH-02 M3-Step2)
         
         检查项：
-        1. 极端行情（EXTREME regime）
+        1. 极端行情（EXTREME regime）- 最高优先级
         2. 清算阶段（price急变 + OI急降）
         3. 拥挤风险（极端费率 + 高OI增长）
-        4. 极端成交量
+        4. 极端成交量（1h成交量 > 24h平均 * 倍数）
+        
+        None-safe: 关键字段缺失时跳过规则（不误DENY）
         
         Args:
             features: 特征快照
@@ -226,7 +277,59 @@ class DecisionCore:
         Returns:
             (是否允许风险敞口, 原因标签列表)
         """
-        # TODO: 实现逻辑
+        tags = []
+        
+        # 获取阈值配置
+        risk_thresholds = thresholds.risk_exposure
+        
+        # 1. 极端行情
+        if regime == MarketRegime.EXTREME:
+            tags.append(ReasonTag.EXTREME_REGIME)
+            return False, tags
+        
+        # 2. 清算阶段（PATCH-P0-02: None-safe）
+        price_change_1h = features.features.price.price_change_1h
+        oi_change_1h = features.features.open_interest.oi_change_1h
+        
+        if price_change_1h is not None and oi_change_1h is not None:
+            if (abs(price_change_1h) > risk_thresholds.liquidation.price_change and 
+                oi_change_1h < risk_thresholds.liquidation.oi_drop):
+                tags.append(ReasonTag.LIQUIDATION_PHASE)
+                return False, tags
+        else:
+            # 关键字段缺失，跳过此规则但记录
+            if price_change_1h is None or oi_change_1h is None:
+                logger.debug("Liquidation check skipped (price_change_1h or oi_change_1h missing)")
+        
+        # 3. 拥挤风险（PATCH-P0-02: None-safe）
+        funding_rate_value = features.features.funding.funding_rate
+        oi_change_6h = features.features.open_interest.oi_change_6h
+        
+        if funding_rate_value is not None and oi_change_6h is not None:
+            funding_rate_abs = abs(funding_rate_value)
+            if (funding_rate_abs > risk_thresholds.crowding.funding_abs and 
+                oi_change_6h > risk_thresholds.crowding.oi_growth):
+                tags.append(ReasonTag.CROWDING_RISK)
+                return False, tags
+        else:
+            # 关键字段缺失，跳过此规则
+            if funding_rate_value is None or oi_change_6h is None:
+                logger.debug("Crowding check skipped (funding_rate or oi_change_6h missing)")
+        
+        # 4. 极端成交量（PATCH-P0-02: None-safe）
+        volume_1h = features.features.volume.volume_1h
+        volume_24h = features.features.volume.volume_24h
+        
+        if volume_1h is not None and volume_24h is not None and volume_24h > 0:
+            volume_avg = volume_24h / 24
+            if volume_1h > volume_avg * risk_thresholds.extreme_volume.multiplier:
+                tags.append(ReasonTag.EXTREME_VOLUME)
+                return False, tags
+        else:
+            # 成交量数据缺失，跳过此规则
+            logger.debug("Extreme volume check skipped (volume data missing)")
+        
+        # 通过所有风险检查
         return True, []
     
     # ========================================
@@ -243,26 +346,95 @@ class DecisionCore:
         """
         交易质量评估（纯函数）
         
-        TODO: 从market_state_machine_l1.py._eval_trade_quality()提取
+        提取自: market_state_machine_l1.py._eval_trade_quality() (PR-ARCH-02 M3-Step3)
         
         检查项：
-        1. 吸纳风险（高失衡 + 低成交量）
-        2. 噪音市（费率波动大但无方向）
-        3. 轮动风险（OI和价格背离）
-        4. 震荡市弱信号
+        1. 吸纳风险（高失衡 + 低成交量）→ POOR
+        2. 噪音市（费率波动大但无方向）→ UNCERTAIN
+        3. 轮动风险（OI和价格背离）→ POOR
+        4. 震荡市弱信号（imbalance弱 + OI变化小）→ UNCERTAIN
         
-        注意：噪音市检测需要funding_rate_prev，需要特殊处理
+        None-safe: 关键字段缺失时降级到UNCERTAIN（不直接POOR）
+        
+        纯函数改造: 噪音市检测使用features.funding.funding_rate_prev（由FeatureBuilder提供）
         
         Args:
             features: 特征快照
             regime: 市场环境
             thresholds: 阈值配置
-            symbol: 交易对符号
+            symbol: 交易对符号（用于日志）
         
         Returns:
             (TradeQuality, 原因标签列表)
         """
-        # TODO: 实现逻辑
+        tags = []
+        
+        # 获取阈值配置
+        quality_thresholds = thresholds.trade_quality
+        
+        # 1. 吸纳风险（PATCH-P0-02: None-safe）
+        imbalance_value = features.features.taker_imbalance.taker_imbalance_1h
+        volume_1h = features.features.volume.volume_1h
+        volume_24h = features.features.volume.volume_24h
+        
+        if imbalance_value is not None and volume_1h is not None and volume_24h is not None and volume_24h > 0:
+            imbalance_abs = abs(imbalance_value)
+            volume_avg = volume_24h / 24
+            if (imbalance_abs > quality_thresholds.absorption.imbalance and 
+                volume_1h < volume_avg * quality_thresholds.absorption.volume_ratio):
+                tags.append(ReasonTag.ABSORPTION_RISK)
+                return TradeQuality.POOR, tags
+        elif imbalance_value is None or volume_1h is None or volume_24h is None:
+            # PATCH-P0-02: 关键字段缺失 → 降级到UNCERTAIN（不直接POOR）
+            logger.debug(f"[{symbol}] Absorption check skipped (imbalance/volume missing)")
+            tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
+            return TradeQuality.UNCERTAIN, tags
+        
+        # 2. 噪音市（PATCH-P0-02: None-safe）
+        # PR-ARCH-02: 使用FeatureSnapshot提供的funding_rate_prev（纯函数改造）
+        funding_rate = features.features.funding.funding_rate
+        funding_rate_prev = features.features.funding.funding_rate_prev
+        
+        if funding_rate is not None and funding_rate_prev is not None:
+            funding_volatility = abs(funding_rate - funding_rate_prev)
+            
+            if (funding_volatility > quality_thresholds.noise.funding_volatility and 
+                abs(funding_rate) < quality_thresholds.noise.funding_abs):
+                tags.append(ReasonTag.NOISY_MARKET)
+                return TradeQuality.UNCERTAIN, tags
+        else:
+            logger.debug(f"[{symbol}] Noise check skipped (funding_rate or funding_rate_prev missing)")
+        
+        # 3. 轮动风险（PATCH-P0-02: None-safe）
+        price_change_1h = features.features.price.price_change_1h
+        oi_change_1h = features.features.open_interest.oi_change_1h
+        
+        if price_change_1h is not None and oi_change_1h is not None:
+            if ((price_change_1h > quality_thresholds.rotation.price_threshold and 
+                 oi_change_1h < -quality_thresholds.rotation.oi_threshold) or
+                (price_change_1h < -quality_thresholds.rotation.price_threshold and 
+                 oi_change_1h > quality_thresholds.rotation.oi_threshold)):
+                tags.append(ReasonTag.ROTATION_RISK)
+                return TradeQuality.POOR, tags
+        else:
+            # PATCH-P0-02: 关键字段缺失 → 跳过规则
+            logger.debug(f"[{symbol}] Rotation check skipped (price_change_1h or oi_change_1h missing)")
+        
+        # 4. 震荡市弱信号（PATCH-P0-02: None-safe）
+        if regime == MarketRegime.RANGE:
+            # 重新计算绝对值（前面已读取imbalance_value和oi_change_1h）
+            imbalance_abs = abs(imbalance_value) if imbalance_value is not None else None
+            oi_change_1h_abs = abs(oi_change_1h) if oi_change_1h is not None else None
+            
+            if imbalance_abs is not None and oi_change_1h_abs is not None:
+                if (imbalance_abs < quality_thresholds.range_weak.imbalance and 
+                    oi_change_1h_abs < quality_thresholds.range_weak.oi):
+                    tags.append(ReasonTag.WEAK_SIGNAL_IN_RANGE)
+                    return TradeQuality.UNCERTAIN, tags
+            else:
+                logger.debug(f"[{symbol}] Range weak signal check skipped (imbalance or oi_change missing)")
+        
+        # 通过所有质量检查
         return TradeQuality.GOOD, []
     
     # ========================================
@@ -278,7 +450,14 @@ class DecisionCore:
         """
         做多方向评估（纯函数）
         
-        TODO: 从market_state_machine_l1.py._eval_long_direction()提取
+        提取自: market_state_machine_l1.py._eval_long_direction() (PR-ARCH-02 M3-Step4)
+        
+        逻辑：
+        - TREND: imbalance > threshold AND oi_change > threshold AND price_change > threshold
+        - RANGE: imbalance > threshold AND oi_change > threshold
+        - RANGE短期机会: TODO（需要扩展models/thresholds.py添加DirectionThresholds）
+        
+        None-safe: 关键字段缺失时返回False（不误判LONG）
         
         Args:
             features: 特征快照
@@ -288,8 +467,49 @@ class DecisionCore:
         Returns:
             (是否允许做多, 原因标签列表)
         """
-        # TODO: 实现逻辑
-        return False, []
+        direction_tags = []
+        
+        # PATCH-P0-02: None-safe读取
+        imbalance = features.features.taker_imbalance.taker_imbalance_1h
+        oi_change = features.features.open_interest.oi_change_1h
+        price_change = features.features.price.price_change_1h
+        
+        # 关键字段缺失，无法判断方向
+        if imbalance is None or oi_change is None or price_change is None:
+            logger.debug("Long direction eval skipped (key fields missing)")
+            return False, direction_tags
+        
+        # TODO: 需要扩展models/thresholds.py添加DirectionThresholds
+        # 临时使用硬编码阈值（应该从thresholds.direction读取）
+        
+        if regime == MarketRegime.TREND:
+            # 趋势市：多方强势
+            long_imbalance_trend = 0.6  # TODO: thresholds.direction.long_imbalance_trend
+            long_oi_change_trend = 0.3  # TODO: thresholds.direction.long_oi_change_trend
+            long_price_change_trend = 0.02  # TODO: thresholds.direction.long_price_change_trend
+            
+            if (imbalance > long_imbalance_trend and 
+                oi_change > long_oi_change_trend and 
+                price_change > long_price_change_trend):
+                return True, direction_tags
+        
+        elif regime == MarketRegime.RANGE:
+            # 震荡市：原有强信号逻辑
+            long_imbalance_range = 0.7  # TODO: thresholds.direction.long_imbalance_range
+            long_oi_change_range = 0.4  # TODO: thresholds.direction.long_oi_change_range
+            
+            if (imbalance > long_imbalance_range and 
+                oi_change > long_oi_change_range):
+                return True, direction_tags
+            
+            # TODO: 方案4：短期机会识别（综合指标，3选2确认）
+            # 需要扩展models/thresholds.py添加:
+            # - thresholds.direction.range.short_term_opportunity.long.min_price_change_1h
+            # - thresholds.direction.range.short_term_opportunity.long.min_oi_change_1h
+            # - thresholds.direction.range.short_term_opportunity.long.min_taker_imbalance
+            # - thresholds.direction.range.short_term_opportunity.long.required_signals
+        
+        return False, direction_tags
     
     @staticmethod
     def _eval_short_direction(
@@ -300,7 +520,14 @@ class DecisionCore:
         """
         做空方向评估（纯函数）
         
-        TODO: 从market_state_machine_l1.py._eval_short_direction()提取
+        提取自: market_state_machine_l1.py._eval_short_direction() (PR-ARCH-02 M3-Step4)
+        
+        逻辑：
+        - TREND: imbalance < -threshold AND oi_change > threshold AND price_change < -threshold
+        - RANGE: imbalance < -threshold AND oi_change > threshold
+        - RANGE短期机会: TODO（需要扩展models/thresholds.py添加DirectionThresholds）
+        
+        None-safe: 关键字段缺失时返回False（不误判SHORT）
         
         Args:
             features: 特征快照
@@ -310,8 +537,49 @@ class DecisionCore:
         Returns:
             (是否允许做空, 原因标签列表)
         """
-        # TODO: 实现逻辑
-        return False, []
+        direction_tags = []
+        
+        # PATCH-P0-02: None-safe读取
+        imbalance = features.features.taker_imbalance.taker_imbalance_1h
+        oi_change = features.features.open_interest.oi_change_1h
+        price_change = features.features.price.price_change_1h
+        
+        # 关键字段缺失，无法判断方向
+        if imbalance is None or oi_change is None or price_change is None:
+            logger.debug("Short direction eval skipped (key fields missing)")
+            return False, direction_tags
+        
+        # TODO: 需要扩展models/thresholds.py添加DirectionThresholds
+        # 临时使用硬编码阈值（应该从thresholds.direction读取）
+        
+        if regime == MarketRegime.TREND:
+            # 趋势市：空方强势
+            short_imbalance_trend = 0.6  # TODO: thresholds.direction.short_imbalance_trend
+            short_oi_change_trend = 0.3  # TODO: thresholds.direction.short_oi_change_trend
+            short_price_change_trend = 0.02  # TODO: thresholds.direction.short_price_change_trend
+            
+            if (imbalance < -short_imbalance_trend and 
+                oi_change > short_oi_change_trend and 
+                price_change < -short_price_change_trend):
+                return True, direction_tags
+        
+        elif regime == MarketRegime.RANGE:
+            # 震荡市：原有强信号逻辑
+            short_imbalance_range = 0.7  # TODO: thresholds.direction.short_imbalance_range
+            short_oi_change_range = 0.4  # TODO: thresholds.direction.short_oi_change_range
+            
+            if (imbalance < -short_imbalance_range and 
+                oi_change > short_oi_change_range):
+                return True, direction_tags
+            
+            # TODO: 方案4：短期机会识别（综合指标，3选2确认）
+            # 需要扩展models/thresholds.py添加:
+            # - thresholds.direction.range.short_term_opportunity.short.max_price_change_1h
+            # - thresholds.direction.range.short_term_opportunity.short.min_oi_change_1h
+            # - thresholds.direction.range.short_term_opportunity.short.max_taker_imbalance
+            # - thresholds.direction.range.short_term_opportunity.short.required_signals
+        
+        return False, direction_tags
     
     # ========================================
     # Step 6: 决策优先级
@@ -325,10 +593,10 @@ class DecisionCore:
         """
         决策优先级判断（纯函数）
         
-        TODO: 从market_state_machine_l1.py._decide_priority()提取
+        提取自: market_state_machine_l1.py._decide_priority() (PR-ARCH-02 M3-Step5)
         
         规则：SHORT > LONG > NO_TRADE
-        冲突时：NO_TRADE
+        冲突时：NO_TRADE（保守处理）
         
         Args:
             allow_short: 是否允许做空
@@ -337,8 +605,29 @@ class DecisionCore:
         Returns:
             (Decision, 原因标签列表)
         """
-        # TODO: 实现逻辑
-        return Decision.NO_TRADE, [ReasonTag.NO_CLEAR_DIRECTION]
+        tags = []
+        
+        # 两个方向都不允许
+        if not allow_short and not allow_long:
+            tags.append(ReasonTag.NO_CLEAR_DIRECTION)
+            return Decision.NO_TRADE, tags
+        
+        # 冲突（保守处理）
+        if allow_short and allow_long:
+            tags.append(ReasonTag.CONFLICTING_SIGNALS)
+            return Decision.NO_TRADE, tags
+        
+        # SHORT优先
+        if allow_short:
+            tags.append(ReasonTag.STRONG_SELL_PRESSURE)
+            return Decision.SHORT, tags
+        
+        # LONG
+        if allow_long:
+            tags.append(ReasonTag.STRONG_BUY_PRESSURE)
+            return Decision.LONG, tags
+        
+        return Decision.NO_TRADE, tags
     
     # ========================================
     # Step 7: 资金费率降级
@@ -353,11 +642,13 @@ class DecisionCore:
         """
         资金费率降级（纯函数）
         
-        TODO: 从market_state_machine_l1.py相关逻辑提取
+        TODO: 从market_state_machine_l1.py相关逻辑提取（PR-ARCH-02 M3-Step6）
         
         规则：
         - LONG时，funding_rate > high_threshold → NO_TRADE
         - SHORT时，funding_rate < -high_threshold → NO_TRADE
+        
+        注意：需要在models/thresholds.py中添加funding_rate降级阈值
         
         Args:
             decision: 当前决策
@@ -367,8 +658,13 @@ class DecisionCore:
         Returns:
             (Decision, 原因标签列表)
         """
-        # TODO: 实现逻辑
-        return decision, []
+        tags = []
+        
+        # TODO: 实现完整逻辑
+        # 需要在thresholds中添加funding_rate降级配置
+        # 临时实现：不降级
+        
+        return decision, tags
     
     # ========================================
     # Step 8: 执行权限判断
@@ -384,13 +680,16 @@ class DecisionCore:
         """
         执行权限判断（策略层，纯函数）
         
-        TODO: 从market_state_machine_l1.py相关逻辑提取
+        提取自: market_state_machine_l1.py相关逻辑（PR-ARCH-02 M3-Step7）
         
         规则（方案D）：
         - NO_TRADE → DENY
         - UNCERTAIN quality → ALLOW_REDUCED
-        - RANGE + weak signals → ALLOW_REDUCED
-        - 其他 → ALLOW
+        - POOR quality → DENY (should not reach here due to earlier filtering)
+        - RANGE + GOOD → ALLOW
+        - TREND + GOOD → ALLOW
+        
+        TODO: 需要完善规则，添加更多条件判断
         
         Args:
             regime: 市场环境
@@ -401,9 +700,19 @@ class DecisionCore:
         Returns:
             ExecutionPermission
         """
-        # TODO: 实现逻辑
+        # Rule 1: NO_TRADE总是DENY
         if decision == Decision.NO_TRADE:
             return ExecutionPermission.DENY
+        
+        # Rule 2: UNCERTAIN quality降级
+        if quality == TradeQuality.UNCERTAIN:
+            return ExecutionPermission.ALLOW_REDUCED
+        
+        # Rule 3: POOR quality（理论上不应该到这里，因为前面已过滤）
+        if quality == TradeQuality.POOR:
+            return ExecutionPermission.DENY
+        
+        # Rule 4: GOOD quality允许
         return ExecutionPermission.ALLOW
     
     # ========================================
@@ -421,12 +730,16 @@ class DecisionCore:
         """
         置信度计算（PR-D混合模式，纯函数）
         
-        TODO: 从market_state_machine_l1.py._compute_confidence()提取
+        TODO: 从market_state_machine_l1.py._compute_confidence()提取（PR-ARCH-02 M3-Step8）
         
         流程：
         1. 基础加分（保持PR-005的加分制）
         2. 硬降级上限（caps）
         3. 强信号突破（+1档，不突破cap）
+        
+        需要在models/thresholds.py中添加:
+        - thresholds.confidence_scoring.caps (EXTREME/RANGE caps)
+        - thresholds.confidence_scoring.boosts (强信号加分)
         
         Args:
             decision: 决策
@@ -438,8 +751,21 @@ class DecisionCore:
         Returns:
             Confidence
         """
-        # TODO: 实现逻辑
-        return Confidence.LOW
+        # TODO: 实现完整的PR-D混合模式置信度计算
+        # 临时实现：简单规则
+        
+        if decision == Decision.NO_TRADE:
+            return Confidence.LOW
+        
+        # 根据质量和环境简单映射
+        if quality == TradeQuality.GOOD and regime == MarketRegime.TREND:
+            return Confidence.HIGH
+        elif quality == TradeQuality.GOOD:
+            return Confidence.MEDIUM
+        elif quality == TradeQuality.UNCERTAIN:
+            return Confidence.LOW
+        else:
+            return Confidence.LOW
 
 
 # ============================================
