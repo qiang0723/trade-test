@@ -1,0 +1,177 @@
+.
+|-- ARCHITECTURE.md
+|-- ARCHITECTURE_OPTIMIZATION_SUMMARY.md
+|-- Dockerfile.l1
+|-- PROJECT_STRUCTURE.txt
+|-- QUICK_START_MODULAR.md
+|-- README.md
+|-- README_ARCHITECTURE.md
+|-- README_QUICK.md
+|-- REFACTORING_REPORT.md
+|-- api
+|   |-- __init__.py
+|   |-- config_routes.py
+|   |-- dual_advisory_routes.py
+|   |-- history_routes.py
+|   |-- l1_advisory_routes.py
+|   `-- market_routes.py
+|-- backtest
+|   |-- README.md
+|   |-- __init__.py
+|   |-- backtest_3month.log
+|   |-- backtest_engine.py
+|   |-- backtest_output.log
+|   |-- cache
+|   |-- config.yaml
+|   |-- data_loader.py
+|   |-- performance_analyzer.py
+|   |-- quick_test.py
+|   |-- report_generator.py
+|   |-- reports
+|   |-- run_backtest.py
+|   |-- saved_results
+|   `-- signal_accuracy_analyzer.py
+|-- binance_data_fetcher.py
+|-- btc_market_data
+|-- btc_web_app_l1.py
+|-- btc_web_app_l1_modular.py
+|-- config
+|   |-- l1_thresholds.yaml
+|   `-- monitored_symbols.yaml
+|-- crypto_market_20260117_174503.csv
+|-- data
+|   `-- db
+|-- data_cache.py
+|-- database
+|   |-- __init__.py
+|   |-- advisory_repository.py
+|   |-- connection.py
+|   |-- dual_advisory_repository.py
+|   |-- migrations.py
+|   `-- pipeline_repository.py
+|-- database_l1.py
+|-- doc
+|   |-- PATCH-1_Normalization\345\255\227\346\256\265\346\227\217\345\205\250\350\246\206\347\233\226.md
+|   |-- PATCH-2_Cache_Lookback_Floor_Gap.md
+|   |-- PATCH-3_Dual_Path_Enhancement.md
+|   |-- PATCH-P0-Next\347\263\273\345\210\227\350\257\204\344\274\260\346\212\245\345\221\212.md
+|   |-- PATCH-P0\347\263\273\345\210\227\345\256\236\346\226\275\346\212\245\345\221\212.md
+|   |-- PATCH-P0\347\263\273\345\210\227\350\257\204\344\274\260\346\212\245\345\221\212.md
+|   |-- PR-DUAL_\345\217\214\345\221\250\346\234\237\347\213\254\347\253\213\347\273\223\350\256\272.md
+|   |-- PR-DUAL_\351\203\250\347\275\262\346\270\205\345\215\225.md
+|   |-- Phase2\345\256\236\346\226\275\346\212\245\345\221\212-P0-Next.md
+|   |-- README.md
+|   |-- \344\272\244\346\230\223\344\277\241\345\217\267\345\274\271\347\252\227\345\212\237\350\203\275\350\257\264\346\230\216.md
+|   |-- \344\277\241\345\217\267\351\200\232\347\237\245\345\212\237\350\203\275\351\252\214\350\257\201\346\270\205\345\215\225.md
+|   |-- \345\233\236\346\265\213\346\241\206\346\236\266\344\275\277\347\224\250\346\214\207\345\215\227.md
+|   |-- \345\271\263\345\217\260\350\257\246\350\247\2433.2.md
+|   `-- \346\250\241\345\235\227\351\207\215\346\236\204\346\265\213\350\257\225\346\212\245\345\221\212.md
+|-- docker-compose-l1.yml
+|-- docker-l1-build.sh
+|-- docker-l1-run.sh
+|-- docker-l1-stop.sh
+|-- l1_engine
+|   |-- README.md
+|   |-- __init__.py
+|   |-- confidence_calculator.py
+|   |-- config_manager.py
+|   |-- config_validator.py
+|   |-- data_validator.py
+|   |-- frequency_controller.py
+|   |-- helper_utils.py
+|   |-- memory.py
+|   |-- regime_detector.py
+|   |-- risk_gates.py
+|   `-- signal_generator.py
+|-- logger_config.py
+|-- logs
+|   `-- web_l1.log
+|-- market_state_machine_l1.py
+|-- metrics_normalizer.py
+|-- models
+|   |-- __init__.py
+|   |-- advisory_result.py
+|   |-- dual_timeframe_result.py
+|   |-- enums.py
+|   `-- reason_tags.py
+|-- quick-commit.sh
+|-- quick-start.sh
+|-- quick-test-dual.sh
+|-- quick-test.sh
+|-- requirements.txt
+|-- run_l1.sh
+|-- services
+|   |-- __init__.py
+|   |-- config_watcher_service.py
+|   `-- scheduler_service.py
+|-- static
+|   |-- css
+|   |-- js
+|   `-- sw.js
+|-- templates
+|   |-- index_l1.html
+|   |-- index_l1_dual.html
+|   `-- index_l1_unified.html
+|-- test_signal_notification.html
+|-- tests
+|   |-- README_TEST_SUITE.md
+|   |-- TEST_SUMMARY.md
+|   |-- run_all_tests.py
+|   |-- run_all_tests.sh
+|   |-- test_calibration_validation.py
+|   |-- test_case_a.py
+|   |-- test_case_a_full.py
+|   |-- test_case_b.py
+|   |-- test_case_b2.py
+|   |-- test_case_c.py
+|   |-- test_case_c2.py
+|   |-- test_data_validation_completeness.py
+|   |-- test_data_validation_ranges.py
+|   |-- test_database_execution_permission.py
+|   |-- test_decimal_calibration.py
+|   |-- test_dual_frequency_control.py
+|   |-- test_execution_permission.py
+|   |-- test_l1_advisory.py
+|   |-- test_logger_initialization.py
+|   |-- test_metadata_injection_point.py
+|   |-- test_p0_1_weak_signal_fix.py
+|   |-- test_p0_2_funding_prev.py
+|   |-- test_p0_3_oi_auxiliary.py
+|   |-- test_p0_next_signal_frequency.py
+|   |-- test_p0_percentage_scale_bugfix.py
+|   |-- test_p0_required_fields_bugfix.py
+|   |-- test_p0_volume_scale_bugfix.py
+|   |-- test_p0_volume_unit_bugfix.py
+|   |-- test_p1_1_config_driven_strong_signal.py
+|   |-- test_p1_2_string_to_confidence_safe_default.py
+|   |-- test_p1_3_startup_guardrails.py
+|   |-- test_patch1_normalization.py
+|   |-- test_patch2_lookback.py
+|   |-- test_patch3_dual_path.py
+|   |-- test_periodic_update_retry.py
+|   |-- test_pr_001_002_003.py
+|   |-- test_pr_001_volume_klines.py
+|   |-- test_pr_004_signal_transparency.py
+|   |-- test_pr_005_multi_tf.py
+|   |-- test_pr_b_trade_quality.py
+|   |-- test_pr_batch1_standalone.py
+|   |-- test_pr_batch2_standalone.py
+|   |-- test_pr_batch3_standalone.py
+|   |-- test_pr_c_decision_control.py
+|   |-- test_pr_d_confidence_hybrid.py
+|   |-- test_pr_dual_timeframe.py
+|   |-- test_pr_h_confidence_simple.py
+|   |-- test_pr_h_confidence_validation.py
+|   |-- test_pr_i_reduce_default_max.py
+|   |-- test_pr_j_range_validation.py
+|   |-- test_pr_m_metadata_format.py
+|   |-- test_refactor_modules.py
+|   |-- test_short_term_opportunity.py
+|   `-- test_symbol_format_normalization.py
+`-- venv
+    |-- bin
+    |-- include
+    |-- lib
+    `-- pyvenv.cfg
+
+25 directories, 150 files

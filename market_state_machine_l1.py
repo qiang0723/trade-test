@@ -883,10 +883,13 @@ class L1AdvisoryEngine:
             f"skipped={len(norm_trace.skipped_fields)}"
         )
         
+        # P0-02: 兼容注入层（在normalize之后、使用之前）
+        normalized_data = self._inject_compatibility_fields(normalized_data)
+        
         # 基础异常值检查（保留，作为双重保护）
-        # PATCH-P0-2: 使用taker_imbalance_1h
-        taker_imb_1h = normalized_data.get('taker_imbalance_1h', 0)
-        if taker_imb_1h < -1 or taker_imb_1h > 1:
+        # P0-02: 使用taker_imbalance_1h（可能由buy_sell_imbalance注入）
+        taker_imb_1h = self._num(normalized_data, 'taker_imbalance_1h')
+        if taker_imb_1h is not None and (taker_imb_1h < -1 or taker_imb_1h > 1):
             logger.error(f"Invalid taker_imbalance_1h: {taker_imb_1h}")
             return False, normalized_data, ReasonTag.INVALID_DATA, norm_trace.to_dict()
         
@@ -895,6 +898,37 @@ class L1AdvisoryEngine:
             return False, normalized_data, ReasonTag.INVALID_DATA, norm_trace.to_dict()
         
         return True, normalized_data, None, norm_trace.to_dict()
+    
+    def _inject_compatibility_fields(self, data: Dict) -> Dict:
+        """
+        P0-02: 兼容注入层 - 字段真相闭环
+        
+        规则：
+        1. 仅在新字段缺失时从旧字段注入
+        2. 注入是单向的（legacy → 新字段）
+        3. 后续逻辑只读新字段
+        
+        兼容映射：
+        - buy_sell_imbalance → taker_imbalance_1h（主要）
+        - 未来可扩展其他兼容
+        
+        Args:
+            data: 已规范化的数据字典
+        
+        Returns:
+            注入后的数据字典
+        """
+        # taker_imbalance_1h兼容注入
+        if data.get('taker_imbalance_1h') is None:
+            legacy_value = data.get('buy_sell_imbalance')
+            if legacy_value is not None:
+                data['taker_imbalance_1h'] = legacy_value
+                logger.info(
+                    f"[P0-02] Injected taker_imbalance_1h={legacy_value:.4f} "
+                    f"from buy_sell_imbalance (compatibility)"
+                )
+        
+        return data
     
     def _check_lookback_coverage(self, data: Dict) -> Tuple[bool, List[ReasonTag]]:
         """
@@ -2519,9 +2553,15 @@ class L1AdvisoryEngine:
         if not context_config:
             return True  # 无配置时默认允许
         
-        price_change_1h = data.get('price_change_1h', 0)
-        taker_imbalance_1h = data.get('taker_imbalance_1h', 0)
-        oi_change_1h = data.get('oi_change_1h', 0)
+        # P0-01: None-safe读取
+        price_change_1h = self._num(data, 'price_change_1h')
+        taker_imbalance_1h = self._num(data, 'taker_imbalance_1h')
+        oi_change_1h = self._num(data, 'oi_change_1h')
+        
+        # P0-01: 关键字段缺失，Context层无法判断
+        if price_change_1h is None or taker_imbalance_1h is None or oi_change_1h is None:
+            logger.debug(f"[Context] Key fields missing, denying context")
+            return False
         
         signals_met = 0
         
@@ -2572,21 +2612,23 @@ class L1AdvisoryEngine:
         if not confirm_config:
             return 0
         
-        # PR-005-DATA: 获取15分钟多周期数据（由 data_cache.py 计算提供）
-        price_change_15m = data.get('price_change_15m')
-        taker_imbalance_15m = data.get('taker_imbalance_15m')
-        volume_ratio_15m = data.get('volume_ratio_15m')
-        oi_change_15m = data.get('oi_change_15m')
+        # P0-05: None-safe读取（不提供默认值）
+        price_change_15m = self._num(data, 'price_change_15m')
+        taker_imbalance_15m = self._num(data, 'taker_imbalance_15m')
+        volume_ratio_15m = self._num(data, 'volume_ratio_15m')
+        oi_change_15m = self._num(data, 'oi_change_15m')
         
-        # 防御性处理：冷启动期间可能数据不足，使用中性默认值
-        if price_change_15m is None:
-            price_change_15m = 0
-        if oi_change_15m is None:
-            oi_change_15m = 0
-        if taker_imbalance_15m is None:
-            taker_imbalance_15m = 0
-        if volume_ratio_15m is None:
-            volume_ratio_15m = 1.0
+        # P0-05: 字段缺失直接返回0（不计入signals_met）
+        # 不伪装成"中性"，而是"无法判断"
+        if any(v is None for v in [price_change_15m, taker_imbalance_15m, volume_ratio_15m, oi_change_15m]):
+            missing = [k for k, v in {
+                'price_change_15m': price_change_15m,
+                'taker_imbalance_15m': taker_imbalance_15m,
+                'volume_ratio_15m': volume_ratio_15m,
+                'oi_change_15m': oi_change_15m
+            }.items() if v is None]
+            logger.debug(f"[Confirm] Fields missing: {missing}, cannot evaluate")
+            return 0  # 无法计算信号数
         
         signals_met = 0
         
@@ -2636,18 +2678,20 @@ class L1AdvisoryEngine:
         if not trigger_config:
             return 0
         
-        # PR-005-DATA: 获取5分钟多周期数据（由 data_cache.py 计算提供）
-        price_change_5m = data.get('price_change_5m')
-        taker_imbalance_5m = data.get('taker_imbalance_5m')
-        volume_ratio_5m = data.get('volume_ratio_5m')
+        # P0-05: None-safe读取（不提供默认值）
+        price_change_5m = self._num(data, 'price_change_5m')
+        taker_imbalance_5m = self._num(data, 'taker_imbalance_5m')
+        volume_ratio_5m = self._num(data, 'volume_ratio_5m')
         
-        # 防御性处理：冷启动期间可能数据不足，使用中性默认值
-        if price_change_5m is None:
-            price_change_5m = 0
-        if taker_imbalance_5m is None:
-            taker_imbalance_5m = 0
-        if volume_ratio_5m is None:
-            volume_ratio_5m = 1.0
+        # P0-05: 字段缺失直接返回0（不计入signals_met）
+        if any(v is None for v in [price_change_5m, taker_imbalance_5m, volume_ratio_5m]):
+            missing = [k for k, v in {
+                'price_change_5m': price_change_5m,
+                'taker_imbalance_5m': taker_imbalance_5m,
+                'volume_ratio_5m': volume_ratio_5m
+            }.items() if v is None]
+            logger.debug(f"[Trigger] Fields missing: {missing}, cannot evaluate")
+            return 0  # 无法计算信号数
         
         signals_met = 0
         
@@ -2811,26 +2855,36 @@ class L1AdvisoryEngine:
                 global_risk_tags.extend(coverage_tags)
                 logger.info(f"[{symbol}] Non-critical window gap, continuing with degraded quality")
         
-        # ===== Step 1.6: Critical Fields 检查（PATCH-P0-3）=====
+        # ===== Step 1.6: Critical Fields 检查（P0-03重构：独立标记，不过度短路）=====
+        # P0-03改进：short和medium独立检查，不相互短路
+        
         # 检查短期关键字段（5m/15m）
         critical_short_fields = ['price_change_5m', 'price_change_15m', 'oi_change_5m', 'oi_change_15m',
                                  'taker_imbalance_5m', 'taker_imbalance_15m', 'volume_ratio_5m', 'volume_ratio_15m']
         missing_short = [f for f in critical_short_fields if data.get(f) is None]
         
+        has_short_data = True
         if missing_short:
             logger.warning(f"[{symbol}] Short-term critical fields missing: {missing_short}")
             global_risk_tags.append(ReasonTag.DATA_INCOMPLETE_LTF)
-            # 短期关键字段缺失 → 返回NO_TRADE（无法进行短期决策）
-            return self._build_dual_no_trade_result(symbol, global_risk_tags, regime=MarketRegime.RANGE)
+            has_short_data = False
+            # P0-03: 不立即返回，让medium_term有机会评估
         
         # 检查中期关键字段（1h/6h）
         critical_medium_fields = ['price_change_1h', 'price_change_6h', 'oi_change_1h', 'oi_change_6h']
         missing_medium = [f for f in critical_medium_fields if data.get(f) is None]
         
+        has_medium_data = True
         if missing_medium:
-            logger.info(f"[{symbol}] Medium-term critical fields missing: {missing_medium}, continuing with degraded quality")
+            logger.info(f"[{symbol}] Medium-term critical fields missing: {missing_medium}")
             global_risk_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
-            # 中期字段缺失 → 允许继续（short_term可能仍有效），但标记降级
+            has_medium_data = False
+            # P0-03: 不立即返回，让short_term有机会评估（如果有数据）
+        
+        # P0-03: 只有两者都缺数据时才全局短路
+        if not has_short_data and not has_medium_data:
+            logger.warning(f"[{symbol}] Both short and medium term data missing, returning dual NO_TRADE")
+            return self._build_dual_no_trade_result(symbol, global_risk_tags, regime=MarketRegime.RANGE)
         
         # ===== Step 2: 全局风险评估（极端行情等）=====
         regime, regime_tags = self._detect_market_regime(data)
@@ -2847,10 +2901,13 @@ class L1AdvisoryEngine:
             global_risk_tags.extend(risk_tags)
             return self._build_dual_no_trade_result(symbol, global_risk_tags, regime=regime, risk_allowed=False)
         
-        # ===== Step 3: 短期评估（5m/15m）=====
+        # ===== Step 3: 短期评估（5m/15m）- P0-03: 独立评估 =====
+        # P0-03: 即使short缺数据，仍尝试评估（内部会返回NO_TRADE+DATA_INCOMPLETE_LTF）
         short_term = self._evaluate_short_term(symbol, data, regime)
         
-        # ===== Step 4: 中长期评估（1h/6h）=====
+        # ===== Step 4: 中长期评估（1h/6h）- P0-03: 独立评估 =====
+        # P0-03: 即使medium缺数据，仍尝试评估（内部会返回NO_TRADE+DATA_INCOMPLETE_MTF）
+        # short缺数据不应掐掉medium的评估
         medium_term = self._evaluate_medium_term(symbol, data, regime)
         
         # ===== Step 5: 一致性分析 =====
@@ -2998,14 +3055,49 @@ class L1AdvisoryEngine:
         
         reason_tags = []
         
-        # 提取短期关键指标
-        price_change_5m = data.get('price_change_5m', 0) or 0
-        price_change_15m = data.get('price_change_15m', 0) or 0
-        taker_imbalance_5m = data.get('taker_imbalance_5m', 0) or 0
-        taker_imbalance_15m = data.get('taker_imbalance_15m', 0) or 0
-        volume_ratio_5m = data.get('volume_ratio_5m', 1.0) or 1.0
-        volume_ratio_15m = data.get('volume_ratio_15m', 1.0) or 1.0
-        oi_change_15m = data.get('oi_change_15m', 0) or 0  # 第5维：OI变化
+        # P0-05: None-safe读取（不提供默认值，禁止伪中性）
+        price_change_5m = self._num(data, 'price_change_5m')
+        price_change_15m = self._num(data, 'price_change_15m')
+        taker_imbalance_5m = self._num(data, 'taker_imbalance_5m')
+        taker_imbalance_15m = self._num(data, 'taker_imbalance_15m')
+        volume_ratio_5m = self._num(data, 'volume_ratio_5m')
+        volume_ratio_15m = self._num(data, 'volume_ratio_15m')
+        oi_change_15m = self._num(data, 'oi_change_15m')
+        
+        # P0-05: 检查短期关键字段完整性
+        critical_short_fields = {
+            'price_change_5m': price_change_5m,
+            'price_change_15m': price_change_15m,
+            'taker_imbalance_5m': taker_imbalance_5m,
+            'taker_imbalance_15m': taker_imbalance_15m,
+            'volume_ratio_5m': volume_ratio_5m,
+            'volume_ratio_15m': volume_ratio_15m,
+            'oi_change_15m': oi_change_15m
+        }
+        
+        missing_fields = [k for k, v in critical_short_fields.items() if v is None]
+        
+        if missing_fields:
+            # P0-05: 显性标记短期数据缺失
+            logger.warning(f"[{symbol}] Short-term critical fields missing: {missing_fields}")
+            reason_tags.append(ReasonTag.DATA_INCOMPLETE_LTF)
+            
+            # 构造NO_TRADE结论（不进入required_signals计数）
+            from models.dual_timeframe_result import TimeframeConclusion
+            from models.enums import Timeframe
+            
+            return TimeframeConclusion(
+                timeframe=Timeframe.SHORT_TERM,
+                timeframe_label="5m/15m",
+                decision=Decision.NO_TRADE,
+                confidence=Confidence.LOW,
+                market_regime=regime,
+                trade_quality=TradeQuality.POOR,
+                execution_permission=ExecutionPermission.DENY,
+                executable=False,
+                reason_tags=reason_tags,
+                key_metrics={'missing_fields': missing_fields}
+            )
         
         # 短期方向判断（使用配置中的短期阈值）
         short_config = self.config.get('dual_timeframe', {}).get('short_term', {})
@@ -3040,9 +3132,9 @@ class L1AdvisoryEngine:
         min_oi_change = short_config.get('min_oi_change_15m', 0.02)
         required_signals = short_config.get('required_signals', 4)
         
-        # 构造key_metrics（含动态阈值信息）
+        # P0-05: 构造key_metrics（使用实际值，已确保非None）
         key_metrics = {
-            'price_change_5m': price_change_5m,
+            'price_change_5m': price_change_5m,  # 此时已确保非None
             'price_change_15m': price_change_15m,
             'taker_imbalance_5m': taker_imbalance_5m,
             'taker_imbalance_15m': taker_imbalance_15m,
@@ -3054,41 +3146,41 @@ class L1AdvisoryEngine:
             'threshold_regime': threshold_regime
         }
         
-        # ===== 5维信号评估 =====
+        # ===== 5维信号评估（P0-05: 所有比较已确保非None） =====
         
         # LONG 条件：价格上涨 + 买压 + OI增长 + 放量 + 5m确认
         long_signals = 0
-        # 维度1: 价格变化（动态阈值）
+        # 维度1: 价格变化（动态阈值）- 已确保非None
         if price_change_15m > min_price_change:
             long_signals += 1
-        # 维度2: Taker失衡
+        # 维度2: Taker失衡 - 已确保非None
         if taker_imbalance_15m > min_taker_imbalance:
             long_signals += 1
-        # 维度3: OI变化（多头增仓）
+        # 维度3: OI变化（多头增仓）- 已确保非None
         if oi_change_15m > min_oi_change:
             long_signals += 1
-        # 维度4: 放量
+        # 维度4: 放量 - 已确保非None
         if volume_ratio_15m > min_volume_ratio:
             long_signals += 1
-        # 维度5: 5m动量确认
+        # 维度5: 5m动量确认 - 已确保非None
         if price_change_5m > 0 and taker_imbalance_5m > 0.30:
             long_signals += 1
         
         # SHORT 条件：价格下跌 + 卖压 + OI增长 + 放量 + 5m确认
         short_signals = 0
-        # 维度1: 价格变化（动态阈值）
+        # 维度1: 价格变化（动态阈值）- 已确保非None
         if price_change_15m < -min_price_change:
             short_signals += 1
-        # 维度2: Taker失衡
+        # 维度2: Taker失衡 - 已确保非None
         if taker_imbalance_15m < -min_taker_imbalance:
             short_signals += 1
-        # 维度3: OI变化（空头增仓，OI同样增长）
+        # 维度3: OI变化（空头增仓，OI同样增长）- 已确保非None
         if oi_change_15m > min_oi_change:
             short_signals += 1
-        # 维度4: 放量
+        # 维度4: 放量 - 已确保非None
         if volume_ratio_15m > min_volume_ratio:
             short_signals += 1
-        # 维度5: 5m动量确认
+        # 维度5: 5m动量确认 - 已确保非None
         if price_change_5m < 0 and taker_imbalance_5m < -0.30:
             short_signals += 1
         
@@ -3157,31 +3249,67 @@ class L1AdvisoryEngine:
         regime: MarketRegime
     ) -> 'TimeframeConclusion':
         """
-        中长期评估（1h/6h）
+        中长期评估（1h/6h）- P0-01: None-safe重构
         
         使用1小时和6小时的数据进行趋势判断
+        
+        P0-01改进：
+        - 禁止None→0伪中性
+        - 关键字段缺失显性标记DATA_INCOMPLETE_MTF
+        - 使用None-safe读取
         """
         from models.dual_timeframe_result import TimeframeConclusion
         from models.enums import Timeframe
         
         reason_tags = []
         
-        # 提取中长期关键指标
-        price_change_1h = data.get('price_change_1h', 0) or 0
-        price_change_6h = data.get('price_change_6h', 0) or 0
-        oi_change_1h = data.get('oi_change_1h', 0) or 0
-        oi_change_6h = data.get('oi_change_6h', 0) or 0
-        # PATCH-P0-2: 使用taker_imbalance_1h替代buy_sell_imbalance
-        taker_imbalance_1h = data.get('taker_imbalance_1h', 0) or 0
-        funding_rate = data.get('funding_rate', 0) or 0
+        # P0-01: None-safe读取（不提供默认值）
+        price_change_1h = self._num(data, 'price_change_1h')
+        price_change_6h = self._num(data, 'price_change_6h')
+        oi_change_1h = self._num(data, 'oi_change_1h')
+        oi_change_6h = self._num(data, 'oi_change_6h')
+        taker_imbalance_1h = self._num(data, 'taker_imbalance_1h')  # P0-02: 统一字段
+        funding_rate = self._num(data, 'funding_rate')
         
-        key_metrics = {
+        # P0-01: 检查关键字段完整性
+        critical_fields = {
             'price_change_1h': price_change_1h,
             'price_change_6h': price_change_6h,
             'oi_change_1h': oi_change_1h,
             'oi_change_6h': oi_change_6h,
-            'taker_imbalance_1h': taker_imbalance_1h,  # PATCH-P0-2: 统一字段名
-            'funding_rate': funding_rate
+            'taker_imbalance_1h': taker_imbalance_1h
+        }
+        
+        missing_fields = [k for k, v in critical_fields.items() if v is None]
+        
+        if missing_fields:
+            # 显性标记：中期关键字段缺失
+            logger.warning(f"[{symbol}] Medium-term critical fields missing: {missing_fields}")
+            reason_tags.append(ReasonTag.DATA_INCOMPLETE_MTF)
+            
+            # 构造NO_TRADE结论（不伪装成"无变化"）
+            return TimeframeConclusion(
+                timeframe=Timeframe.MEDIUM_TERM,
+                timeframe_label="1h/6h",
+                decision=Decision.NO_TRADE,
+                confidence=Confidence.LOW,
+                market_regime=regime,
+                trade_quality=TradeQuality.POOR,
+                execution_permission=ExecutionPermission.DENY,
+                executable=False,
+                reason_tags=reason_tags,
+                key_metrics={'missing_fields': missing_fields}
+            )
+        
+        # P0-01: key_metrics使用实际值（可能为None，但不伪装成0）
+        # funding_rate可以缺失（非关键），使用0.0作为默认
+        key_metrics = {
+            'price_change_1h': price_change_1h,  # 此时已确保非None
+            'price_change_6h': price_change_6h,
+            'oi_change_1h': oi_change_1h,
+            'oi_change_6h': oi_change_6h,
+            'taker_imbalance_1h': taker_imbalance_1h,  # P0-02: 统一字段名
+            'funding_rate': funding_rate if funding_rate is not None else 0.0  # 非关键字段可默认
         }
         
         # 中长期方向判断（复用现有的方向评估逻辑）
