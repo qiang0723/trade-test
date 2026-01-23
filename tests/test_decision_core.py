@@ -98,7 +98,7 @@ def create_test_features(**kwargs) -> FeatureSnapshot:
         ),
         metadata=FeatureMetadata(
             symbol="BTC",
-            feature_version=FeatureVersion.V1_0,
+            feature_version=FeatureVersion.V3_ARCH01,
             generated_at=datetime.now()
         )
     )
@@ -173,14 +173,14 @@ def test_market_regime_detection():
     """测试市场环境识别"""
     thresholds = load_test_thresholds()
     
-    # EXTREME: price_change_1h = 0.06 (> 0.05)
-    features_extreme = create_test_features(price_change_1h=0.06)
+    # EXTREME: price_change_1h = 0.08 (> 0.07)
+    features_extreme = create_test_features(price_change_1h=0.08)
     regime, tags = DecisionCore._detect_market_regime(features_extreme, thresholds)
     assert regime == MarketRegime.EXTREME, f"Expected EXTREME, got {regime}"
     print(f"✅ EXTREME环境识别正确")
     
-    # TREND: price_change_6h = 0.04 (> 0.03)
-    features_trend = create_test_features(price_change_6h=0.04)
+    # TREND: price_change_6h = 0.03 (> 0.02)
+    features_trend = create_test_features(price_change_6h=0.03)
     regime, tags = DecisionCore._detect_market_regime(features_trend, thresholds)
     assert regime == MarketRegime.TREND, f"Expected TREND, got {regime}"
     print(f"✅ TREND环境识别正确")
@@ -211,7 +211,7 @@ def test_risk_exposure_evaluation():
     
     # 清算阶段应该DENY（急跌 + OI急降）
     features_liquidation = create_test_features(
-        price_change_1h=-0.06,  # 急跌
+        price_change_1h=-0.08,  # 急跌（触发EXTREME）
         oi_change_1h=-0.35       # OI急降
     )
     risk_ok, tags = DecisionCore._eval_risk_exposure(
@@ -263,10 +263,10 @@ def test_trade_quality_evaluation():
     assert ReasonTag.ABSORPTION_RISK in tags
     print(f"✅ 吸纳风险质量评估正确")
     
-    # 噪音市应该UNCERTAIN（费率波动大）
+    # 噪音市应该UNCERTAIN（费率波动大 + 当前费率低）
     features_noise = create_test_features(
-        funding_rate=0.0002,      # 当前费率低
-        funding_rate_prev=0.0008  # 前值高（波动大）
+        funding_rate=0.00005,     # 当前费率低（< 0.0001）
+        funding_rate_prev=0.00080  # 前值高（波动0.00075 > 0.0005）
     )
     quality, tags = DecisionCore._eval_trade_quality(
         features_noise, MarketRegime.RANGE, thresholds, "BTC"

@@ -284,7 +284,7 @@ class DecisionGate:
                 result.is_cooling = True
                 result.is_blocked = True
                 result.block_reason = f"Cooling period: {int(time_since_last)}s < {cooling_period}s"
-                result.added_tags.append(ReasonTag.FREQUENCY_COOLING)
+                result.added_tags.append(ReasonTag.FLIP_COOLDOWN_BLOCK)
                 logger.debug(f"Cooling period: same direction within {time_since_last}s")
                 return result
         
@@ -293,14 +293,14 @@ class DecisionGate:
             result.min_interval_violated = True
             result.is_blocked = True
             result.block_reason = f"Min interval: {int(time_since_last)}s < {min_interval}s"
-            result.added_tags.append(ReasonTag.MIN_INTERVAL_VIOLATED)
+            result.added_tags.append(ReasonTag.MIN_INTERVAL_BLOCK)
             logger.debug(f"Min interval violated: {time_since_last}s < {min_interval}s")
             return result
         
         # Rule 5: 方向翻转（允许但记录）
         if draft.decision != last_signal_direction and last_signal_direction != Decision.NO_TRADE:
-            result.added_tags.append(ReasonTag.DIRECTION_FLIP)
-            logger.debug(f"Direction flip: {last_signal_direction.value} -> {draft.decision.value}")
+            # 方向翻转允许，记录日志（无专用ReasonTag）
+            logger.debug(f"Direction flip allowed: {last_signal_direction.value} -> {draft.decision.value}")
         
         return result
     

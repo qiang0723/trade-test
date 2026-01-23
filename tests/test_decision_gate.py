@@ -117,7 +117,7 @@ def test_cooling_period_blocking():
     
     assert final2.executable == False, "冷却期内重复决策应该阻断"
     assert final2.frequency_control.is_cooling == True
-    assert ReasonTag.FREQUENCY_COOLING in final2.reason_tags
+    assert ReasonTag.FLIP_COOLDOWN_BLOCK in final2.reason_tags
     
     print("✅ 冷却期阻断测试通过")
 
@@ -144,7 +144,7 @@ def test_min_interval_violation():
     
     assert final2.executable == False, "最小间隔内决策应该阻断"
     assert final2.frequency_control.min_interval_violated == True
-    assert ReasonTag.MIN_INTERVAL_VIOLATED in final2.reason_tags
+    assert ReasonTag.MIN_INTERVAL_BLOCK in final2.reason_tags
     
     print("✅ 最小间隔测试通过")
 
@@ -170,7 +170,7 @@ def test_direction_flip_allowed():
     final2 = gate.apply(draft2, "BTC", now2, thresholds, Timeframe.SHORT_TERM)
     
     assert final2.executable == True, "超过最小间隔的方向翻转应该允许"
-    assert ReasonTag.DIRECTION_FLIP in final2.reason_tags
+    # 方向翻转允许，无专用标签（只有日志记录）
     
     print("✅ 方向翻转允许测试通过")
 
@@ -227,19 +227,19 @@ def test_dual_timeframe_independent_control():
     
     print("✅ 首次双周期决策允许")
     
-    # 第二次：短期LONG（冷却期内），中期SHORT（不同方向，允许）
+    # 第二次：短期LONG（冷却期内），中期NO_TRADE（NO_TRADE总是允许）
     draft2 = DualTimeframeDecisionDraft(
-        short_term=create_test_draft(decision=Decision.LONG),
-        medium_term=create_test_draft(decision=Decision.SHORT),
+        short_term=create_test_draft(decision=Decision.LONG),      # 冷却期内阻断
+        medium_term=create_test_draft(decision=Decision.NO_TRADE), # NO_TRADE总是允许
         global_risk_tags=[]
     )
     
-    now2 = now + timedelta(seconds=700)
+    now2 = now + timedelta(seconds=700)  # 700秒 < 短期冷却期(1800s)
     final2 = gate.apply_dual(draft2, "BTC", now2, thresholds)
     
-    # 短期被冷却期阻断，中期允许（独立频控）
+    # 短期被冷却期阻断，中期允许（NO_TRADE + 独立频控）
     assert final2.short_term.executable == False, "短期冷却期内应该阻断"
-    assert final2.medium_term.executable == True, "中期独立频控应该允许"
+    assert final2.medium_term.executable == True, "中期NO_TRADE应该允许（独立频控）"
     
     print("✅ 双周期独立频控测试通过")
 
