@@ -270,13 +270,14 @@ class DecisionGate:
         # 计算时间间隔
         time_since_last = (now - last_decision_time).total_seconds()
         
-        # 获取频控配置（TODO: 从thresholds读取，临时硬编码）
+        # 获取频控配置（从thresholds读取）
+        dual_control = thresholds.dual_decision_control
         if timeframe == Timeframe.SHORT_TERM:
-            cooling_period = 1800  # 30分钟 TODO: thresholds.dual_timeframe.short_term_cooling_seconds
-            min_interval = 600      # 10分钟 TODO: thresholds.dual_timeframe.short_term_min_interval_seconds
-        else:
-            cooling_period = 7200   # 2小时 TODO: thresholds.dual_timeframe.medium_term_cooling_seconds
-            min_interval = 1800     # 30分钟 TODO: thresholds.dual_timeframe.medium_term_min_interval_seconds
+            cooling_period = dual_control.short_term_flip_cooldown_seconds
+            min_interval = dual_control.short_term_interval_seconds
+        else:  # MEDIUM_TERM
+            cooling_period = dual_control.medium_term_flip_cooldown_seconds
+            min_interval = dual_control.medium_term_interval_seconds
         
         # Rule 3: 冷却期检查（相同方向重复信号）
         if draft.decision == last_signal_direction:
