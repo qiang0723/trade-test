@@ -3910,3 +3910,164 @@ class L1AdvisoryEngine:
             risk_exposure_allowed=risk_allowed,
             global_risk_tags=global_risk_tags
         )
+    
+    # ========================================
+    # PR-ARCH-02: 新架构转换方法
+    # ========================================
+    
+    def _convert_final_to_result(
+        self,
+        final: 'DualTimeframeDecisionFinal',
+        symbol: str,
+        features: 'FeatureSnapshot'
+    ) -> 'DualTimeframeResult':
+        """
+        将DualTimeframeDecisionFinal转换为DualTimeframeResult（向后兼容）
+        
+        PR-ARCH-02: 新架构核心转换方法
+        
+        Args:
+            final: DecisionGate输出的最终决策
+            symbol: 交易对符号
+            features: 特征快照（用于提取price等元信息）
+        
+        Returns:
+            DualTimeframeResult: 向后兼容的结果对象
+        """
+        from models.dual_timeframe_result import (
+            DualTimeframeResult, TimeframeConclusion, AlignmentAnalysis
+        )
+        from models.enums import Timeframe
+        
+        logger.debug(f"[{symbol}] Converting DualTimeframeDecisionFinal to DualTimeframeResult")
+        
+        # 构建短期TimeframeConclusion
+        short_conclusion = TimeframeConclusion(
+            timeframe=Timeframe.SHORT_TERM,
+            timeframe_label="5m/15m",
+            decision=final.short_term.decision,
+            confidence=final.short_term.confidence,
+            executable=final.short_term.executable,
+            execution_permission=final.short_term.execution_permission,
+            trade_quality=final.short_term.trade_quality,
+            market_regime=final.short_term.market_regime,
+            reason_tags=final.short_term.reason_tags.copy(),
+            key_metrics=final.short_term.key_metrics.copy() if final.short_term.key_metrics else {}
+        )
+        
+        # 构建中期TimeframeConclusion
+        medium_conclusion = TimeframeConclusion(
+            timeframe=Timeframe.MEDIUM_TERM,
+            timeframe_label="1h/6h",
+            decision=final.medium_term.decision,
+            confidence=final.medium_term.confidence,
+            executable=final.medium_term.executable,
+            execution_permission=final.medium_term.execution_permission,
+            trade_quality=final.medium_term.trade_quality,
+            market_regime=final.medium_term.market_regime,
+            reason_tags=final.medium_term.reason_tags.copy(),
+            key_metrics=final.medium_term.key_metrics.copy() if final.medium_term.key_metrics else {}
+        )
+        
+        # 构建AlignmentAnalysis
+        alignment = self._analyze_alignment_from_final(short_conclusion, medium_conclusion)
+        
+        # 提取price（优先使用features中的current_price）
+        price = None
+        if features and features.features and features.features.price:
+            price = features.features.price.current_price
+        
+        # 构建DualTimeframeResult
+        return DualTimeframeResult(
+            symbol=symbol,
+            timestamp=datetime.now(),
+            short_term=short_conclusion,
+            medium_term=medium_conclusion,
+            alignment=alignment,
+            price=price,
+            risk_exposure_allowed=True,  # 新架构中风险评估已在DecisionCore中完成
+            global_risk_tags=final.global_risk_tags.copy()
+        )
+    
+    def _analyze_alignment_from_final(
+        self,
+        short: 'TimeframeConclusion',
+        medium: 'TimeframeConclusion'
+    ) -> 'AlignmentAnalysis':
+        """
+        从两个TimeframeConclusion分析对齐关系
+        
+        PR-ARCH-02: 简化版本的对齐分析（基于决策方向）
+        
+        规则：
+        1. 都是NO_TRADE → BOTH_NO_TRADE（一致）
+        2. 方向相同（LONG/SHORT） → ALIGNED_SIGNAL（一致）
+        3. 一个NO_TRADE，一个有信号 → PARTIALLY_ALIGNED（部分一致）
+        4. 方向相反（LONG vs SHORT） → CONFLICTING（冲突）
+        
+        TODO: 实现完整的对齐分析逻辑（考虑confidence、executable等）
+        
+        Args:
+            short: 短期结论
+            medium: 中期结论
+        
+        Returns:
+            AlignmentAnalysis: 对齐分析结果
+        """
+        from models.dual_timeframe_result import AlignmentAnalysis
+        from models.enums import AlignmentType, ConflictResolution
+        
+        # Rule 1: 都是NO_TRADE
+        if short.decision == Decision.NO_TRADE and medium.decision == Decision.NO_TRADE:
+            return AlignmentAnalysis(
+                is_aligned=True,
+                alignment_type=AlignmentType.BOTH_NO_TRADE,
+                has_conflict=False,
+                conflict_resolution=None,
+                resolution_reason="短期和中期均无交易信号",
+                recommended_action=Decision.NO_TRADE,
+                recommended_confidence=Confidence.LOW,
+                recommendation_notes="⏸️ 双周期均无交易机会"
+            )
+        
+        # Rule 2: 方向相同（LONG/SHORT）
+        if short.decision == medium.decision and short.decision != Decision.NO_TRADE:
+            return AlignmentAnalysis(
+                is_aligned=True,
+                alignment_type=AlignmentType.ALIGNED_SIGNAL,
+                has_conflict=False,
+                conflict_resolution=None,
+                resolution_reason="短期和中期方向一致",
+                recommended_action=short.decision,
+                recommended_confidence=max(short.confidence, medium.confidence),
+                recommendation_notes=f"✅ 双周期一致：{short.decision.value.upper()}"
+            )
+        
+        # Rule 3: 一个NO_TRADE，一个有信号
+        if (short.decision == Decision.NO_TRADE and medium.decision != Decision.NO_TRADE) or \
+           (short.decision != Decision.NO_TRADE and medium.decision == Decision.NO_TRADE):
+            active_decision = medium.decision if short.decision == Decision.NO_TRADE else short.decision
+            active_timeframe = "中期" if short.decision == Decision.NO_TRADE else "短期"
+            
+            return AlignmentAnalysis(
+                is_aligned=False,
+                alignment_type=AlignmentType.PARTIALLY_ALIGNED,
+                has_conflict=False,
+                conflict_resolution=ConflictResolution.PREFER_MEDIUM_TERM if active_decision == medium.decision else ConflictResolution.PREFER_SHORT_TERM,
+                resolution_reason=f"只有{active_timeframe}有信号",
+                recommended_action=active_decision,
+                recommended_confidence=Confidence.LOW,
+                recommendation_notes=f"⚠️  仅{active_timeframe}：{active_decision.value.upper()}"
+            )
+        
+        # Rule 4: 方向相反（LONG vs SHORT）
+        return AlignmentAnalysis(
+            is_aligned=False,
+            alignment_type=AlignmentType.CONFLICTING,
+            has_conflict=True,
+            conflict_resolution=ConflictResolution.PREFER_MEDIUM_TERM,
+            resolution_reason="短期和中期方向冲突，优先中期",
+            recommended_action=medium.decision,
+            recommended_confidence=Confidence.LOW,
+            recommendation_notes=f"⚠️  周期冲突：短期{short.decision.value} vs 中期{medium.decision.value}"
+        )
