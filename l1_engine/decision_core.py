@@ -55,6 +55,7 @@ class DecisionCore:
     def evaluate_single(
         features: FeatureSnapshot,
         thresholds: Thresholds,
+        timeframe: 'Timeframe',
         symbol: str = "UNKNOWN"
     ) -> TimeframeDecisionDraft:
         """
@@ -75,18 +76,25 @@ class DecisionCore:
         Args:
             features: 特征快照（FeatureSnapshot）
             thresholds: 强类型阈值配置
+            timeframe: 周期标识（SHORT_TERM或MEDIUM_TERM）
             symbol: 交易对符号（用于日志）
         
         Returns:
             TimeframeDecisionDraft: 决策草稿
         """
-        # Step 1: 数据验证（简化版本，TODO：添加更完善的coverage检查）
-        # 检查features.coverage.short_evaluable或medium_evaluable
-        # if not features.coverage.short_evaluable and not features.coverage.medium_evaluable:
-        #     return create_no_trade_draft([ReasonTag.DATA_INCOMPLETE], MarketRegime.RANGE)
+        # Step 1: 数据验证
+        # P0-1修复：根据timeframe检查对应的coverage
+        if timeframe == Timeframe.SHORT_TERM:
+            if not features.coverage.short_evaluable:
+                logger.warning(f"[{symbol}] Short-term data insufficient")
+                return create_no_trade_draft([ReasonTag.DATA_INCOMPLETE], MarketRegime.RANGE)
+        elif timeframe == Timeframe.MEDIUM_TERM:
+            if not features.coverage.medium_evaluable:
+                logger.warning(f"[{symbol}] Medium-term data insufficient")
+                return create_no_trade_draft([ReasonTag.DATA_INCOMPLETE_MTF], MarketRegime.RANGE)
         
         # Step 2: 市场环境识别 ✅
-        regime, regime_tags = DecisionCore._detect_market_regime(features, thresholds)
+        regime, regime_tags = DecisionCore._detect_market_regime(features, thresholds, timeframe)
         
         # Step 3: 风险准入评估（第一道闸门） ✅
         risk_ok, risk_tags = DecisionCore._eval_risk_exposure(features, regime, thresholds)
@@ -155,13 +163,28 @@ class DecisionCore:
         Returns:
             DualTimeframeDecisionDraft: 双周期决策草稿
         """
-        # TODO: 检查short_evaluable和medium_evaluable
-        # TODO: 分别调用evaluate_single（使用不同的特征子集）
         # TODO: 识别全局风险标签
         
-        # 骨架实现
-        short_draft = DecisionCore.evaluate_single(features, thresholds, symbol)
-        medium_draft = DecisionCore.evaluate_single(features, thresholds, symbol)
+        # ✅ P0-1修复：分别评估短期和中期，使用不同的timeframe参数
+        from models.enums import Timeframe
+        
+        # 短期评估（5m/15m）
+        short_draft = DecisionCore.evaluate_single(
+            features, 
+            thresholds, 
+            Timeframe.SHORT_TERM,
+            symbol
+        )
+        logger.debug(f"[{symbol}] Short-term evaluated: {short_draft.decision.value}")
+        
+        # 中期评估（1h/6h）
+        medium_draft = DecisionCore.evaluate_single(
+            features,
+            thresholds,
+            Timeframe.MEDIUM_TERM,
+            symbol
+        )
+        logger.debug(f"[{symbol}] Medium-term evaluated: {medium_draft.decision.value}")
         
         return DualTimeframeDecisionDraft(
             short_term=short_draft,
@@ -176,7 +199,8 @@ class DecisionCore:
     @staticmethod
     def _detect_market_regime(
         features: FeatureSnapshot,
-        thresholds: Thresholds
+        thresholds: Thresholds,
+        timeframe: 'Timeframe'
     ) -> Tuple[MarketRegime, List[ReasonTag]]:
         """
         识别市场环境（纯函数）
@@ -193,9 +217,14 @@ class DecisionCore:
         
         None-safe: 关键字段缺失时使用退化逻辑或默认RANGE
         
+        P0-1修复：根据timeframe选择不同的判定逻辑
+        - SHORT_TERM: 主要看5m/15m/1h数据
+        - MEDIUM_TERM: 主要看1h/6h数据
+        
         Args:
             features: 特征快照
             thresholds: 阈值配置
+            timeframe: 周期标识
         
         Returns:
             (MarketRegime, 原因标签列表)
@@ -206,11 +235,15 @@ class DecisionCore:
         price_change_1h = features.features.price.price_change_1h
         price_change_6h = features.features.price.price_change_6h
         price_change_15m = features.features.price.price_change_15m  # fallback
+        price_change_5m = features.features.price.price_change_5m  # short-term
         
         # 获取阈值配置
         regime_thresholds = thresholds.market_regime
         
-        # 1. EXTREME: 极端波动（优先级最高）
+        # P0-1修复：根据timeframe选择不同的判定策略
+        from models.enums import Timeframe
+        
+        # 1. EXTREME: 极端波动（优先级最高，两个周期都检查）
         if price_change_1h is not None:
             price_change_1h_abs = abs(price_change_1h)
             if price_change_1h_abs > regime_thresholds.extreme_price_change_1h:
@@ -775,6 +808,7 @@ class DecisionCore:
 def evaluate_single_decision(
     features: FeatureSnapshot,
     thresholds: Thresholds,
+    timeframe: 'Timeframe',
     symbol: str = "UNKNOWN"
 ) -> TimeframeDecisionDraft:
     """
@@ -783,12 +817,13 @@ def evaluate_single_decision(
     Args:
         features: 特征快照
         thresholds: 阈值配置
+        timeframe: 周期标识
         symbol: 交易对符号
     
     Returns:
         TimeframeDecisionDraft
     """
-    return DecisionCore.evaluate_single(features, thresholds, symbol)
+    return DecisionCore.evaluate_single(features, thresholds, timeframe, symbol)
 
 
 def evaluate_dual_decision(

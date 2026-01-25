@@ -83,6 +83,13 @@ class FeatureBuilder:
         # Step 2: 提取特征
         features = self._extract_features(normalized_data)
         
+        # P0-2修复：验证核心必需字段
+        if not self._validate_core_fields(features, symbol):
+            logger.error(f"[{symbol}] Core fields validation failed")
+            # 返回空快照，标记数据无效
+            from models.reason_tags import ReasonTag
+            return create_empty_snapshot(symbol, ReasonTag.INVALID_DATA)
+        
         # Step 3: 计算覆盖度信息
         coverage = self._extract_coverage(raw_data, data_cache, symbol)
         
@@ -107,6 +114,41 @@ class FeatureBuilder:
                     f"medium_evaluable={coverage.medium_evaluable}")
         
         return snapshot
+    
+    def _validate_core_fields(self, features: MarketFeatures, symbol: str) -> bool:
+        """
+        验证核心必需字段（P0-2修复）
+        
+        核心必需字段（最小不可缺集合）：
+        - price: 当前价格
+        - volume_24h: 24小时成交量
+        - funding_rate: 资金费率
+        
+        Args:
+            features: 提取的特征
+            symbol: 交易对符号（用于日志）
+        
+        Returns:
+            bool: 是否通过验证
+        """
+        # 检查price
+        if features.price is None or features.price.current_price is None:
+            logger.error(f"[{symbol}] Missing core field: price")
+            return False
+        
+        # 检查volume_24h
+        if features.volume is None or features.volume.volume_24h is None:
+            logger.error(f"[{symbol}] Missing core field: volume_24h")
+            return False
+        
+        # 检查funding_rate
+        if features.funding is None or features.funding.funding_rate is None:
+            logger.error(f"[{symbol}] Missing core field: funding_rate")
+            return False
+        
+        # 所有核心字段验证通过
+        logger.debug(f"[{symbol}] Core fields validation passed")
+        return True
     
     def _normalize_data(self, raw_data: Dict) -> Tuple[Dict, Optional[Dict]]:
         """
