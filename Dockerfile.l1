@@ -49,6 +49,9 @@ COPY templates/ ./templates/
 # 测试文件（PR-C）
 COPY tests/ ./tests/
 
+# 脚本文件（回测、评估等）
+COPY scripts/ ./scripts/
+
 # 创建数据目录
 RUN mkdir -p data/db
 

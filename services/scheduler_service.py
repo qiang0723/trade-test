@@ -2,7 +2,7 @@
 Scheduler Service - 定时任务服务
 
 职责：
-1. 管理定时任务（定期决策更新、数据清理）
+1. 管理定时任务（定期决策更新、数据清理、白名单更新）
 2. 封装APScheduler逻辑
 """
 
@@ -38,6 +38,7 @@ class SchedulerService:
         self.binance_fetcher = binance_fetcher
         self.config = config
         self.scheduler = None
+        self.whitelist_service = None  # 延迟初始化
     
     def start(self) -> Optional[object]:
         """启动定时任务调度器"""
@@ -48,6 +49,9 @@ class SchedulerService:
         try:
             # 缓存预热：启动时从Binance获取历史数据
             self._warmup_cache()
+            
+            # 初始化白名单服务
+            self._init_whitelist_service()
             
             periodic_config = self.config.get('periodic_update', {})
             
@@ -82,16 +86,60 @@ class SchedulerService:
                 name=f'Cleanup old L1 advisory records (every {cleanup_interval}h)'
             )
             
+            # 任务3: 定期更新白名单（每小时）
+            self.scheduler.add_job(
+                func=self._update_whitelist_job,
+                trigger='cron',
+                minute=5,  # 每小时第5分钟执行
+                id='update_whitelist',
+                name='Update dynamic whitelist (hourly)',
+                max_instances=1
+            )
+            
+            # 启动时立即更新一次白名单
+            self.scheduler.add_job(
+                func=self._update_whitelist_job,
+                trigger='date',
+                run_date=datetime.now(),
+                id='initial_whitelist_update',
+                name='Initial whitelist update'
+            )
+            
             self.scheduler.start()
             logger.info("⏰ Scheduler started:")
             logger.info(f"  - Periodic advisory update: Every {interval_minutes} minute(s)")
             logger.info(f"  - Cleanup old records: Every {cleanup_interval} hours")
+            logger.info(f"  - Whitelist update: Every hour (minute 5)")
             
             return self.scheduler
         
         except Exception as e:
             logger.error(f"Error starting scheduler: {e}")
             return None
+    
+    def _init_whitelist_service(self):
+        """初始化白名单服务"""
+        try:
+            from .whitelist_service import WhitelistService
+            self.whitelist_service = WhitelistService(self.l1_db)
+            logger.info("📋 WhitelistService initialized")
+        except Exception as e:
+            logger.error(f"Error initializing WhitelistService: {e}")
+            self.whitelist_service = None
+    
+    def _update_whitelist_job(self):
+        """定时更新白名单"""
+        try:
+            if not self.whitelist_service:
+                self._init_whitelist_service()
+            
+            if self.whitelist_service:
+                result = self.whitelist_service.update_whitelist()
+                logger.info(f"📋 Whitelist update completed: {result['total_updated']} combos updated")
+            else:
+                logger.warning("WhitelistService not available, skipping whitelist update")
+        except Exception as e:
+            logger.error(f"Error updating whitelist: {e}", exc_info=True)
     
     def stop(self):
         """停止调度器"""

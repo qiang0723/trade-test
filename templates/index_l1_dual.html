@@ -620,6 +620,68 @@
             font-size: 13px;
         }
         
+        /* 白名单状态标记 */
+        .whitelist-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 9px;
+            font-weight: bold;
+            margin-left: 6px;
+        }
+        
+        .whitelist-badge.in-whitelist {
+            background: linear-gradient(135deg, #4caf50, #2e7d32);
+            color: white;
+        }
+        
+        .whitelist-badge.in-blacklist {
+            background: linear-gradient(135deg, #f44336, #c62828);
+            color: white;
+        }
+        
+        .whitelist-badge.observation {
+            background: linear-gradient(135deg, #ff9800, #f57c00);
+            color: white;
+        }
+        
+        /* 白名单胜率显示 */
+        .whitelist-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 4px;
+            padding: 4px 6px;
+            background: #f0f7ff;
+            border-radius: 4px;
+            font-size: 10px;
+        }
+        
+        .whitelist-info.recommended {
+            background: #e8f5e9;
+            border-left: 3px solid #4caf50;
+        }
+        
+        .whitelist-info.not-recommended {
+            background: #fff3e0;
+            border-left: 3px solid #ff9800;
+        }
+        
+        .whitelist-info.blacklist {
+            background: #ffebee;
+            border-left: 3px solid #f44336;
+        }
+        
+        .win-rate {
+            font-weight: bold;
+        }
+        
+        .win-rate.high { color: #2e7d32; }
+        .win-rate.medium { color: #f57c00; }
+        .win-rate.low { color: #c62828; }
+        
         /* 响应式 */
         @media (max-width: 768px) {
             .symbols-grid {
@@ -732,6 +794,9 @@
         let currentPage = 1;
         const itemsPerPage = 20;
         
+        // 白名单数据
+        let whitelistData = {};  // {symbol_direction: {win_rate, in_whitelist, status}}
+        
         // 通知设置
         let notificationEnabled = localStorage.getItem('signalNotificationEnabled') !== 'false';
         let soundEnabled = localStorage.getItem('soundEnabled') !== 'false';
@@ -756,12 +821,106 @@
             // 初始化筛选器
             initSymbolFilter();
             
+            // 加载白名单数据
+            await loadWhitelistData();
+            
             // 加载数据
             await refreshAllSymbols();
             
             // 启动自动刷新（每60秒）
             setInterval(refreshAllSymbols, 60000);
+            
+            // 每5分钟刷新白名单
+            setInterval(loadWhitelistData, 300000);
         });
+        
+        // 加载白名单数据
+        async function loadWhitelistData() {
+            try {
+                const response = await fetch('/api/whitelist');
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    // 转换为快速查找格式
+                    whitelistData = {};
+                    
+                    // 处理白名单
+                    result.data.whitelist.forEach(item => {
+                        const key = `${item.symbol}_${item.direction}`;
+                        whitelistData[key] = {
+                            win_rate: item.win_rate,
+                            in_whitelist: true,
+                            status: 'whitelist',
+                            total_signals: item.total_signals
+                        };
+                    });
+                    
+                    // 处理黑名单
+                    result.data.blacklist.forEach(item => {
+                        const key = `${item.symbol}_${item.direction}`;
+                        whitelistData[key] = {
+                            win_rate: item.win_rate,
+                            in_whitelist: false,
+                            status: 'blacklist',
+                            total_signals: item.total_signals
+                        };
+                    });
+                    
+                    // 处理观察期
+                    result.data.observation.forEach(item => {
+                        const key = `${item.symbol}_${item.direction}`;
+                        whitelistData[key] = {
+                            win_rate: item.win_rate,
+                            in_whitelist: false,
+                            status: 'observation',
+                            total_signals: item.total_signals
+                        };
+                    });
+                    
+                    console.log(`白名单数据已加载: ${Object.keys(whitelistData).length}个组合`);
+                }
+            } catch (error) {
+                console.error('加载白名单失败:', error);
+            }
+        }
+        
+        // 获取白名单状态
+        function getWhitelistStatus(symbol, direction) {
+            const key = `${symbol}_${direction}`;
+            return whitelistData[key] || null;
+        }
+        
+        // 生成白名单HTML
+        function getWhitelistHtml(symbol, direction) {
+            const status = getWhitelistStatus(symbol, direction);
+            if (!status) return '';
+            
+            const winRatePct = (status.win_rate * 100).toFixed(0);
+            let badgeClass, badgeText, infoClass;
+            
+            if (status.status === 'whitelist') {
+                badgeClass = 'in-whitelist';
+                badgeText = '✅白名单';
+                infoClass = 'recommended';
+            } else if (status.status === 'blacklist') {
+                badgeClass = 'in-blacklist';
+                badgeText = '❌黑名单';
+                infoClass = 'blacklist';
+            } else {
+                badgeClass = 'observation';
+                badgeText = '👀观察中';
+                infoClass = 'not-recommended';
+            }
+            
+            const winRateClass = status.win_rate >= 0.6 ? 'high' : status.win_rate >= 0.4 ? 'medium' : 'low';
+            
+            return `
+                <div class="whitelist-info ${infoClass}">
+                    <span class="whitelist-badge ${badgeClass}">${badgeText}</span>
+                    <span>胜率: <span class="win-rate ${winRateClass}">${winRatePct}%</span> (${status.total_signals}笔)</span>
+                </div>
+            `;
+        }
         
         // 请求通知权限
         function requestNotificationPermission() {
@@ -899,6 +1058,13 @@
         function showSignalPopup(signal) {
             const { symbol, decision, confidence, price, shortDecision, mediumDecision, isAligned, isReversal } = signal;
             
+            // 获取白名单状态
+            const wlStatus = getWhitelistStatus(symbol, decision);
+            const isInWhitelist = wlStatus && wlStatus.in_whitelist;
+            const winRate = wlStatus ? (wlStatus.win_rate * 100).toFixed(0) : '?';
+            const wlLabel = isInWhitelist ? `✅ 白名单 (胜率${winRate}%)` : 
+                           (wlStatus?.status === 'blacklist' ? `❌ 黑名单 (胜率${winRate}%)` : `👀 观察中`);
+            
             const popup = document.createElement('div');
             popup.className = 'signal-popup';
             popup.classList.add(decision === 'long' ? 'signal-long' : 'signal-short');
@@ -926,6 +1092,9 @@
                     <div class="signal-details">
                         <span class="signal-confidence">${confidenceLabel}</span>
                         <span class="signal-exec exec-yes">${alignedLabel}</span>
+                    </div>
+                    <div style="margin: 8px 0; padding: 6px 10px; background: ${isInWhitelist ? '#e8f5e9' : '#fff3e0'}; border-radius: 6px; font-size: 12px; font-weight: bold; color: ${isInWhitelist ? '#2e7d32' : '#e65100'};">
+                        ${wlLabel}
                     </div>
                     <div style="margin: 10px 0; font-size: 12px; color: #666;">
                         短期: ${getDecisionIcon(shortDecision)} ${getDecisionLabel(shortDecision)} | 
@@ -1090,6 +1259,10 @@
                 ? `<div class="risk-tags">${global_risk_tags.map(tag => `<span class="risk-tag">${tag}</span>`).join('')}</div>`
                 : '';
             
+            // 白名单状态（基于推荐操作）
+            const recAction = alignment.recommended_action;
+            const whitelistHtml = recAction !== 'no_trade' ? getWhitelistHtml(symbol, recAction) : '';
+            
             card.innerHTML = `
                 <div class="card-header">
                     <div>
@@ -1122,6 +1295,8 @@
                 <div class="alignment-badge ${alignment.alignment_type}">
                     ${alignmentText}
                 </div>
+                
+                ${whitelistHtml}
                 
                 ${riskTagsHtml}
                 

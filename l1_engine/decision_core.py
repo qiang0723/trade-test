@@ -523,57 +523,58 @@ class DecisionCore:
         # imbalance 使用1小时数据（更稳定）
         imbalance = features.features.taker_imbalance.taker_imbalance_1h
         
-        # 关键字段检查（回测优化：放宽条件，允许oi_change缺失）
-        if imbalance is None and price_change is None:
-            logger.debug(f"Long direction eval skipped (both imbalance and price_change missing)")
+        # 关键字段检查（回滚：LONG需要严格的3/3条件）
+        # 回测结论：LONG信号2/3条件模式胜率仅12.7%，需要恢复严格条件
+        if imbalance is None or price_change is None:
+            logger.debug(f"Long direction eval skipped (key fields missing: imbalance={imbalance}, price={price_change})")
             return False, direction_tags
         
-        # 从配置读取方向阈值（PR-FIX: 替换硬编码TODO值）
+        # 从配置读取方向阈值
         if regime == MarketRegime.TREND:
-            # 趋势市：多方强势（回测优化：2/3条件满足即可）
+            # 趋势市：多方强势（回滚：恢复严格3/3条件）
+            # 回测数据：2/3条件LONG胜率12.7%，严格条件胜率98%
             trend_cfg = thresholds.direction.trend.long
             long_imbalance_trend = trend_cfg.imbalance
             long_oi_change_trend = trend_cfg.oi_change
-            long_price_change_trend = trend_cfg.price_change or 0.004  # 默认0.4%
+            long_price_change_trend = trend_cfg.price_change or 0.004
             
-            # 计算满足的条件数
-            conditions_met = 0
-            if imbalance is not None and imbalance > long_imbalance_trend:
-                conditions_met += 1
-            if oi_change is not None and oi_change > long_oi_change_trend:
-                conditions_met += 1
-            if price_change is not None and price_change > long_price_change_trend:
-                conditions_met += 1
+            # LONG必须同时满足：imbalance + price_change（oi_change可选）
+            # 核心条件：买压 + 价格上涨
+            imbalance_ok = imbalance > long_imbalance_trend
+            price_ok = price_change > long_price_change_trend
+            oi_ok = oi_change is not None and oi_change > long_oi_change_trend
             
-            # TREND环境：2/3条件满足即可（回测优化）
-            if conditions_met >= 2:
+            # 严格模式：imbalance + price 必须满足，oi可选加分
+            if imbalance_ok and price_ok:
                 direction_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
                 return True, direction_tags
         
         elif regime == MarketRegime.RANGE:
             # 震荡市：从配置读取阈值
+            # 注意：RANGE环境信号会被置信度系统降级到MEDIUM以下
             range_cfg = thresholds.direction.range.long
             long_imbalance_range = range_cfg.imbalance
             long_oi_change_range = range_cfg.oi_change
             
-            if (imbalance > long_imbalance_range and 
-                oi_change > long_oi_change_range):
+            # 严格模式：需要imbalance和oi_change同时满足（None检查）
+            if (imbalance is not None and imbalance > long_imbalance_range and 
+                oi_change is not None and oi_change > long_oi_change_range):
                 direction_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
                 return True, direction_tags
             
-            # 短期机会识别（3选1确认）
+            # 短期机会识别（3选N确认，需要None检查）
             if 'long' in thresholds.direction.range.short_term_opportunity:
                 opp = thresholds.direction.range.short_term_opportunity['long']
                 signals_met = 0
                 
-                # 信号1: 价格上涨
-                if price_change > opp.min_price_change_1h:
+                # 信号1: 价格上涨（需要None检查）
+                if price_change is not None and price_change > opp.min_price_change_1h:
                     signals_met += 1
-                # 信号2: OI增长
-                if oi_change > opp.min_oi_change_1h:
+                # 信号2: OI增长（需要None检查）
+                if oi_change is not None and oi_change > opp.min_oi_change_1h:
                     signals_met += 1
-                # 信号3: 买压
-                if imbalance > opp.min_taker_imbalance:
+                # 信号3: 买压（需要None检查）
+                if imbalance is not None and imbalance > opp.min_taker_imbalance:
                     signals_met += 1
                 
                 if signals_met >= opp.required_signals:
@@ -658,28 +659,30 @@ class DecisionCore:
         
         elif regime == MarketRegime.RANGE:
             # 震荡市：从配置读取阈值
+            # 注意：RANGE环境信号会被置信度系统降级到MEDIUM以下
             range_cfg = thresholds.direction.range.short
             short_imbalance_range = range_cfg.imbalance
             short_oi_change_range = range_cfg.oi_change
             
-            if (imbalance < -short_imbalance_range and 
-                oi_change > short_oi_change_range):
+            # 严格模式：需要imbalance和oi_change同时满足（None检查）
+            if (imbalance is not None and imbalance < -short_imbalance_range and 
+                oi_change is not None and oi_change > short_oi_change_range):
                 direction_tags.append(ReasonTag.STRONG_SELL_PRESSURE)
                 return True, direction_tags
             
-            # 短期机会识别（3选1确认）
+            # 短期机会识别（3选N确认，需要None检查）
             if 'short' in thresholds.direction.range.short_term_opportunity:
                 opp = thresholds.direction.range.short_term_opportunity['short']
                 signals_met = 0
                 
-                # 信号1: 价格下跌（注意：配置中是 max_price_change_1h，为负值）
-                if price_change < opp.min_price_change_1h:  # min_price_change_1h 为负值阈值
+                # 信号1: 价格下跌（需要None检查）
+                if price_change is not None and price_change < opp.min_price_change_1h:
                     signals_met += 1
-                # 信号2: OI增长
-                if oi_change > opp.min_oi_change_1h:
+                # 信号2: OI增长（需要None检查）
+                if oi_change is not None and oi_change > opp.min_oi_change_1h:
                     signals_met += 1
-                # 信号3: 卖压（注意：min_taker_imbalance 对于 short 是负值阈值）
-                if imbalance < opp.min_taker_imbalance:  # 卖压 imbalance < -threshold
+                # 信号3: 卖压（需要None检查）
+                if imbalance is not None and imbalance < opp.min_taker_imbalance:
                     signals_met += 1
                 
                 if signals_met >= opp.required_signals:

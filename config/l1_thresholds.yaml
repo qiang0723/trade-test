@@ -16,9 +16,33 @@ symbol_universe:
     - BTR    # BTR
     - GPS    # GPS
     - RIVER  # RIVER
+    - BULLA  # BULLA
   
   # 默认币种（前端初始化）
   default_symbol: BTC
+
+# ==================
+# 币种级别策略配置（基于回测数据）
+# ==================
+symbol_strategy:
+  # 高质量币种 - 可产生HIGH以上信号
+  # 回测结果：BTR LONG 84.2%, GPS SHORT 63.1%
+  high_quality_symbols:
+    - BTR    # LONG信号84.2%胜率
+    - GPS    # SHORT信号63.1%胜率
+  
+  # 币种方向偏好（基于回测胜率）
+  # 只允许指定方向产生HIGH以上信号
+  symbol_direction_bias:
+    BTR: long      # BTR只允许LONG (84.2%胜率)
+    GPS: short     # GPS只允许SHORT (63.1%胜率)
+    # 其他币种：默认允许双向，但需要ULTRA置信度
+  
+  # 默认策略：非高质量币种需要ULTRA才能输出信号
+  default_min_confidence: ultra
+  
+  # 高质量币种的最低置信度
+  high_quality_min_confidence: high
 
 # ==================
 # 定时更新配置（整合自 monitored_symbols.yaml）

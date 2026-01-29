@@ -6,6 +6,7 @@ Database Layer - 数据访问层
 - advisory_repository: L1单周期决策数据访问
 - dual_advisory_repository: 双周期决策数据访问  
 - pipeline_repository: 管道步骤数据访问
+- whitelist_repository: 动态白名单数据访问
 - migrations: 数据库迁移
 """
 
@@ -13,6 +14,7 @@ from .connection import DatabaseConnection
 from .advisory_repository import AdvisoryRepository
 from .dual_advisory_repository import DualAdvisoryRepository
 from .pipeline_repository import PipelineRepository
+from .whitelist_repository import WhitelistRepository
 from .migrations import DatabaseMigrations
 
 __all__ = [
@@ -20,6 +22,7 @@ __all__ = [
     'AdvisoryRepository',
     'DualAdvisoryRepository',
     'PipelineRepository',
+    'WhitelistRepository',
     'DatabaseMigrations',
 ]
 
@@ -50,6 +53,7 @@ class L1DatabaseModular:
         self.advisory = AdvisoryRepository(self.connection)
         self.dual_advisory = DualAdvisoryRepository(self.connection)
         self.pipeline = PipelineRepository(self.connection)
+        self.whitelist = WhitelistRepository(self.connection)
     
     # ========================================
     # 向后兼容方法（兼容旧API）
