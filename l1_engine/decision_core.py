@@ -25,7 +25,7 @@ import logging
 from typing import Tuple, List, Dict, Optional
 from models.feature_snapshot import FeatureSnapshot
 from models.thresholds import Thresholds
-from models.enums import Decision, Confidence, TradeQuality, MarketRegime, ExecutionPermission
+from models.enums import Decision, Confidence, TradeQuality, MarketRegime, ExecutionPermission, Timeframe
 from models.reason_tags import ReasonTag
 from models.decision_core_dto import (
     TimeframeDecisionDraft, DualTimeframeDecisionDraft,
@@ -106,9 +106,9 @@ class DecisionCore:
         if quality == TradeQuality.POOR:
             return create_no_trade_draft(quality_tags, regime)
         
-        # Step 5: 方向评估 ✅（简化版本，TODO：完善短期机会识别）
-        allow_long, long_tags = DecisionCore._eval_long_direction(features, regime, thresholds)
-        allow_short, short_tags = DecisionCore._eval_short_direction(features, regime, thresholds)
+        # Step 5: 方向评估 ✅（PR-FIX: 传递timeframe参数）
+        allow_long, long_tags = DecisionCore._eval_long_direction(features, regime, thresholds, timeframe)
+        allow_short, short_tags = DecisionCore._eval_short_direction(features, regime, thresholds, timeframe)
         
         # Step 6: 决策优先级 ✅
         decision, direction_tags = DecisionCore._decide_priority(allow_short, allow_long)
@@ -478,7 +478,8 @@ class DecisionCore:
     def _eval_long_direction(
         features: FeatureSnapshot,
         regime: MarketRegime,
-        thresholds: Thresholds
+        thresholds: Thresholds,
+        timeframe: 'Timeframe' = None
     ) -> Tuple[bool, List[ReasonTag]]:
         """
         做多方向评估（纯函数）
@@ -488,7 +489,7 @@ class DecisionCore:
         逻辑：
         - TREND: imbalance > threshold AND oi_change > threshold AND price_change > threshold
         - RANGE: imbalance > threshold AND oi_change > threshold
-        - RANGE短期机会: TODO（需要扩展models/thresholds.py添加DirectionThresholds）
+        - RANGE短期机会: 3选1确认
         
         None-safe: 关键字段缺失时返回False（不误判LONG）
         
@@ -496,51 +497,80 @@ class DecisionCore:
             features: 特征快照
             regime: 市场环境
             thresholds: 阈值配置
+            timeframe: 时间框架（SHORT_TERM使用15m数据，MEDIUM_TERM使用1h数据）
         
         Returns:
             (是否允许做多, 原因标签列表)
         """
         direction_tags = []
         
-        # PATCH-P0-02: None-safe读取
+        # PR-FIX: 根据timeframe选择数据字段
+        # SHORT_TERM (5m/15m): 优先使用15分钟数据
+        # MEDIUM_TERM (1h/6h): 使用1小时数据
+        if timeframe == Timeframe.SHORT_TERM:
+            # 短期评估：优先使用15分钟数据，回退到1小时
+            price_change = features.features.price.price_change_15m
+            oi_change = features.features.open_interest.oi_change_15m
+            if price_change is None:
+                price_change = features.features.price.price_change_1h
+            if oi_change is None:
+                oi_change = features.features.open_interest.oi_change_1h
+        else:
+            # 中期评估或默认：使用1小时数据
+            price_change = features.features.price.price_change_1h
+            oi_change = features.features.open_interest.oi_change_1h
+        
+        # imbalance 使用1小时数据（更稳定）
         imbalance = features.features.taker_imbalance.taker_imbalance_1h
-        oi_change = features.features.open_interest.oi_change_1h
-        price_change = features.features.price.price_change_1h
         
         # 关键字段缺失，无法判断方向
         if imbalance is None or oi_change is None or price_change is None:
-            logger.debug("Long direction eval skipped (key fields missing)")
+            logger.debug(f"Long direction eval skipped (key fields missing: imbalance={imbalance}, oi={oi_change}, price={price_change})")
             return False, direction_tags
         
-        # TODO: 需要扩展models/thresholds.py添加DirectionThresholds
-        # 临时使用硬编码阈值（应该从thresholds.direction读取）
-        
+        # 从配置读取方向阈值（PR-FIX: 替换硬编码TODO值）
         if regime == MarketRegime.TREND:
             # 趋势市：多方强势
-            long_imbalance_trend = 0.6  # TODO: thresholds.direction.long_imbalance_trend
-            long_oi_change_trend = 0.3  # TODO: thresholds.direction.long_oi_change_trend
-            long_price_change_trend = 0.02  # TODO: thresholds.direction.long_price_change_trend
+            trend_cfg = thresholds.direction.trend.long
+            long_imbalance_trend = trend_cfg.imbalance
+            long_oi_change_trend = trend_cfg.oi_change
+            long_price_change_trend = trend_cfg.price_change or 0.004  # 默认0.4%
             
             if (imbalance > long_imbalance_trend and 
                 oi_change > long_oi_change_trend and 
                 price_change > long_price_change_trend):
+                direction_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
                 return True, direction_tags
         
         elif regime == MarketRegime.RANGE:
-            # 震荡市：原有强信号逻辑
-            long_imbalance_range = 0.7  # TODO: thresholds.direction.long_imbalance_range
-            long_oi_change_range = 0.4  # TODO: thresholds.direction.long_oi_change_range
+            # 震荡市：从配置读取阈值
+            range_cfg = thresholds.direction.range.long
+            long_imbalance_range = range_cfg.imbalance
+            long_oi_change_range = range_cfg.oi_change
             
             if (imbalance > long_imbalance_range and 
                 oi_change > long_oi_change_range):
+                direction_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
                 return True, direction_tags
             
-            # TODO: 方案4：短期机会识别（综合指标，3选2确认）
-            # 需要扩展models/thresholds.py添加:
-            # - thresholds.direction.range.short_term_opportunity.long.min_price_change_1h
-            # - thresholds.direction.range.short_term_opportunity.long.min_oi_change_1h
-            # - thresholds.direction.range.short_term_opportunity.long.min_taker_imbalance
-            # - thresholds.direction.range.short_term_opportunity.long.required_signals
+            # 短期机会识别（3选1确认）
+            if 'long' in thresholds.direction.range.short_term_opportunity:
+                opp = thresholds.direction.range.short_term_opportunity['long']
+                signals_met = 0
+                
+                # 信号1: 价格上涨
+                if price_change > opp.min_price_change_1h:
+                    signals_met += 1
+                # 信号2: OI增长
+                if oi_change > opp.min_oi_change_1h:
+                    signals_met += 1
+                # 信号3: 买压
+                if imbalance > opp.min_taker_imbalance:
+                    signals_met += 1
+                
+                if signals_met >= opp.required_signals:
+                    direction_tags.append(ReasonTag.RANGE_SHORT_TERM_LONG)
+                    return True, direction_tags
         
         return False, direction_tags
     
@@ -548,7 +578,8 @@ class DecisionCore:
     def _eval_short_direction(
         features: FeatureSnapshot,
         regime: MarketRegime,
-        thresholds: Thresholds
+        thresholds: Thresholds,
+        timeframe: 'Timeframe' = None
     ) -> Tuple[bool, List[ReasonTag]]:
         """
         做空方向评估（纯函数）
@@ -558,7 +589,7 @@ class DecisionCore:
         逻辑：
         - TREND: imbalance < -threshold AND oi_change > threshold AND price_change < -threshold
         - RANGE: imbalance < -threshold AND oi_change > threshold
-        - RANGE短期机会: TODO（需要扩展models/thresholds.py添加DirectionThresholds）
+        - RANGE短期机会: 3选1确认
         
         None-safe: 关键字段缺失时返回False（不误判SHORT）
         
@@ -566,51 +597,78 @@ class DecisionCore:
             features: 特征快照
             regime: 市场环境
             thresholds: 阈值配置
+            timeframe: 时间框架（SHORT_TERM使用15m数据，MEDIUM_TERM使用1h数据）
         
         Returns:
             (是否允许做空, 原因标签列表)
         """
         direction_tags = []
         
-        # PATCH-P0-02: None-safe读取
+        # PR-FIX: 根据timeframe选择数据字段
+        if timeframe == Timeframe.SHORT_TERM:
+            # 短期评估：优先使用15分钟数据，回退到1小时
+            price_change = features.features.price.price_change_15m
+            oi_change = features.features.open_interest.oi_change_15m
+            if price_change is None:
+                price_change = features.features.price.price_change_1h
+            if oi_change is None:
+                oi_change = features.features.open_interest.oi_change_1h
+        else:
+            # 中期评估或默认：使用1小时数据
+            price_change = features.features.price.price_change_1h
+            oi_change = features.features.open_interest.oi_change_1h
+        
+        # imbalance 使用1小时数据（更稳定）
         imbalance = features.features.taker_imbalance.taker_imbalance_1h
-        oi_change = features.features.open_interest.oi_change_1h
-        price_change = features.features.price.price_change_1h
         
         # 关键字段缺失，无法判断方向
         if imbalance is None or oi_change is None or price_change is None:
-            logger.debug("Short direction eval skipped (key fields missing)")
+            logger.debug(f"Short direction eval skipped (key fields missing: imbalance={imbalance}, oi={oi_change}, price={price_change})")
             return False, direction_tags
         
-        # TODO: 需要扩展models/thresholds.py添加DirectionThresholds
-        # 临时使用硬编码阈值（应该从thresholds.direction读取）
-        
+        # 从配置读取方向阈值（PR-FIX: 替换硬编码TODO值）
         if regime == MarketRegime.TREND:
             # 趋势市：空方强势
-            short_imbalance_trend = 0.6  # TODO: thresholds.direction.short_imbalance_trend
-            short_oi_change_trend = 0.3  # TODO: thresholds.direction.short_oi_change_trend
-            short_price_change_trend = 0.02  # TODO: thresholds.direction.short_price_change_trend
+            trend_cfg = thresholds.direction.trend.short
+            short_imbalance_trend = trend_cfg.imbalance
+            short_oi_change_trend = trend_cfg.oi_change
+            short_price_change_trend = trend_cfg.price_change or 0.004  # 默认0.4%
             
             if (imbalance < -short_imbalance_trend and 
                 oi_change > short_oi_change_trend and 
                 price_change < -short_price_change_trend):
+                direction_tags.append(ReasonTag.STRONG_SELL_PRESSURE)
                 return True, direction_tags
         
         elif regime == MarketRegime.RANGE:
-            # 震荡市：原有强信号逻辑
-            short_imbalance_range = 0.7  # TODO: thresholds.direction.short_imbalance_range
-            short_oi_change_range = 0.4  # TODO: thresholds.direction.short_oi_change_range
+            # 震荡市：从配置读取阈值
+            range_cfg = thresholds.direction.range.short
+            short_imbalance_range = range_cfg.imbalance
+            short_oi_change_range = range_cfg.oi_change
             
             if (imbalance < -short_imbalance_range and 
                 oi_change > short_oi_change_range):
+                direction_tags.append(ReasonTag.STRONG_SELL_PRESSURE)
                 return True, direction_tags
             
-            # TODO: 方案4：短期机会识别（综合指标，3选2确认）
-            # 需要扩展models/thresholds.py添加:
-            # - thresholds.direction.range.short_term_opportunity.short.max_price_change_1h
-            # - thresholds.direction.range.short_term_opportunity.short.min_oi_change_1h
-            # - thresholds.direction.range.short_term_opportunity.short.max_taker_imbalance
-            # - thresholds.direction.range.short_term_opportunity.short.required_signals
+            # 短期机会识别（3选1确认）
+            if 'short' in thresholds.direction.range.short_term_opportunity:
+                opp = thresholds.direction.range.short_term_opportunity['short']
+                signals_met = 0
+                
+                # 信号1: 价格下跌（注意：配置中是 max_price_change_1h，为负值）
+                if price_change < opp.min_price_change_1h:  # min_price_change_1h 为负值阈值
+                    signals_met += 1
+                # 信号2: OI增长
+                if oi_change > opp.min_oi_change_1h:
+                    signals_met += 1
+                # 信号3: 卖压（注意：min_taker_imbalance 对于 short 是负值阈值）
+                if imbalance < opp.min_taker_imbalance:  # 卖压 imbalance < -threshold
+                    signals_met += 1
+                
+                if signals_met >= opp.required_signals:
+                    direction_tags.append(ReasonTag.RANGE_SHORT_TERM_SHORT)
+                    return True, direction_tags
         
         return False, direction_tags
     
@@ -784,21 +842,68 @@ class DecisionCore:
         Returns:
             Confidence
         """
-        # TODO: 实现完整的PR-D混合模式置信度计算
-        # 临时实现：简单规则
+        # PR-D混合模式置信度计算（使用配置文件中的评分系统）
         
         if decision == Decision.NO_TRADE:
             return Confidence.LOW
         
-        # 根据质量和环境简单映射
-        if quality == TradeQuality.GOOD and regime == MarketRegime.TREND:
-            return Confidence.HIGH
-        elif quality == TradeQuality.GOOD:
-            return Confidence.MEDIUM
+        # 从配置读取评分参数
+        scoring = thresholds.confidence_scoring
+        
+        # Step 1: 基础加分
+        score = 0
+        
+        # 决策分（有方向=加分）
+        score += scoring.decision_score  # 30分
+        
+        # 市场环境分
+        if regime == MarketRegime.TREND:
+            score += scoring.regime_trend_score  # 30分
+        elif regime == MarketRegime.RANGE:
+            score += scoring.regime_range_score  # 20分
+        elif regime == MarketRegime.EXTREME:
+            score += scoring.regime_extreme_score  # 0分
+        
+        # 质量分
+        if quality == TradeQuality.GOOD:
+            score += scoring.quality_good_score  # 30分
         elif quality == TradeQuality.UNCERTAIN:
-            return Confidence.LOW
+            score += scoring.quality_uncertain_score  # 25分
+        elif quality == TradeQuality.POOR:
+            score += scoring.quality_poor_score  # 0分
+        
+        # 强信号加分
+        strong_tags = {ReasonTag.STRONG_BUY_PRESSURE, ReasonTag.STRONG_SELL_PRESSURE}
+        if scoring.strong_signal_boost.enabled and any(t in strong_tags for t in reason_tags):
+            score += scoring.strong_signal_bonus  # 15分
+        
+        # Step 2: 档位映射
+        thresholds_map = scoring.thresholds
+        if score >= thresholds_map.ultra:
+            confidence = Confidence.ULTRA
+        elif score >= thresholds_map.high:
+            confidence = Confidence.HIGH
+        elif score >= thresholds_map.medium:
+            confidence = Confidence.MEDIUM
         else:
-            return Confidence.LOW
+            confidence = Confidence.LOW
+        
+        # Step 3: 硬降级上限（caps）
+        caps = scoring.caps
+        reduce_tags = set(thresholds.reason_tag_rules.reduce_tags) if thresholds.reason_tag_rules else set()
+        
+        # 检查是否有降级标签
+        has_reduce_tag = any(t.value in [rt.value if hasattr(rt, 'value') else rt for rt in reduce_tags] for t in reason_tags)
+        
+        if has_reduce_tag and caps.uncertain_quality_max:
+            cap_confidence = Confidence[caps.uncertain_quality_max.upper()]
+            # 置信度优先级映射
+            conf_priority = {Confidence.ULTRA: 4, Confidence.HIGH: 3, Confidence.MEDIUM: 2, Confidence.LOW: 1}
+            if conf_priority.get(confidence, 0) > conf_priority.get(cap_confidence, 0):
+                confidence = cap_confidence
+        
+        logger.debug(f"Confidence computed: score={score}, confidence={confidence.value}")
+        return confidence
 
 
 # ============================================

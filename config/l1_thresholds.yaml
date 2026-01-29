@@ -50,7 +50,7 @@ data_quality:
   max_staleness_seconds: 120      # 数据最大过期时间（秒），超过视为过期
 
 # ==================
-# 决策频率控制（PR-C）
+# 决策频率控制（PR-C）- 平衡调整
 # ==================
 decision_control:
   # 最小决策间隔（秒）- 防止短时间内重复建议
@@ -108,85 +108,85 @@ trade_quality:
     price_threshold: 0.02         # 价格变化阈值（小数格式：0.02=2%）
     oi_threshold: 0.05            # OI变化阈值（小数格式：0.05=5%）
   
-  # 震荡市弱信号
+  # 震荡市弱信号（优化：放宽阈值，减少UNCERTAIN判定）
   range_weak:
-    imbalance: 0.6                # 失衡阈值（-1到1范围）
-    oi: 0.10                      # OI变化阈值（小数格式：0.10=10%）
+    imbalance: 0.75               # 失衡阈值（优化：0.6→0.75，更宽松）
+    oi: 0.15                      # OI变化阈值（优化：0.10→0.15，更宽松）
 
 # ==================
-# 方向评估阈值 - 折中方案：目标30-50笔交易
+# 方向评估阈值 - 回测优化：LONG宽松，SHORT严格
+# 回测结果：SHORT信号胜率仅8-23%，LONG信号表现较好
 # ==================
 direction:
   # 趋势市
   trend:
     long:
-      imbalance: 0.12             # 买卖失衡阈值
-      oi_change: 0.02             # 1h OI增长阈值
-      price_change: 0.004         # 1h价格上涨阈值
+      imbalance: 0.08             # 买卖失衡阈值（LONG宽松：保持8%）
+      oi_change: 0.002            # 1h OI增长阈值（LONG宽松：0.2%）
+      price_change: 0.006         # 1h价格上涨阈值（LONG宽松：0.6%）
     short:
-      imbalance: 0.12             # 买卖失衡阈值
-      oi_change: 0.02             # 1h OI增长阈值
-      price_change: 0.004         # 1h价格下跌阈值
+      imbalance: 0.15             # 买卖失衡阈值（SHORT严格：提高到15%）
+      oi_change: 0.008            # 1h OI增长阈值（SHORT严格：0.8%）
+      price_change: 0.015         # 1h价格下跌阈值（SHORT严格：1.5%）
   
-  # 震荡市
+  # 震荡市（回测优化：LONG宽松，SHORT严格）
   range:
     long:
-      imbalance: 0.15             # 失衡要求
-      oi_change: 0.025            # OI增长要求
+      imbalance: 0.08             # 失衡要求（LONG宽松：8%）
+      oi_change: 0.003            # OI增长要求（LONG宽松：0.3%）
     short:
-      imbalance: 0.15             # 失衡要求
-      oi_change: 0.025            # OI增长要求
+      imbalance: 0.15             # 失衡要求（SHORT严格：15%）
+      oi_change: 0.008            # OI增长要求（SHORT严格：0.8%）
     
-    # 短期机会识别 - 3选1确认
+    # 短期机会识别 - LONG宽松(3选1)，SHORT严格(3选2)
     short_term_opportunity:
       long:
-        min_price_change_1h: 0.005      # 1小时涨幅 > 0.5%
-        min_oi_change_1h: 0.03          # OI增长 > 3%
-        min_taker_imbalance: 0.12       # PATCH-P0-05: 新键名（买压 > 12%）
-        min_buy_sell_imbalance: 0.12    # DEPRECATED: 旧键名（兼容）
-        required_signals: 1             # 3选1
+        min_price_change_1h: 0.006      # 1小时涨幅 > 0.6%（LONG宽松）
+        min_oi_change_1h: 0.003         # OI增长 > 0.3%（LONG宽松）
+        min_taker_imbalance: 0.06       # 买压 > 6%（LONG宽松）
+        min_buy_sell_imbalance: 0.06    # DEPRECATED: 旧键名（兼容）
+        required_signals: 1             # 3选1（LONG宽松）
       short:
-        max_price_change_1h: -0.005     # 1小时跌幅 < -0.5%
-        min_oi_change_1h: 0.03          # OI增长 > 3%
-        max_taker_imbalance: -0.12      # PATCH-P0-05: 新键名（卖压 < -12%）
+        max_price_change_1h: -0.015     # 1小时跌幅 < -1.5%（SHORT严格）
+        min_oi_change_1h: 0.008         # OI增长 > 0.8%（SHORT严格）
+        max_taker_imbalance: -0.12      # 卖压 < -12%（SHORT严格）
         max_buy_sell_imbalance: -0.12   # DEPRECATED: 旧键名（兼容）
-        required_signals: 1             # 3选1
+        required_signals: 2             # 3选2（SHORT严格）
 
 # ==================
-# 置信度配置（PR-D混合模式）
+# 置信度配置 - 回测优化版：只保留确定性信号
+# 回测结论：TREND环境100%胜率，RANGE环境18.4%胜率
+# 策略：只在TREND环境产生HIGH以上信号
 # ==================
 confidence_scoring:
-  # 基础分（保持现有评分体系）
+  # 基础分（回测优化：RANGE环境降为0分）
   decision_score: 30               # 决策类型分（LONG/SHORT=30, NO_TRADE=0）
-  regime_trend_score: 30           # TREND环境分
-  regime_range_score: 10           # RANGE环境分
+  regime_trend_score: 35           # TREND环境分（提高：30→35）
+  regime_range_score: 0            # RANGE环境分（回测优化：15→0，禁止RANGE信号）
   regime_extreme_score: 0          # EXTREME环境分
   quality_good_score: 30           # GOOD质量分
-  quality_uncertain_score: 15      # UNCERTAIN质量分（降级）
+  quality_uncertain_score: 15      # UNCERTAIN质量分（收紧：20→15）
   quality_poor_score: 0            # POOR质量分
-  strong_signal_bonus: 10          # 强信号加分
+  strong_signal_bonus: 15          # 强信号加分（提高：10→15）
   
-  # 档位映射（保持现有）
+  # 档位映射（回测优化：提高门槛）
   thresholds:
-    ultra: 90                      # >=90分 → ULTRA
-    high: 65                       # >=65分 → HIGH
-    medium: 40                     # >=40分 → MEDIUM
+    ultra: 85                      # >=85分 → ULTRA（回测优化：90→85）
+    high: 75                       # >=75分 → HIGH（回测优化：65→75，确保只有TREND）
+    medium: 50                     # >=50分 → MEDIUM（回测优化：45→50）
   
-  # 硬降级上限（caps）- 方案D修订：调整为HIGH以配合ALLOW_REDUCED
+  # 硬降级上限（caps）- MEDIUM确保只有TREND能到HIGH
   caps:
-    # UNCERTAIN质量的上限（修订：MEDIUM → HIGH，使ALLOW_REDUCED可执行）
-    uncertain_quality_max: "HIGH"  # HIGH 允许降级执行
+    # UNCERTAIN质量的上限
+    uncertain_quality_max: "MEDIUM"  # MEDIUM（收紧：HIGH→MEDIUM）
     
-    # PR-I: reduce_tags 的默认cap（避免忘配 tag_caps 导致过严）
-    # 建议设置为 uncertain_quality_max 以保持一致性
-    # 如果未配置，会自动回退到 uncertain_quality_max
-    reduce_default_max: "HIGH"     # 默认值（可选，未配置时等于 uncertain_quality_max）
+    # reduce_tags 的默认cap（必须 >= min_confidence_reduced）
+    reduce_default_max: "MEDIUM"     # 默认值（收紧：HIGH→MEDIUM）
     
-    # 特定ReasonTag的上限（修订：MEDIUM → HIGH，使ALLOW_REDUCED可执行）
-    # 注意：显式配置的 tag_caps 会覆盖 reduce_default_max
+    # 特定ReasonTag的上限（必须 >= min_confidence_reduced = MEDIUM）
     tag_caps:
-      noisy_market: "HIGH"           # HIGH 允许降级执行
-      weak_signal_in_range: "HIGH"   # HIGH 允许降级执行
+      noisy_market: "MEDIUM"         # MEDIUM（必须 >= min_confidence_reduced）
+      weak_signal_in_range: "MEDIUM" # MEDIUM（禁止RANGE弱信号达到HIGH）
   
   # 强信号突破
   strong_signal_boost:

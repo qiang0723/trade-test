@@ -109,9 +109,11 @@ class FeatureBuilder:
             trace=trace
         )
         
-        logger.debug(f"[{symbol}] FeatureSnapshot built: "
+        # 诊断日志（INFO级别以便在生产环境看到）
+        logger.info(f"[{symbol}] FeatureSnapshot built: "
                     f"short_evaluable={coverage.short_evaluable}, "
-                    f"medium_evaluable={coverage.medium_evaluable}")
+                    f"medium_evaluable={coverage.medium_evaluable}, "
+                    f"missing_windows={coverage.missing_windows}")
         
         return snapshot
     
@@ -254,21 +256,41 @@ class FeatureBuilder:
         """
         # 方式1: 从raw_data的_metadata中获取（PATCH-2增强）
         metadata = raw_data.get('_metadata', {})
-        lookback_coverage = metadata.get('lookback_coverage', {})
+        raw_coverage = metadata.get('lookback_coverage', {})
+        
+        # 统一格式：get_lookback_coverage返回 {'has_data': ..., 'windows': {...}}
+        # 需要提取windows部分
+        if isinstance(raw_coverage, dict) and 'windows' in raw_coverage:
+            lookback_coverage = raw_coverage.get('windows', {})
+        else:
+            lookback_coverage = raw_coverage  # 兼容旧格式
         
         # 方式2: 如果raw_data中没有，尝试从data_cache直接查询
         if not lookback_coverage and data_cache and hasattr(data_cache, 'get_lookback_coverage'):
             try:
-                lookback_coverage = data_cache.get_lookback_coverage(symbol)
+                result = data_cache.get_lookback_coverage(symbol)
+                # get_lookback_coverage返回 {'windows': {...}}，需要提取windows
+                lookback_coverage = result.get('windows', {}) if isinstance(result, dict) else {}
+                logger.info(f"[{symbol}] Got coverage from data_cache: has_data={result.get('has_data')}, cache_size={result.get('cache_size')}")
             except Exception as e:
                 logger.warning(f"[{symbol}] Failed to get lookback_coverage from data_cache: {e}")
                 lookback_coverage = {}
+        
+        # 诊断：检查lookback_coverage来源
+        logger.info(f"[{symbol}] lookback_coverage source: from_metadata={bool(metadata.get('lookback_coverage'))}, final_keys={list(lookback_coverage.keys())}")
         
         # 提取各窗口的lookback信息
         lookback_5m = lookback_coverage.get('5m', {})
         lookback_15m = lookback_coverage.get('15m', {})
         lookback_1h = lookback_coverage.get('1h', {})
         lookback_6h = lookback_coverage.get('6h', {})
+        
+        # 诊断日志
+        logger.info(f"[{symbol}] Coverage windows: "
+                    f"5m={lookback_5m.get('is_valid')}, "
+                    f"15m={lookback_15m.get('is_valid')}, "
+                    f"1h={lookback_1h.get('is_valid')}, "
+                    f"6h={lookback_6h.get('is_valid')}")
         
         # 缺失窗口列表
         missing_windows = []

@@ -21,6 +21,7 @@ services:
       - TZ=Asia/Shanghai
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=INFO
+      - FLASK_DEBUG=false  # 关闭debug模式，防止热重载清空缓存
     logging:
       driver: "json-file"
       options:
@@ -29,7 +30,7 @@ services:
     networks:
       - l1-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/api/l1/advisory/BTC"]
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
       timeout: 10s
       retries: 3

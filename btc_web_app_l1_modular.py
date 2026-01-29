@@ -187,10 +187,14 @@ if __name__ == '__main__':
     logger.info("=" * 60)
     
     try:
+        # 从环境变量读取debug模式（Docker中默认关闭）
+        import os
+        debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+        
         app.run(
             host='0.0.0.0', 
             port=5001,
-            debug=True
+            debug=debug_mode
         )
     finally:
         # 应用关闭时停止服务

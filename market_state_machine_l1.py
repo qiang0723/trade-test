@@ -2015,6 +2015,11 @@ class L1AdvisoryEngine:
         # ===== Step 1: 特征生成（PR-ARCH-01）=====
         try:
             data_cache = get_cache()
+            
+            # 🔥 FIX: 先存储数据到缓存（解决18小时无信号问题）
+            data_cache.store_tick(symbol, data)
+            logger.info(f"[{symbol}] ✅ Market data stored to cache (cache_size: {len(data_cache.cache.get(symbol, []))})")
+            
             feature_snapshot = self.feature_builder.build(symbol, data, data_cache=data_cache)
             logger.debug(f"[{symbol}] FeatureSnapshot built (version: {feature_snapshot.metadata.feature_version.value})")
         except Exception as e:
@@ -2209,14 +2214,19 @@ class L1AdvisoryEngine:
         
         # Rule 2: 方向相同（LONG/SHORT）
         if short.decision == medium.decision and short.decision != Decision.NO_TRADE:
+            # 根据决策方向选择对齐类型
+            alignment_type = AlignmentType.BOTH_LONG if short.decision == Decision.LONG else AlignmentType.BOTH_SHORT
+            # 选择更高的置信度（Confidence枚举不能直接比较，使用优先级映射）
+            confidence_priority = {Confidence.ULTRA: 4, Confidence.HIGH: 3, Confidence.MEDIUM: 2, Confidence.LOW: 1}
+            best_confidence = short.confidence if confidence_priority.get(short.confidence, 0) >= confidence_priority.get(medium.confidence, 0) else medium.confidence
             return AlignmentAnalysis(
                 is_aligned=True,
-                alignment_type=AlignmentType.ALIGNED_SIGNAL,
+                alignment_type=alignment_type,
                 has_conflict=False,
                 conflict_resolution=None,
                 resolution_reason="短期和中期方向一致",
                 recommended_action=short.decision,
-                recommended_confidence=max(short.confidence, medium.confidence),
+                recommended_confidence=best_confidence,
                 recommendation_notes=f"✅ 双周期一致：{short.decision.value.upper()}"
             )
         
@@ -2226,11 +2236,14 @@ class L1AdvisoryEngine:
             active_decision = medium.decision if short.decision == Decision.NO_TRADE else short.decision
             active_timeframe = "中期" if short.decision == Decision.NO_TRADE else "短期"
             
+            # 根据活跃信号方向选择部分对齐类型
+            partial_type = AlignmentType.PARTIAL_LONG if active_decision == Decision.LONG else AlignmentType.PARTIAL_SHORT
+            
             return AlignmentAnalysis(
                 is_aligned=False,
-                alignment_type=AlignmentType.PARTIALLY_ALIGNED,
+                alignment_type=partial_type,
                 has_conflict=False,
-                conflict_resolution=ConflictResolution.PREFER_MEDIUM_TERM if active_decision == medium.decision else ConflictResolution.PREFER_SHORT_TERM,
+                conflict_resolution=ConflictResolution.FOLLOW_MEDIUM_TERM if active_decision == medium.decision else ConflictResolution.FOLLOW_SHORT_TERM,
                 resolution_reason=f"只有{active_timeframe}有信号",
                 recommended_action=active_decision,
                 recommended_confidence=Confidence.LOW,
@@ -2238,11 +2251,13 @@ class L1AdvisoryEngine:
             )
         
         # Rule 4: 方向相反（LONG vs SHORT）
+        # 根据冲突类型选择对齐类型
+        conflict_type = AlignmentType.CONFLICT_LONG_SHORT if short.decision == Decision.LONG else AlignmentType.CONFLICT_SHORT_LONG
         return AlignmentAnalysis(
             is_aligned=False,
-            alignment_type=AlignmentType.CONFLICTING,
+            alignment_type=conflict_type,
             has_conflict=True,
-            conflict_resolution=ConflictResolution.PREFER_MEDIUM_TERM,
+            conflict_resolution=ConflictResolution.FOLLOW_MEDIUM_TERM,
             resolution_reason="短期和中期方向冲突，优先中期",
             recommended_action=medium.decision,
             recommended_confidence=Confidence.LOW,

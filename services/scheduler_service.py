@@ -46,6 +46,9 @@ class SchedulerService:
             return None
         
         try:
+            # 缓存预热：启动时从Binance获取历史数据
+            self._warmup_cache()
+            
             periodic_config = self.config.get('periodic_update', {})
             
             if not periodic_config.get('enabled', True):
@@ -56,6 +59,7 @@ class SchedulerService:
             
             # 任务1: 定时自动获取决策并保存
             interval_minutes = periodic_config.get('interval_minutes', 1)
+            from datetime import datetime
             self.scheduler.add_job(
                 func=self._periodic_advisory_update,
                 trigger='interval',
@@ -63,7 +67,7 @@ class SchedulerService:
                 id='periodic_advisory',
                 name=f'Periodic L1 advisory update (every {interval_minutes} minute(s))',
                 max_instances=1,
-                next_run_time=None
+                next_run_time=datetime.now()  # 立即开始执行
             )
             
             # 任务2: 定期清理旧数据
@@ -94,6 +98,27 @@ class SchedulerService:
         if self.scheduler:
             self.scheduler.shutdown()
             logger.info("Scheduler stopped")
+    
+    def _warmup_cache(self):
+        """预热缓存：从Binance获取历史数据填充缓存"""
+        try:
+            symbols = self.config.get('symbols', ['BTCUSDT'])
+            warmup_hours = 6  # 预热6小时历史数据
+            
+            logger.info(f"🔥 Starting cache warmup for {len(symbols)} symbols...")
+            
+            # 调用binance_fetcher的预热方法
+            if hasattr(self.binance_fetcher, 'warmup_cache'):
+                results = self.binance_fetcher.warmup_cache(symbols, hours=warmup_hours)
+                
+                # 统计结果
+                success_count = sum(1 for r in results.values() if r.get('success'))
+                logger.info(f"🔥 Cache warmup completed: {success_count}/{len(symbols)} symbols warmed up")
+            else:
+                logger.warning("BinanceDataFetcher does not have warmup_cache method, skipping warmup")
+        
+        except Exception as e:
+            logger.error(f"Error during cache warmup: {e}", exc_info=True)
     
     def _periodic_advisory_update(self):
         """定时更新任务：每分钟自动获取市场数据并生成决策"""
@@ -148,11 +173,14 @@ class SchedulerService:
                 
                 # 生成L1双周期决策并保存
                 try:
-                    result = self.advisory_engine.on_new_tick_dual(symbol, market_data)
-                    self.l1_db.save_dual_advisory_result(symbol, result)
+                    # 统一使用不带USDT后缀的符号名（数据库一致性）
+                    db_symbol = symbol.replace('USDT', '') if symbol.endswith('USDT') else symbol
+                    
+                    result = self.advisory_engine.on_new_tick_dual(db_symbol, market_data)
+                    self.l1_db.save_dual_advisory_result(db_symbol, result)
                     
                     logger.info(
-                        f"✅ Periodic update saved: {symbol} → {result.alignment.recommended_action.value} "
+                        f"✅ Periodic update saved: {db_symbol} → {result.alignment.recommended_action.value} "
                         f"(short: {result.short_term.decision.value}, medium: {result.medium_term.decision.value})"
                     )
                 

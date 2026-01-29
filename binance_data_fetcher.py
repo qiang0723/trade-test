@@ -67,8 +67,10 @@ class BinanceDataFetcher:
         # 智能识别：避免重复拼接 USDT
         if symbol.endswith('USDT'):
             trading_symbol = symbol  # 已经是完整交易对，直接使用
+            cache_symbol = symbol.replace('USDT', '')  # 缓存使用不带后缀的符号
         else:
             trading_symbol = f"{symbol}USDT"  # 基础币种，拼接 USDT
+            cache_symbol = symbol  # 缓存使用原符号
         
         try:
             # 1. 获取24h ticker
@@ -126,8 +128,8 @@ class BinanceDataFetcher:
             else:
                 logger.warning(f"Incomplete klines data for {symbol}, some fields may be None")
             
-            # 5. 使用缓存计算历史变化率
-            enhanced_data = self.cache.get_enhanced_market_data(symbol, current_data)
+            # 5. 使用缓存计算历史变化率（使用不带USDT后缀的符号名）
+            enhanced_data = self.cache.get_enhanced_market_data(cache_symbol, current_data)
             
             # PR-003: 标注数据完整性
             enhanced_data['_data_complete'] = data_complete
@@ -355,6 +357,85 @@ class BinanceDataFetcher:
             缓存信息字典
         """
         return self.cache.get_cache_info(symbol)
+    
+    def warmup_cache(self, symbols: list, hours: int = 6) -> dict:
+        """
+        预热缓存：从Binance获取历史K线数据填充缓存
+        
+        Args:
+            symbols: 币种符号列表（如 ['BTC', 'ETH']）
+            hours: 预热的历史数据时长（默认6小时）
+        
+        Returns:
+            dict: 预热结果 {symbol: {'success': bool, 'ticks': int, 'error': str}}
+        """
+        from datetime import datetime, timedelta
+        
+        results = {}
+        logger.info(f"🔥 Starting cache warmup for {len(symbols)} symbols, {hours} hours each...")
+        
+        for symbol in symbols:
+            try:
+                # 统一使用不带USDT后缀的符号名
+                cache_symbol = symbol.replace('USDT', '') if symbol.endswith('USDT') else symbol
+                trading_symbol = f"{cache_symbol}USDT"
+                
+                # 获取历史K线数据（1分钟K线）
+                # 6小时 = 360根K线，用limit参数获取
+                limit = hours * 60
+                
+                klines = self.client.futures_klines(
+                    symbol=trading_symbol,
+                    interval='1m',
+                    limit=min(limit, 1500)  # Binance最大限制1500
+                )
+                
+                if not klines:
+                    results[cache_symbol] = {'success': False, 'ticks': 0, 'error': 'No klines returned'}
+                    continue
+                
+                # 同时获取当前OI和资金费率（用于填充tick数据）
+                try:
+                    oi_info = self.client.futures_open_interest(symbol=trading_symbol)
+                    current_oi = float(oi_info['openInterest']) if oi_info else 0.0
+                    
+                    funding_info = self.client.futures_funding_rate(symbol=trading_symbol, limit=1)
+                    current_funding = float(funding_info[0]['fundingRate']) if funding_info else 0.0
+                except:
+                    current_oi = 0.0
+                    current_funding = 0.0
+                
+                # 将K线数据转换为tick并存入缓存
+                ticks_stored = 0
+                for kline in klines:
+                    # K线格式: [open_time, open, high, low, close, volume, close_time, ...]
+                    timestamp = datetime.fromtimestamp(kline[0] / 1000)  # 转换毫秒时间戳
+                    close_price = float(kline[4])
+                    volume = float(kline[5])
+                    
+                    tick_data = {
+                        'price': close_price,
+                        'volume_24h': volume,  # 这里用K线volume作为近似
+                        'open_interest': current_oi,  # 用当前OI（近似）
+                        'funding_rate': current_funding
+                    }
+                    
+                    self.cache.store_tick(cache_symbol, tick_data, timestamp)
+                    ticks_stored += 1
+                
+                results[cache_symbol] = {'success': True, 'ticks': ticks_stored, 'error': None}
+                logger.info(f"✅ Warmup completed for {cache_symbol}: {ticks_stored} ticks stored")
+                
+            except Exception as e:
+                results[cache_symbol] = {'success': False, 'ticks': 0, 'error': str(e)}
+                logger.error(f"❌ Warmup failed for {symbol}: {e}")
+        
+        # 汇总结果
+        success_count = sum(1 for r in results.values() if r['success'])
+        total_ticks = sum(r['ticks'] for r in results.values())
+        logger.info(f"🔥 Cache warmup completed: {success_count}/{len(symbols)} symbols, {total_ticks} total ticks")
+        
+        return results
 
 
 # 全局fetcher实例（单例模式，线程安全）
