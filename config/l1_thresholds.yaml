@@ -114,44 +114,44 @@ trade_quality:
     oi: 0.15                      # OI变化阈值（优化：0.10→0.15，更宽松）
 
 # ==================
-# 方向评估阈值 - 回测优化：LONG宽松，SHORT严格
-# 回测结果：SHORT信号胜率仅8-23%，LONG信号表现较好
+# 方向评估阈值 - 回测优化v2：适度放宽边界条件
+# 核心策略：只在TREND环境产生HIGH信号，边界条件适度放宽
 # ==================
 direction:
-  # 趋势市
+  # 趋势市（TREND环境100%胜率，适度放宽以捕获信号）
   trend:
     long:
-      imbalance: 0.08             # 买卖失衡阈值（LONG宽松：保持8%）
-      oi_change: 0.002            # 1h OI增长阈值（LONG宽松：0.2%）
-      price_change: 0.006         # 1h价格上涨阈值（LONG宽松：0.6%）
+      imbalance: 0.06             # 买卖失衡阈值（放宽：8%→6%）
+      oi_change: 0.002            # 1h OI增长阈值
+      price_change: 0.005         # 1h价格上涨阈值（放宽：0.6%→0.5%）
     short:
-      imbalance: 0.15             # 买卖失衡阈值（SHORT严格：提高到15%）
-      oi_change: 0.008            # 1h OI增长阈值（SHORT严格：0.8%）
-      price_change: 0.015         # 1h价格下跌阈值（SHORT严格：1.5%）
+      imbalance: 0.10             # 买卖失衡阈值（放宽：15%→10%）
+      oi_change: 0.005            # 1h OI增长阈值（放宽：0.8%→0.5%）
+      price_change: 0.012         # 1h价格下跌阈值（放宽：1.5%→1.2%）
   
-  # 震荡市（回测优化：LONG宽松，SHORT严格）
+  # 震荡市（RANGE环境已被置信度系统过滤，这里设置宽松些）
   range:
     long:
-      imbalance: 0.08             # 失衡要求（LONG宽松：8%）
-      oi_change: 0.003            # OI增长要求（LONG宽松：0.3%）
+      imbalance: 0.06             # 失衡要求（放宽：8%→6%）
+      oi_change: 0.002            # OI增长要求
     short:
-      imbalance: 0.15             # 失衡要求（SHORT严格：15%）
-      oi_change: 0.008            # OI增长要求（SHORT严格：0.8%）
+      imbalance: 0.10             # 失衡要求（放宽：15%→10%）
+      oi_change: 0.005            # OI增长要求
     
-    # 短期机会识别 - LONG宽松(3选1)，SHORT严格(3选2)
+    # 短期机会识别
     short_term_opportunity:
       long:
-        min_price_change_1h: 0.006      # 1小时涨幅 > 0.6%（LONG宽松）
-        min_oi_change_1h: 0.003         # OI增长 > 0.3%（LONG宽松）
-        min_taker_imbalance: 0.06       # 买压 > 6%（LONG宽松）
-        min_buy_sell_imbalance: 0.06    # DEPRECATED: 旧键名（兼容）
-        required_signals: 1             # 3选1（LONG宽松）
+        min_price_change_1h: 0.005      # 1小时涨幅 > 0.5%（放宽）
+        min_oi_change_1h: 0.002         # OI增长 > 0.2%
+        min_taker_imbalance: 0.05       # 买压 > 5%（放宽）
+        min_buy_sell_imbalance: 0.05    # DEPRECATED: 旧键名（兼容）
+        required_signals: 1             # 3选1
       short:
-        max_price_change_1h: -0.015     # 1小时跌幅 < -1.5%（SHORT严格）
-        min_oi_change_1h: 0.008         # OI增长 > 0.8%（SHORT严格）
-        max_taker_imbalance: -0.12      # 卖压 < -12%（SHORT严格）
-        max_buy_sell_imbalance: -0.12   # DEPRECATED: 旧键名（兼容）
-        required_signals: 2             # 3选2（SHORT严格）
+        max_price_change_1h: -0.012     # 1小时跌幅 < -1.2%（放宽）
+        min_oi_change_1h: 0.005         # OI增长 > 0.5%
+        max_taker_imbalance: -0.08      # 卖压 < -8%（放宽：-12%→-8%）
+        max_buy_sell_imbalance: -0.08   # DEPRECATED: 旧键名（兼容）
+        required_signals: 2             # 3选2（保持严格）
 
 # ==================
 # 置信度配置 - 回测优化版：只保留确定性信号

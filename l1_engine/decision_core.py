@@ -523,22 +523,30 @@ class DecisionCore:
         # imbalance 使用1小时数据（更稳定）
         imbalance = features.features.taker_imbalance.taker_imbalance_1h
         
-        # 关键字段缺失，无法判断方向
-        if imbalance is None or oi_change is None or price_change is None:
-            logger.debug(f"Long direction eval skipped (key fields missing: imbalance={imbalance}, oi={oi_change}, price={price_change})")
+        # 关键字段检查（回测优化：放宽条件，允许oi_change缺失）
+        if imbalance is None and price_change is None:
+            logger.debug(f"Long direction eval skipped (both imbalance and price_change missing)")
             return False, direction_tags
         
         # 从配置读取方向阈值（PR-FIX: 替换硬编码TODO值）
         if regime == MarketRegime.TREND:
-            # 趋势市：多方强势
+            # 趋势市：多方强势（回测优化：2/3条件满足即可）
             trend_cfg = thresholds.direction.trend.long
             long_imbalance_trend = trend_cfg.imbalance
             long_oi_change_trend = trend_cfg.oi_change
             long_price_change_trend = trend_cfg.price_change or 0.004  # 默认0.4%
             
-            if (imbalance > long_imbalance_trend and 
-                oi_change > long_oi_change_trend and 
-                price_change > long_price_change_trend):
+            # 计算满足的条件数
+            conditions_met = 0
+            if imbalance is not None and imbalance > long_imbalance_trend:
+                conditions_met += 1
+            if oi_change is not None and oi_change > long_oi_change_trend:
+                conditions_met += 1
+            if price_change is not None and price_change > long_price_change_trend:
+                conditions_met += 1
+            
+            # TREND环境：2/3条件满足即可（回测优化）
+            if conditions_met >= 2:
                 direction_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
                 return True, direction_tags
         
@@ -621,22 +629,30 @@ class DecisionCore:
         # imbalance 使用1小时数据（更稳定）
         imbalance = features.features.taker_imbalance.taker_imbalance_1h
         
-        # 关键字段缺失，无法判断方向
-        if imbalance is None or oi_change is None or price_change is None:
-            logger.debug(f"Short direction eval skipped (key fields missing: imbalance={imbalance}, oi={oi_change}, price={price_change})")
+        # 关键字段检查（回测优化：放宽条件，允许oi_change缺失）
+        if imbalance is None and price_change is None:
+            logger.debug(f"Short direction eval skipped (both imbalance and price_change missing)")
             return False, direction_tags
         
         # 从配置读取方向阈值（PR-FIX: 替换硬编码TODO值）
         if regime == MarketRegime.TREND:
-            # 趋势市：空方强势
+            # 趋势市：空方强势（回测优化：2/3条件满足即可）
             trend_cfg = thresholds.direction.trend.short
             short_imbalance_trend = trend_cfg.imbalance
             short_oi_change_trend = trend_cfg.oi_change
             short_price_change_trend = trend_cfg.price_change or 0.004  # 默认0.4%
             
-            if (imbalance < -short_imbalance_trend and 
-                oi_change > short_oi_change_trend and 
-                price_change < -short_price_change_trend):
+            # 计算满足的条件数
+            conditions_met = 0
+            if imbalance is not None and imbalance < -short_imbalance_trend:
+                conditions_met += 1
+            if oi_change is not None and oi_change > short_oi_change_trend:
+                conditions_met += 1
+            if price_change is not None and price_change < -short_price_change_trend:
+                conditions_met += 1
+            
+            # TREND环境：2/3条件满足即可（回测优化）
+            if conditions_met >= 2:
                 direction_tags.append(ReasonTag.STRONG_SELL_PRESSURE)
                 return True, direction_tags
         
