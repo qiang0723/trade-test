@@ -317,57 +317,57 @@ multi_tf:
   # 功能开关
   enabled: true
   
-  # Layer 1: Context（1小时方向偏置）- P2优化：适配低波动市场
+  # Layer 1: Context（1小时方向偏置）- 第二批优化：收紧为3选2
   context_1h:
     # LONG方向Context
     long:
-      min_price_change: 0.005     # 1h涨幅 > 0.5%（放宽：0.7%→0.5%）
-      min_taker_imbalance: 0.15   # taker失衡 > 15%（放宽：30%→15%）
-      min_oi_change: 0.02         # OI增长 > 2%（放宽：3.5%→2%）
-      required_signals: 1         # 3选1（放宽：2→1，适应数据缺失）
+      min_price_change: 0.005     # 1h涨幅 > 0.5%
+      min_taker_imbalance: 0.15   # taker失衡 > 15%
+      min_oi_change: 0.02         # OI增长 > 2%
+      required_signals: 2         # 第二批优化：3选2（收紧：1→2）
     
     # SHORT方向Context
     short:
-      max_price_change: -0.005    # 1h跌幅 < -0.5%（放宽：-0.7%→-0.5%）
-      max_taker_imbalance: -0.15  # taker失衡 < -15%（放宽：-30%→-15%）
-      min_oi_change: 0.02         # OI增长 > 2%（放宽：3.5%→2%）
-      required_signals: 1         # 3选1（放宽：2→1，适应数据缺失）
+      max_price_change: -0.005    # 1h跌幅 < -0.5%
+      max_taker_imbalance: -0.15  # taker失衡 < -15%
+      min_oi_change: 0.02         # OI增长 > 2%
+      required_signals: 2         # 第二批优化：3选2（收紧：1→2）
   
-  # Layer 2: Confirm（15分钟确认）- P2优化：适配低波动市场
+  # Layer 2: Confirm（15分钟确认）- 第二批优化：收紧为4选2
   confirm_15m:
     # LONG方向Confirm
     long:
-      min_price_change: 0.002     # 15m涨幅 > 0.2%（放宽：0.3%→0.2%）
-      min_taker_imbalance: 0.15   # taker失衡 > 15%（放宽：40%→15%）
-      min_volume_ratio: 1.0       # 放量比率 > 1.0x（放宽：1.2x→1.0x）
-      min_oi_change: 0.005        # OI增长 > 0.5%（放宽：2%→0.5%）
-      required_confirmed: 1       # 4选1确认（放宽：2→1）
-      required_partial: 1         # 至少1个为部分
+      min_price_change: 0.002     # 15m涨幅 > 0.2%
+      min_taker_imbalance: 0.15   # taker失衡 > 15%
+      min_volume_ratio: 1.0       # 放量比率 > 1.0x
+      min_oi_change: 0.005        # OI增长 > 0.5%
+      required_confirmed: 2       # 第二批优化：4选2（收紧：1→2）
+      required_partial: 1         # 至少1个为部分确认
     
     # SHORT方向Confirm
     short:
-      max_price_change: -0.002    # 15m跌幅 < -0.2%（放宽：-0.3%→-0.2%）
-      max_taker_imbalance: -0.15  # taker失衡 < -15%（放宽：-40%→-15%）
-      min_volume_ratio: 1.0       # 放量比率 > 1.0x（放宽：1.2x→1.0x）
-      min_oi_change: 0.005        # OI增长 > 0.5%（放宽：2%→0.5%）
-      required_confirmed: 1       # 4选1确认（放宽：2→1）
-      required_partial: 1         # 至少1个为部分
+      max_price_change: -0.002    # 15m跌幅 < -0.2%
+      max_taker_imbalance: -0.15  # taker失衡 < -15%
+      min_volume_ratio: 1.0       # 放量比率 > 1.0x
+      min_oi_change: 0.005        # OI增长 > 0.5%
+      required_confirmed: 2       # 第二批优化：4选2（收紧：1→2）
+      required_partial: 1         # 至少1个为部分确认
   
-  # Layer 3: Trigger（5分钟触发）- P2优化：适配低波动市场
+  # Layer 3: Trigger（5分钟触发）- 保持3选1（入场信号需要灵活）
   trigger_5m:
     # LONG方向Trigger
     long:
-      min_price_change: 0.001     # 5m涨幅 > 0.1%（放宽：0.15%→0.1%）
-      min_taker_imbalance: 0.15   # taker失衡 > 15%（放宽：50%→15%）
-      min_volume_ratio: 1.0       # 放量比率 > 1.0x（放宽：1.5x→1.0x）
-      required_signals: 1         # 3选1触发（放宽：2→1）
+      min_price_change: 0.001     # 5m涨幅 > 0.1%
+      min_taker_imbalance: 0.15   # taker失衡 > 15%
+      min_volume_ratio: 1.0       # 放量比率 > 1.0x
+      required_signals: 1         # 保持3选1（入场时机灵活）
     
     # SHORT方向Trigger
     short:
-      max_price_change: -0.001    # 5m跌幅 < -0.1%（放宽：-0.15%→-0.1%）
-      max_taker_imbalance: -0.15  # taker失衡 < -15%（放宽：-50%→-15%）
-      min_volume_ratio: 1.0       # 放量比率 > 1.0x（放宽：1.5x→1.0x）
-      required_signals: 1         # 3选1触发（放宽：2→1）
+      max_price_change: -0.001    # 5m跌幅 < -0.1%
+      max_taker_imbalance: -0.15  # taker失衡 < -15%
+      min_volume_ratio: 1.0       # 放量比率 > 1.0x
+      required_signals: 1         # 保持3选1（入场时机灵活）
   
   # 绑定策略
   binding_policy:
@@ -510,3 +510,10 @@ signal_enhancement:
     extreme_follow_penalty: -8        # 极端顺向惩罚（-5→-8）
     retail_divergence_threshold: 0.15 # 大户-散户偏差阈值
     retail_divergence_bonus: 3        # 偏差加分
+  
+  # P1-3: 资金费率趋势分析
+  funding_trend:
+    normal_threshold: 0.0003          # 正常区间：0.03%
+    elevated_threshold: 0.0008        # 升高区间：0.08%
+    acceleration_boost: 6             # 费率加速加分
+    reversal_boost: 10                # 费率反转信号加分

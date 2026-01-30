@@ -76,6 +76,12 @@ class SignalEnhancer:
         'volume_surge_boost': 8,               # 大幅放量加分
         'volume_moderate_boost': 5,            # 中度放量加分
         'volume_low_penalty': -3,              # 缩量惩罚
+        
+        # P1-3: 资金费率趋势分析
+        'funding_trend_normal': 0.0003,        # 正常费率区间 0.03%
+        'funding_trend_elevated': 0.0008,      # 升高费率区间 0.08%
+        'funding_acceleration_boost': 6,       # 费率加速加分
+        'funding_reversal_boost': 10,          # 费率反转信号加分
     }
     
     def __init__(self, thresholds: Dict = None):
@@ -632,6 +638,92 @@ class SignalEnhancer:
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
     
     # ========================================
+    # P1-3: 资金费率趋势分析
+    # ========================================
+    
+    def eval_funding_trend(
+        self,
+        funding_rate: Optional[float],
+        oi_change_1h: Optional[float],
+        decision: Decision
+    ) -> EnhancementResult:
+        """
+        评估资金费率趋势信号（P1-3优化）
+        
+        逻辑：
+        - 费率远离中性（加速）→ 标记趋势强化
+        - 费率极端 + OI增长 → 拥挤加剧
+        - 费率极端 + OI下降 → 可能反转
+        
+        Args:
+            funding_rate: 当前资金费率（小数格式）
+            oi_change_1h: 1小时OI变化
+            decision: 当前决策方向
+        
+        Returns:
+            EnhancementResult
+        """
+        tags = []
+        confidence_boost = 0
+        signal_quality = 'neutral'
+        details = {'funding_rate': funding_rate, 'oi_change_1h': oi_change_1h}
+        
+        if funding_rate is None or decision == Decision.NO_TRADE:
+            return EnhancementResult(tags, confidence_boost, signal_quality, details)
+        
+        normal_threshold = self.thresholds.get('funding_trend_normal', 0.0003)
+        elevated_threshold = self.thresholds.get('funding_trend_elevated', 0.0008)
+        acceleration_boost = self.thresholds.get('funding_acceleration_boost', 6)
+        reversal_boost = self.thresholds.get('funding_reversal_boost', 10)
+        
+        abs_funding = abs(funding_rate)
+        
+        # 费率加速：远离中性区间
+        if abs_funding > elevated_threshold:
+            details['funding_status'] = 'elevated'
+            
+            # 结合OI变化判断趋势
+            if oi_change_1h is not None:
+                if oi_change_1h < -0.02:  # OI下降>2%，可能反转
+                    tags.append(ReasonTag.FUNDING_TREND_REVERSAL)
+                    details['trend_type'] = 'potential_reversal'
+                    
+                    # 逆势开仓时加分
+                    is_counter_trend = (
+                        (funding_rate > 0 and decision == Decision.SHORT) or
+                        (funding_rate < 0 and decision == Decision.LONG)
+                    )
+                    if is_counter_trend:
+                        confidence_boost = reversal_boost
+                        signal_quality = 'strong'
+                        logger.info(f"Funding reversal signal: rate={funding_rate:.4f}, oi_change={oi_change_1h:.2%}")
+                else:
+                    # OI增长或稳定，趋势加速
+                    tags.append(ReasonTag.FUNDING_TREND_ACCELERATING)
+                    details['trend_type'] = 'accelerating'
+                    
+                    # 顺势开仓时适度加分（但需警惕拥挤）
+                    is_with_trend = (
+                        (funding_rate > 0 and decision == Decision.LONG) or
+                        (funding_rate < 0 and decision == Decision.SHORT)
+                    )
+                    if is_with_trend:
+                        # 顺势但费率极端，小扣分（拥挤风险）
+                        confidence_boost = -3
+                        signal_quality = 'weak'
+                    else:
+                        # 逆势+费率加速，潜力信号
+                        confidence_boost = acceleration_boost
+                        signal_quality = 'moderate'
+        
+        # 费率从正常升高到警戒区
+        elif abs_funding > normal_threshold:
+            details['funding_status'] = 'rising'
+            # 仅标记，不加减分
+        
+        return EnhancementResult(tags, confidence_boost, signal_quality, details)
+    
+    # ========================================
     # 综合评估入口
     # ========================================
     
@@ -675,6 +767,12 @@ class SignalEnhancer:
         all_tags.extend(funding_result.tags)
         total_boost += funding_result.confidence_boost
         all_details['funding'] = funding_result.details
+        
+        # P1-3: 资金费率趋势分析
+        funding_trend_result = self.eval_funding_trend(funding_rate, oi_change_1h, decision)
+        all_tags.extend(funding_trend_result.tags)
+        total_boost += funding_trend_result.confidence_boost
+        all_details['funding_trend'] = funding_trend_result.details
         
         # Phase 1.2: OI与价格背离
         divergence_result = self.eval_oi_price_divergence(price_change_1h, oi_change_1h, decision)

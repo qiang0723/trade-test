@@ -211,11 +211,12 @@ class DecisionCore:
         symbol: str
     ) -> Tuple[TimeframeDecisionDraft, TimeframeDecisionDraft]:
         """
-        P3-1: Dual Alignment仲裁
+        P3-1 + P1-2优化: Dual Alignment仲裁
         
-        规则：
-        - 同向（short和medium决策相同且非NO_TRADE）：ALIGNMENT_BONUS，置信度+1档
-        - 反向（short和medium决策不同且都非NO_TRADE）：TIMEFRAME_CONFLICT，强制降级
+        规则（P1-2增强）：
+        - 完全对齐（同向 + 双方置信度>=HIGH）：+2档
+        - 部分对齐（同向 + 置信度有LOW/MEDIUM）：+1档
+        - 反向（决策不同且都非NO_TRADE）：TIMEFRAME_CONFLICT，强制降级
         - 其他情况：不处理
         
         重要：不改写原始方向结论，只影响置信度和执行权限
@@ -237,25 +238,40 @@ class DecisionCore:
         if short_decision == Decision.NO_TRADE or medium_decision == Decision.NO_TRADE:
             return short_draft, medium_draft
         
+        # 置信度优先级映射
+        CONF_ORDER = {Confidence.LOW: 1, Confidence.MEDIUM: 2, Confidence.HIGH: 3, Confidence.ULTRA: 4}
+        CONF_REVERSE = {1: Confidence.LOW, 2: Confidence.MEDIUM, 3: Confidence.HIGH, 4: Confidence.ULTRA}
+        
         # 同向：两个周期方向一致
         if short_decision == medium_decision:
             # 添加ALIGNMENT_BONUS标签
             global_tags.append(ReasonTag.ALIGNMENT_BONUS)
             
-            # 提升置信度（但不超过ULTRA）
-            CONF_ORDER = {Confidence.LOW: 1, Confidence.MEDIUM: 2, Confidence.HIGH: 3, Confidence.ULTRA: 4}
-            CONF_REVERSE = {1: Confidence.LOW, 2: Confidence.MEDIUM, 3: Confidence.HIGH, 4: Confidence.ULTRA}
+            # P1-2增强：判断完全对齐还是部分对齐
+            short_conf_order = CONF_ORDER.get(short_draft.confidence, 1)
+            medium_conf_order = CONF_ORDER.get(medium_draft.confidence, 1)
+            
+            # 完全对齐：两个周期置信度都>=HIGH（>=3）
+            is_full_alignment = short_conf_order >= 3 and medium_conf_order >= 3
+            
+            if is_full_alignment:
+                # 完全对齐：+2档
+                boost_levels = 2
+                logger.info(f"[{symbol}] FULL Alignment: both HIGH+, boost +2")
+            else:
+                # 部分对齐：+1档
+                boost_levels = 1
+                logger.debug(f"[{symbol}] PARTIAL Alignment: boost +1")
             
             # 提升short_draft的置信度
-            short_conf_order = CONF_ORDER.get(short_draft.confidence, 1)
-            new_short_conf_order = min(short_conf_order + 1, 4)  # 最高ULTRA
+            new_short_conf_order = min(short_conf_order + boost_levels, 4)  # 最高ULTRA
             short_draft.confidence = CONF_REVERSE[new_short_conf_order]
             
             # 将ALIGNMENT_BONUS添加到short_draft的reason_tags
             if ReasonTag.ALIGNMENT_BONUS not in short_draft.reason_tags:
                 short_draft.reason_tags.append(ReasonTag.ALIGNMENT_BONUS)
             
-            logger.debug(f"[{symbol}] Alignment BONUS: {short_decision.value} (conf {CONF_REVERSE[short_conf_order].value} -> {short_draft.confidence.value})")
+            logger.debug(f"[{symbol}] Alignment BONUS: {short_decision.value} (conf {CONF_REVERSE[short_conf_order].value} -> {short_draft.confidence.value}, boost={boost_levels})")
         
         # 反向：两个周期方向相反
         else:
@@ -270,7 +286,6 @@ class DecisionCore:
             short_draft.permission = ExecutionPermission.ALLOW_REDUCED
             
             # 强制cap置信度到MEDIUM
-            CONF_ORDER = {Confidence.LOW: 1, Confidence.MEDIUM: 2, Confidence.HIGH: 3, Confidence.ULTRA: 4}
             if CONF_ORDER.get(short_draft.confidence, 1) > 2:
                 short_draft.confidence = Confidence.MEDIUM
             

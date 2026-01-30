@@ -146,6 +146,10 @@ class ReasonTag(Enum):
     VOLUME_SURGE_1H = "volume_surge_1h"                    # 1h大幅放量（>2x）
     VOLUME_MODERATE_1H = "volume_moderate_1h"              # 1h中度放量（>1.5x）
     VOLUME_LOW_1H = "volume_low_1h"                        # 1h缩量（<0.5x）
+    
+    # P1-3: 资金费率趋势分析
+    FUNDING_TREND_ACCELERATING = "funding_trend_accelerating"  # 费率加速（远离中性）
+    FUNDING_TREND_REVERSAL = "funding_trend_reversal"          # 费率反转信号
 
 
 # 中文解释映射
@@ -271,6 +275,10 @@ REASON_TAG_EXPLANATIONS = {
     "volume_surge_1h": "🔥 1h大幅放量：1小时成交量>2倍均值，资金强势进场",
     "volume_moderate_1h": "📊 1h中度放量：1小时成交量>1.5倍均值，资金有所增加",
     "volume_low_1h": "📉 1h缩量：1小时成交量<0.5倍均值，市场交投清淡",
+    
+    # P1-3: 资金费率趋势分析
+    "funding_trend_accelerating": "📈 费率加速：资金费率远离中性区间，市场情绪加剧",
+    "funding_trend_reversal": "🔄 费率反转信号：费率极端后有反转迹象，关注方向变化",
 }
 
 
@@ -418,6 +426,10 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.VOLUME_SURGE_1H: ExecutabilityLevel.ALLOW,           # 大幅放量→正面信号
     ReasonTag.VOLUME_MODERATE_1H: ExecutabilityLevel.ALLOW,        # 中度放量→正面信号
     ReasonTag.VOLUME_LOW_1H: ExecutabilityLevel.DEGRADE,           # 缩量→降级警告
+    
+    # P1-3: 资金费率趋势分析
+    ReasonTag.FUNDING_TREND_ACCELERATING: ExecutabilityLevel.ALLOW,  # 费率加速→需关注
+    ReasonTag.FUNDING_TREND_REVERSAL: ExecutabilityLevel.ALLOW,      # 费率反转→正面信号
 }
 
 
