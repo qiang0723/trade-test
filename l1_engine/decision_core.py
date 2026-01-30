@@ -118,17 +118,22 @@ class DecisionCore:
             decision, features, thresholds
         )
         
+        # Step 7.5: 信号增强评估（Phase 1/2）
+        enhancement_tags, confidence_boost = DecisionCore._eval_signal_enhancement(
+            features, decision, thresholds
+        )
+        
         # 收集所有标签（Step 8和9需要）
-        all_tags = regime_tags + risk_tags + quality_tags + long_tags + short_tags + direction_tags + funding_tags
+        all_tags = regime_tags + risk_tags + quality_tags + long_tags + short_tags + direction_tags + funding_tags + enhancement_tags
         
         # Step 8: 执行权限判断（P0-04: 完全由ReasonTagRules驱动）
         execution_permission = DecisionCore._determine_execution_permission(
             regime, quality, decision, thresholds, all_tags
         )
         
-        # Step 9: 置信度计算（PR-D混合模式）
+        # Step 9: 置信度计算（PR-D混合模式 + 增强加分）
         confidence = DecisionCore._compute_confidence(
-            decision, regime, quality, all_tags, thresholds
+            decision, regime, quality, all_tags, thresholds, confidence_boost
         )
         
         # Step 10: 组装DecisionDraft ✅
@@ -1067,6 +1072,72 @@ class DecisionCore:
         return decision, tags
     
     # ========================================
+    # Step 7.5: 信号增强评估（Phase 1/2）
+    # ========================================
+    
+    @staticmethod
+    def _eval_signal_enhancement(
+        features: FeatureSnapshot,
+        decision: Decision,
+        thresholds: Thresholds
+    ) -> Tuple[List[ReasonTag], int]:
+        """
+        信号增强评估（Phase 1/2）
+        
+        评估维度：
+        1. 资金费率极端反转信号
+        2. OI与价格背离信号
+        3. 多周期方向一致性
+        
+        Args:
+            features: 特征快照
+            decision: 当前决策
+            thresholds: 阈值配置
+        
+        Returns:
+            (增强标签列表, 置信度加分)
+        """
+        from l1_engine.signal_enhancer import SignalEnhancer
+        
+        # 获取增强阈值配置
+        raw_config = getattr(thresholds, 'raw_config', {}) if thresholds else {}
+        enhancement_cfg = raw_config.get('signal_enhancement', {})
+        
+        # 创建增强器
+        enhancer = SignalEnhancer(enhancement_cfg)
+        
+        # 提取特征数据
+        funding_rate = features.features.funding.funding_rate if features.features.funding else None
+        price_change_1h = features.features.price.price_change_1h if features.features.price else None
+        oi_change_1h = features.features.open_interest.oi_change_1h if features.features.open_interest else None
+        
+        imbalance_5m = features.features.taker_imbalance.taker_imbalance_5m if features.features.taker_imbalance else None
+        imbalance_15m = features.features.taker_imbalance.taker_imbalance_15m if features.features.taker_imbalance else None
+        imbalance_1h = features.features.taker_imbalance.taker_imbalance_1h if features.features.taker_imbalance else None
+        
+        # Phase 2: 获取大户多空比数据
+        top_long_ratio = features.features.top_trader.top_long_ratio if features.features.top_trader else None
+        retail_long_ratio = features.features.top_trader.retail_long_ratio if features.features.top_trader else None
+        
+        # 综合评估
+        result = enhancer.evaluate_all(
+            funding_rate=funding_rate,
+            price_change_1h=price_change_1h,
+            oi_change_1h=oi_change_1h,
+            imbalance_5m=imbalance_5m,
+            imbalance_15m=imbalance_15m,
+            imbalance_1h=imbalance_1h,
+            decision=decision,
+            top_long_ratio=top_long_ratio,
+            retail_long_ratio=retail_long_ratio
+        )
+        
+        if result.tags:
+            logger.info(f"Signal enhancement: tags={[t.value for t in result.tags]}, boost={result.confidence_boost}")
+        
+        return result.tags, result.confidence_boost
+    
+    # ========================================
     # Step 8: 执行权限判断
     # ========================================
     
@@ -1142,21 +1213,28 @@ class DecisionCore:
         regime: MarketRegime,
         quality: TradeQuality,
         reason_tags: List[ReasonTag],
-        thresholds: Thresholds
+        thresholds: Thresholds,
+        enhancement_boost: int = 0
     ) -> Confidence:
         """
-        置信度计算（P0-05增强：tag_caps生效）
+        置信度计算（P0-05增强：tag_caps生效 + Phase1/2增强加分）
         
         流程：
         1. 基础加分（保持PR-005的加分制）
-        2. 档位映射
-        3. tag_caps应用（只cap，不硬降）
-        4. 强信号突破（+1档，不突破cap）
+        2. 增强信号加分（Phase 1/2）
+        3. 档位映射
+        4. tag_caps应用（只cap，不硬降）
+        5. 强信号突破（+1档，不突破cap）
         
         P0-05改进：
         - UNCERTAIN不再总是LOW，而是参与正常评分
         - tag_caps按标签类型独立cap
         - caps只限制上限，不强制降级
+        
+        Phase 1/2增强：
+        - 资金费率极端反转加分
+        - OI与价格背离加分
+        - 多周期一致性加分
         
         Args:
             decision: 决策
@@ -1164,6 +1242,7 @@ class DecisionCore:
             quality: 交易质量
             reason_tags: 原因标签列表
             thresholds: 阈值配置
+            enhancement_boost: 信号增强加分（来自SignalEnhancer）
         
         Returns:
             Confidence
@@ -1205,6 +1284,11 @@ class DecisionCore:
         has_strong_signal = scoring.strong_signal_boost.enabled and any(t in strong_tags for t in reason_tags)
         if has_strong_signal:
             score += scoring.strong_signal_bonus  # 15分
+        
+        # Phase 1/2: 信号增强加分（在cap之前）
+        if enhancement_boost != 0:
+            score += enhancement_boost
+            logger.debug(f"Signal enhancement boost: +{enhancement_boost} points")
         
         # Step 2: 档位映射
         thresholds_map = scoring.thresholds

@@ -311,12 +311,22 @@ class FeatureBuilder:
             funding_rate_prev=None  # TODO: 从历史数据获取（如需要）
         )
         
+        # Phase 2: Top Trader features (大户多空比)
+        from models.feature_snapshot import TopTraderFeatures
+        top_trader_features = TopTraderFeatures(
+            top_long_ratio=normalized_data.get('top_long_ratio'),
+            top_short_ratio=normalized_data.get('top_short_ratio'),
+            retail_long_ratio=normalized_data.get('retail_long_ratio'),
+            retail_short_ratio=normalized_data.get('retail_short_ratio')
+        )
+        
         return MarketFeatures(
             price=price_features,
             open_interest=oi_features,
             taker_imbalance=taker_features,
             volume=volume_features,
-            funding=funding_features
+            funding=funding_features,
+            top_trader=top_trader_features
         )
     
     def _extract_coverage(

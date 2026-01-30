@@ -327,24 +327,131 @@ class BinanceDataFetcher:
             logger.error(f"Error fetching spot data for {symbol}: {e}", exc_info=True)
             return None
     
-    def fetch_market_data(self, symbol: str, market_type: str = 'futures') -> Optional[dict]:
+    def fetch_market_data(self, symbol: str, market_type: str = 'futures', include_ratio: bool = True) -> Optional[dict]:
         """
         获取市场数据（统一接口）
         
         Args:
             symbol: 币种符号（如 "BTC"）
             market_type: 市场类型（'futures' 或 'spot'）
+            include_ratio: 是否包含大户多空比数据（Phase 2，默认True）
         
         Returns:
             增强的市场数据字典或None
         """
         if market_type == 'futures':
+            if include_ratio:
+                return self.fetch_futures_data_with_ratio(symbol)
             return self.fetch_futures_data(symbol)
         elif market_type == 'spot':
             return self.fetch_spot_data(symbol)
         else:
             logger.error(f"Unknown market type: {market_type}")
             return None
+    
+    def fetch_long_short_ratio(self, symbol: str) -> Optional[dict]:
+        """
+        获取多空比数据（Phase 2: 大户多空比）
+        
+        API端点：
+        1. topLongShortPositionRatio - 大户持仓多空比
+        2. globalLongShortAccountRatio - 全市场账户多空比
+        
+        Args:
+            symbol: 币种符号（如 "BTC"）
+        
+        Returns:
+            多空比数据字典或None
+            {
+                'top_long_ratio': float,    # 大户做多比例 (0-1)
+                'top_short_ratio': float,   # 大户做空比例 (0-1)
+                'retail_long_ratio': float, # 散户做多比例 (0-1)
+                'retail_short_ratio': float # 散户做空比例 (0-1)
+            }
+        """
+        # 智能识别：避免重复拼接 USDT
+        if symbol.endswith('USDT'):
+            trading_symbol = symbol
+        else:
+            trading_symbol = f"{symbol}USDT"
+        
+        try:
+            result = {
+                'top_long_ratio': None,
+                'top_short_ratio': None,
+                'retail_long_ratio': None,
+                'retail_short_ratio': None,
+                'long_short_ratio': None,
+            }
+            
+            # 1. 获取大户持仓多空比（Top Trader Long/Short Ratio - Positions）
+            try:
+                top_ratio = self.client.futures_top_longshort_position_ratio(
+                    symbol=trading_symbol,
+                    period='1h',
+                    limit=1
+                )
+                if top_ratio and len(top_ratio) > 0:
+                    latest = top_ratio[0]
+                    result['top_long_ratio'] = float(latest.get('longAccount', 0))
+                    result['top_short_ratio'] = float(latest.get('shortAccount', 0))
+                    result['long_short_ratio'] = float(latest.get('longShortRatio', 1))
+                    logger.debug(f"Top trader ratio for {symbol}: long={result['top_long_ratio']:.2%}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch top trader ratio for {symbol}: {e}")
+            
+            # 2. 获取全市场账户多空比（作为散户代理）
+            try:
+                global_ratio = self.client.futures_global_longshort_ratio(
+                    symbol=trading_symbol,
+                    period='1h',
+                    limit=1
+                )
+                if global_ratio and len(global_ratio) > 0:
+                    latest = global_ratio[0]
+                    result['retail_long_ratio'] = float(latest.get('longAccount', 0))
+                    result['retail_short_ratio'] = float(latest.get('shortAccount', 0))
+                    logger.debug(f"Global (retail) ratio for {symbol}: long={result['retail_long_ratio']:.2%}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch global ratio for {symbol}: {e}")
+            
+            # 只有在成功获取到数据时才返回
+            if result['top_long_ratio'] is not None or result['retail_long_ratio'] is not None:
+                logger.info(f"Long/Short ratio for {symbol}: "
+                           f"top_long={result['top_long_ratio']}, "
+                           f"retail_long={result['retail_long_ratio']}")
+                return result
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching long/short ratio for {symbol}: {e}")
+            return None
+    
+    def fetch_futures_data_with_ratio(self, symbol: str) -> Optional[dict]:
+        """
+        获取合约市场数据（包含大户多空比）
+        
+        Args:
+            symbol: 币种符号
+        
+        Returns:
+            增强的市场数据字典（包含多空比）或None
+        """
+        # 获取基础市场数据
+        data = self.fetch_futures_data(symbol)
+        if data is None:
+            return None
+        
+        # 获取多空比数据
+        ratio_data = self.fetch_long_short_ratio(symbol)
+        if ratio_data:
+            data['top_long_ratio'] = ratio_data.get('top_long_ratio')
+            data['top_short_ratio'] = ratio_data.get('top_short_ratio')
+            data['retail_long_ratio'] = ratio_data.get('retail_long_ratio')
+            data['retail_short_ratio'] = ratio_data.get('retail_short_ratio')
+        
+        return data
     
     def get_cache_info(self, symbol: str) -> dict:
         """

@@ -112,6 +112,29 @@ class ReasonTag(Enum):
     MTF_NO_TRIGGER = "mtf_no_trigger"              # 无触发：context✅ confirm✅ trigger❌
     MTF_PARTIAL_CONFIRM = "mtf_partial_confirm"    # 部分确认：context✅ confirm部分
     MTF_DENIED = "mtf_denied"                      # 拒绝：context❌
+    
+    # ===== 数据增强信号类（Phase 1/2）=====
+    # Phase 1.1: 资金费率极端反转
+    FUNDING_EXTREME_REVERSAL = "funding_extreme_reversal"  # 资金费率极端+逆势→反转信号
+    FUNDING_EXTREME_LONG = "funding_extreme_long"          # 极端负费率→做多潜力
+    FUNDING_EXTREME_SHORT = "funding_extreme_short"        # 极端正费率→做空潜力
+    
+    # Phase 1.2: OI与价格背离
+    OI_PRICE_DIVERGENCE_BULL = "oi_price_divergence_bull"  # 价格跌+OI涨→看涨背离（空头入场）
+    OI_PRICE_DIVERGENCE_BEAR = "oi_price_divergence_bear"  # 价格涨+OI跌→看跌背离（多头出场）
+    HEALTHY_UPTREND = "healthy_uptrend"                    # 健康上涨：price↑+OI↑
+    HEALTHY_DOWNTREND = "healthy_downtrend"                # 健康下跌：price↓+OI↑
+    
+    # Phase 1.3: 多周期一致性
+    TIMEFRAME_FULL_ALIGNMENT = "timeframe_full_alignment"  # 5m/15m/1h方向完全一致
+    TIMEFRAME_PARTIAL_ALIGNMENT = "timeframe_partial_alignment"  # 部分周期一致
+    
+    # Phase 2: 大户多空比（预留）
+    TOP_TRADER_LONG_BIAS = "top_trader_long_bias"          # 大户偏多（>55%）
+    TOP_TRADER_SHORT_BIAS = "top_trader_short_bias"        # 大户偏空（>55%）
+    TOP_TRADER_EXTREME_LONG = "top_trader_extreme_long"    # 大户极端偏多（>70%）→警惕反转
+    TOP_TRADER_EXTREME_SHORT = "top_trader_extreme_short"  # 大户极端偏空（>70%）→警惕反转
+    SMART_MONEY_DIVERGENCE = "smart_money_divergence"      # 大户与散户方向相反→跟随大户
 
 
 # 中文解释映射
@@ -204,6 +227,28 @@ REASON_TAG_EXPLANATIONS = {
     "mtf_no_trigger": "⏸️ MultiTF无触发：1h方向+15m确认满足，但5m入场信号不足（等待时机）",
     "mtf_partial_confirm": "⚠️ MultiTF部分确认：1h方向满足，15m确认信号较弱（降级执行）",
     "mtf_denied": "🚫 MultiTF拒绝：1h方向不符（Context层否决）",
+    
+    # Phase 1.1: 资金费率极端反转
+    "funding_extreme_reversal": "🔄 资金费率极端反转：费率极端+逆势开仓，高概率反转信号",
+    "funding_extreme_long": "💰 极端负费率：空头拥挤，做多成本低，潜在做多机会",
+    "funding_extreme_short": "💸 极端正费率：多头拥挤，做空收益高，潜在做空机会",
+    
+    # Phase 1.2: OI与价格背离
+    "oi_price_divergence_bull": "📈 看涨背离：价格下跌但OI增长，新空头入场，可能反弹",
+    "oi_price_divergence_bear": "📉 看跌背离：价格上涨但OI下降，多头获利出场，可能回调",
+    "healthy_uptrend": "💚 健康上涨：价格上涨+OI增长，新资金入场确认趋势",
+    "healthy_downtrend": "💔 健康下跌：价格下跌+OI增长，新空头入场确认趋势",
+    
+    # Phase 1.3: 多周期一致性
+    "timeframe_full_alignment": "🎯 全周期一致：5m/15m/1h方向完全一致，高质量信号",
+    "timeframe_partial_alignment": "⚡ 部分周期一致：多数周期方向一致，信号可参考",
+    
+    # Phase 2: 大户多空比
+    "top_trader_long_bias": "🐋 大户偏多：前20%大户多单占比>55%，聪明钱看涨",
+    "top_trader_short_bias": "🐋 大户偏空：前20%大户空单占比>55%，聪明钱看跌",
+    "top_trader_extreme_long": "⚠️ 大户极端偏多：多单占比>70%，市场可能过热",
+    "top_trader_extreme_short": "⚠️ 大户极端偏空：空单占比>70%，市场可能超卖",
+    "smart_money_divergence": "🎯 聪明钱背离：大户与散户方向相反，跟随大户信号",
 }
 
 
@@ -317,6 +362,29 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.MTF_NO_TRIGGER: ExecutabilityLevel.DEGRADE,      # 无触发→降级（等待时机）
     ReasonTag.MTF_PARTIAL_CONFIRM: ExecutabilityLevel.DEGRADE, # 部分确认→降级
     ReasonTag.MTF_DENIED: ExecutabilityLevel.ALLOW,            # 拒绝→由decision=NO_TRADE自然DENY
+    
+    # ===== 数据增强信号类（Phase 1/2）=====
+    # Phase 1.1: 资金费率极端反转 - 全部为正面信号
+    ReasonTag.FUNDING_EXTREME_REVERSAL: ExecutabilityLevel.ALLOW,  # 反转信号→正面
+    ReasonTag.FUNDING_EXTREME_LONG: ExecutabilityLevel.ALLOW,      # 极端负费率→做多潜力
+    ReasonTag.FUNDING_EXTREME_SHORT: ExecutabilityLevel.ALLOW,     # 极端正费率→做空潜力
+    
+    # Phase 1.2: OI与价格背离 - 背离可能需要谨慎处理
+    ReasonTag.OI_PRICE_DIVERGENCE_BULL: ExecutabilityLevel.ALLOW,  # 看涨背离→正面信号
+    ReasonTag.OI_PRICE_DIVERGENCE_BEAR: ExecutabilityLevel.DEGRADE, # 看跌背离→降级（逆势风险）
+    ReasonTag.HEALTHY_UPTREND: ExecutabilityLevel.ALLOW,           # 健康上涨→正面
+    ReasonTag.HEALTHY_DOWNTREND: ExecutabilityLevel.ALLOW,         # 健康下跌→正面
+    
+    # Phase 1.3: 多周期一致性 - 全部为正面信号
+    ReasonTag.TIMEFRAME_FULL_ALIGNMENT: ExecutabilityLevel.ALLOW,   # 全周期一致→正面
+    ReasonTag.TIMEFRAME_PARTIAL_ALIGNMENT: ExecutabilityLevel.ALLOW, # 部分一致→正面
+    
+    # Phase 2: 大户多空比
+    ReasonTag.TOP_TRADER_LONG_BIAS: ExecutabilityLevel.ALLOW,       # 大户偏多→正面
+    ReasonTag.TOP_TRADER_SHORT_BIAS: ExecutabilityLevel.ALLOW,      # 大户偏空→正面
+    ReasonTag.TOP_TRADER_EXTREME_LONG: ExecutabilityLevel.DEGRADE,  # 大户极端偏多→警惕反转
+    ReasonTag.TOP_TRADER_EXTREME_SHORT: ExecutabilityLevel.DEGRADE, # 大户极端偏空→警惕反转
+    ReasonTag.SMART_MONEY_DIVERGENCE: ExecutabilityLevel.ALLOW,     # 聪明钱背离→高质量信号
 }
 
 

@@ -82,6 +82,15 @@ class FundingFeatures:
 
 
 @dataclass
+class TopTraderFeatures:
+    """大户多空比特征（Phase 2）"""
+    top_long_ratio: Optional[float] = None       # 大户做多比例 (0-1)
+    top_short_ratio: Optional[float] = None      # 大户做空比例 (0-1)
+    retail_long_ratio: Optional[float] = None    # 散户做多比例 (0-1)
+    retail_short_ratio: Optional[float] = None   # 散户做空比例 (0-1)
+
+
+@dataclass
 class MarketFeatures:
     """市场特征集合（包含所有特征子集）"""
     price: PriceFeatures = field(default_factory=PriceFeatures)
@@ -89,6 +98,7 @@ class MarketFeatures:
     taker_imbalance: TakerImbalanceFeatures = field(default_factory=TakerImbalanceFeatures)
     volume: VolumeFeatures = field(default_factory=VolumeFeatures)
     funding: FundingFeatures = field(default_factory=FundingFeatures)
+    top_trader: TopTraderFeatures = field(default_factory=TopTraderFeatures)  # Phase 2: 大户多空比
     
     def to_flat_dict(self) -> Dict[str, Optional[float]]:
         """

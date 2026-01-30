@@ -132,10 +132,10 @@ trade_quality:
     price_threshold: 0.02         # 价格变化阈值（小数格式：0.02=2%）
     oi_threshold: 0.05            # OI变化阈值（小数格式：0.05=5%）
   
-  # 震荡市弱信号（优化：放宽阈值，减少UNCERTAIN判定）
+  # 震荡市弱信号（大幅放宽：只在极弱信号时才标记为弱）
   range_weak:
-    imbalance: 0.75               # 失衡阈值（优化：0.6→0.75，更宽松）
-    oi: 0.15                      # OI变化阈值（优化：0.10→0.15，更宽松）
+    imbalance: 0.05               # 失衡阈值（放宽：0.75→0.05，只有极弱失衡才标记）
+    oi: 0.005                     # OI变化阈值（放宽：0.15→0.005，几乎不检查OI）
 
 # ==================
 # 方向评估阈值 - 回测优化v2：适度放宽边界条件
@@ -183,34 +183,34 @@ direction:
 # 策略：只在TREND环境产生HIGH以上信号
 # ==================
 confidence_scoring:
-  # 基础分（回测优化：RANGE环境降为0分）
+  # 基础分（信号频率优化：收紧RANGE环境）
   decision_score: 30               # 决策类型分（LONG/SHORT=30, NO_TRADE=0）
   regime_trend_score: 35           # TREND环境分（提高：30→35）
-  regime_range_score: 0            # RANGE环境分（回测优化：15→0，禁止RANGE信号）
+  regime_range_score: 5            # RANGE环境分（收紧：15→5，减少RANGE信号）
   regime_extreme_score: 0          # EXTREME环境分
   quality_good_score: 30           # GOOD质量分
-  quality_uncertain_score: 15      # UNCERTAIN质量分（收紧：20→15）
+  quality_uncertain_score: 10      # UNCERTAIN质量分（收紧：15→10）
   quality_poor_score: 0            # POOR质量分
-  strong_signal_bonus: 15          # 强信号加分（提高：10→15）
+  strong_signal_bonus: 10          # 强信号加分（收紧：15→10）
   
-  # 档位映射（回测优化：提高门槛）
+  # 档位映射（收紧MEDIUM门槛）
   thresholds:
-    ultra: 85                      # >=85分 → ULTRA（回测优化：90→85）
-    high: 75                       # >=75分 → HIGH（回测优化：65→75，确保只有TREND）
-    medium: 50                     # >=50分 → MEDIUM（回测优化：45→50）
+    ultra: 85                      # >=85分 → ULTRA
+    high: 75                       # >=75分 → HIGH
+    medium: 55                     # >=55分 → MEDIUM（收紧：50→55）
   
   # 硬降级上限（caps）- MEDIUM确保只有TREND能到HIGH
   caps:
-    # UNCERTAIN质量的上限
-    uncertain_quality_max: "MEDIUM"  # MEDIUM（收紧：HIGH→MEDIUM）
+    # UNCERTAIN质量的上限（与min_confidence_reduced一致）
+    uncertain_quality_max: "HIGH"    # HIGH（与min_confidence_reduced一致）
     
     # reduce_tags 的默认cap（必须 >= min_confidence_reduced）
-    reduce_default_max: "MEDIUM"     # 默认值（收紧：HIGH→MEDIUM）
+    reduce_default_max: "HIGH"       # HIGH（与min_confidence_reduced一致）
     
-    # 特定ReasonTag的上限（必须 >= min_confidence_reduced = MEDIUM）
+    # 特定ReasonTag的上限（与min_confidence_reduced保持一致）
     tag_caps:
-      noisy_market: "MEDIUM"         # MEDIUM（必须 >= min_confidence_reduced）
-      weak_signal_in_range: "MEDIUM" # MEDIUM（禁止RANGE弱信号达到HIGH）
+      noisy_market: "HIGH"           # HIGH（与min_confidence_reduced一致）
+      weak_signal_in_range: "HIGH"   # HIGH（弱信号需HIGH才可执行）
       
       # P1-01 DataValidity: 异常值的caps
       data_outlier_price_change: "MEDIUM"      # 价格变化异常 → cap to MEDIUM
@@ -257,14 +257,14 @@ reason_tag_rules:
     - rotation_risk
 
 # ==================
-# 执行控制（方案D：双门槛机制）
+# 执行控制（方案D：双门槛机制）- 收紧版
 # ==================
 executable_control:
   # ALLOW 的最低置信度要求（正常执行）
   min_confidence_normal: "HIGH"     # HIGH 或 ULTRA
   
-  # ALLOW_REDUCED 的最低置信度要求（降级执行）
-  min_confidence_reduced: "MEDIUM"  # MEDIUM/HIGH/ULTRA
+  # ALLOW_REDUCED 的最低置信度要求（降级执行）- 收紧
+  min_confidence_reduced: "HIGH"    # 收紧：MEDIUM→HIGH（降级信号也需HIGH）
   
   # 说明：
   # - ALLOW: 无降级标签，要求 HIGH/ULTRA
@@ -317,57 +317,57 @@ multi_tf:
   # 功能开关
   enabled: true
   
-  # Layer 1: Context（1小时方向偏置）- P1优化：降低25%
+  # Layer 1: Context（1小时方向偏置）- P2优化：适配低波动市场
   context_1h:
     # LONG方向Context
     long:
-      min_price_change: 0.007     # 1h涨幅 > 0.7%（优化前1%）
-      min_taker_imbalance: 0.30   # taker失衡 > 30%（优化前40%）
-      min_oi_change: 0.035        # OI增长 > 3.5%（优化前5%）
-      required_signals: 2         # 3选2
+      min_price_change: 0.005     # 1h涨幅 > 0.5%（放宽：0.7%→0.5%）
+      min_taker_imbalance: 0.15   # taker失衡 > 15%（放宽：30%→15%）
+      min_oi_change: 0.02         # OI增长 > 2%（放宽：3.5%→2%）
+      required_signals: 1         # 3选1（放宽：2→1，适应数据缺失）
     
     # SHORT方向Context
     short:
-      max_price_change: -0.007    # 1h跌幅 < -0.7%（优化前-1%）
-      max_taker_imbalance: -0.30  # taker失衡 < -30%（优化前-40%）
-      min_oi_change: 0.035        # OI增长 > 3.5%（优化前5%）
-      required_signals: 2         # 3选2
+      max_price_change: -0.005    # 1h跌幅 < -0.5%（放宽：-0.7%→-0.5%）
+      max_taker_imbalance: -0.15  # taker失衡 < -15%（放宽：-30%→-15%）
+      min_oi_change: 0.02         # OI增长 > 2%（放宽：3.5%→2%）
+      required_signals: 1         # 3选1（放宽：2→1，适应数据缺失）
   
-  # Layer 2: Confirm（15分钟确认，4选2）- P1优化：降低25%
+  # Layer 2: Confirm（15分钟确认）- P2优化：适配低波动市场
   confirm_15m:
     # LONG方向Confirm
     long:
-      min_price_change: 0.003     # 15m涨幅 > 0.3%（优化前0.5%）
-      min_taker_imbalance: 0.40   # taker失衡 > 40%（优化前50%）
-      min_volume_ratio: 1.2       # 放量比率 > 1.2x（优化前1.5x）
-      min_oi_change: 0.02         # OI增长 > 2%（优化前3%）
-      required_confirmed: 2       # 4选2确认
+      min_price_change: 0.002     # 15m涨幅 > 0.2%（放宽：0.3%→0.2%）
+      min_taker_imbalance: 0.15   # taker失衡 > 15%（放宽：40%→15%）
+      min_volume_ratio: 1.0       # 放量比率 > 1.0x（放宽：1.2x→1.0x）
+      min_oi_change: 0.005        # OI增长 > 0.5%（放宽：2%→0.5%）
+      required_confirmed: 1       # 4选1确认（放宽：2→1）
       required_partial: 1         # 至少1个为部分
     
     # SHORT方向Confirm
     short:
-      max_price_change: -0.003    # 15m跌幅 < -0.3%（优化前-0.5%）
-      max_taker_imbalance: -0.40  # taker失衡 < -40%（优化前-50%）
-      min_volume_ratio: 1.2       # 放量比率 > 1.2x（优化前1.5x）
-      min_oi_change: 0.02         # OI增长 > 2%（优化前3%）
-      required_confirmed: 2       # 4选2确认
+      max_price_change: -0.002    # 15m跌幅 < -0.2%（放宽：-0.3%→-0.2%）
+      max_taker_imbalance: -0.15  # taker失衡 < -15%（放宽：-40%→-15%）
+      min_volume_ratio: 1.0       # 放量比率 > 1.0x（放宽：1.2x→1.0x）
+      min_oi_change: 0.005        # OI增长 > 0.5%（放宽：2%→0.5%）
+      required_confirmed: 1       # 4选1确认（放宽：2→1）
       required_partial: 1         # 至少1个为部分
   
-  # Layer 3: Trigger（5分钟触发，3选2）- P1优化：降低25%
+  # Layer 3: Trigger（5分钟触发）- P2优化：适配低波动市场
   trigger_5m:
     # LONG方向Trigger
     long:
-      min_price_change: 0.0015    # 5m涨幅 > 0.15%（优化前0.2%）
-      min_taker_imbalance: 0.50   # taker失衡 > 50%（优化前60%）
-      min_volume_ratio: 1.5       # 放量比率 > 1.5x（优化前2.0x）
-      required_signals: 2         # 3选2触发
+      min_price_change: 0.001     # 5m涨幅 > 0.1%（放宽：0.15%→0.1%）
+      min_taker_imbalance: 0.15   # taker失衡 > 15%（放宽：50%→15%）
+      min_volume_ratio: 1.0       # 放量比率 > 1.0x（放宽：1.5x→1.0x）
+      required_signals: 1         # 3选1触发（放宽：2→1）
     
     # SHORT方向Trigger
     short:
-      max_price_change: -0.0015   # 5m跌幅 < -0.15%（优化前-0.2%）
-      max_taker_imbalance: -0.50  # taker失衡 < -50%（优化前-60%）
-      min_volume_ratio: 1.5       # 放量比率 > 1.5x（优化前2.0x）
-      required_signals: 2         # 3选2触发
+      max_price_change: -0.001    # 5m跌幅 < -0.1%（放宽：-0.15%→-0.1%）
+      max_taker_imbalance: -0.15  # taker失衡 < -15%（放宽：-50%→-15%）
+      min_volume_ratio: 1.0       # 放量比率 > 1.0x（放宽：1.5x→1.0x）
+      required_signals: 1         # 3选1触发（放宽：2→1）
   
   # 绑定策略
   binding_policy:
@@ -452,3 +452,30 @@ dual_decision_control:
   # - NO_TRADE决策不受频率控制（允许随时输出）
   # - 翻转冷却时间应 >= 决策间隔时间
   # - 对齐类型仅阻断重大翻转（双向一致态互换）
+
+# ==================
+# 信号增强配置（Phase 1/2）
+# ==================
+signal_enhancement:
+  # Phase 1.1: 资金费率极端反转阈值
+  funding_extreme_positive: 0.001     # 正极端费率 > 0.1%
+  funding_extreme_negative: -0.001    # 负极端费率 < -0.1%
+  funding_very_extreme: 0.002         # 非常极端费率 > 0.2%（触发反转信号）
+  
+  # Phase 1.2: OI与价格背离阈值
+  divergence_price_threshold: 0.01    # 价格变化阈值 1%
+  divergence_oi_threshold: 0.02       # OI变化阈值 2%
+  healthy_trend_oi_threshold: 0.01    # 健康趋势OI阈值 1%
+  
+  # Phase 1.3: 多周期一致性阈值
+  alignment_imbalance_threshold: 0.05 # 方向判定阈值 5%
+  
+  # Phase 2: 大户多空比阈值
+  top_trader_bias_threshold: 0.55     # 偏向阈值 55%（>55%认为有明确偏向）
+  top_trader_extreme_threshold: 0.70  # 极端阈值 70%（>70%可能预示反转）
+  
+  # 置信度加分配置（收紧：减少加分上限）
+  boost_limits:
+    max_single_boost: 10              # 单项增强最大加分（收紧：15→10）
+    max_total_boost: 15               # 总增强最大加分（收紧：30→15）
+    min_total_boost: -15              # 总增强最小扣分（收紧：-20→-15）

@@ -97,8 +97,8 @@ class DecisionGate:
             draft, last_decision_time, last_signal_direction, now, thresholds, timeframe
         )
         
-        # Step 3: 计算最终executable
-        executable = self._compute_executable(draft, freq_control)
+        # Step 3: 计算最终executable（传入thresholds以检查置信度门槛）
+        executable = self._compute_executable(draft, freq_control, thresholds)
         
         # Step 4: 保存状态（如果可执行且是LONG/SHORT）
         if executable and draft.decision in [Decision.LONG, Decision.SHORT]:
@@ -207,8 +207,8 @@ class DecisionGate:
             draft, last_decision_time, last_signal_direction, now, thresholds, timeframe
         )
         
-        # 计算最终executable
-        executable = self._compute_executable(draft, freq_control)
+        # 计算最终executable（传入thresholds以检查置信度门槛）
+        executable = self._compute_executable(draft, freq_control, thresholds)
         
         # 保存状态
         if executable and draft.decision in [Decision.LONG, Decision.SHORT]:
@@ -312,30 +312,35 @@ class DecisionGate:
     def _compute_executable(
         self,
         draft: TimeframeDecisionDraft,
-        freq_control: FrequencyControlResult
+        freq_control: FrequencyControlResult,
+        thresholds: Thresholds = None
     ) -> bool:
         """
         计算最终executable
         
         规则：
-        1. NO_TRADE总是executable=True（允许随时输出）
+        1. NO_TRADE → executable=False（不需要执行）
         2. ExecutionPermission=DENY → False
         3. 频控阻断 → False
-        4. 其他 → True
+        4. 置信度门槛检查（方案D双门槛）：
+           - ALLOW: 需要 >= min_confidence_normal (HIGH)
+           - ALLOW_REDUCED: 需要 >= min_confidence_reduced (配置值)
+        5. 其他 → True
         
         Args:
             draft: 决策草稿
             freq_control: 频控结果
+            thresholds: 阈值配置
         
         Returns:
             bool: 是否可执行
         """
-        # Rule 1: NO_TRADE总是允许
+        # Rule 1: NO_TRADE不需要执行
         if draft.decision == Decision.NO_TRADE:
-            return True
+            return False
         
         # Rule 2: ExecutionPermission=DENY
-        from models.enums import ExecutionPermission
+        from models.enums import ExecutionPermission, Confidence
         if draft.execution_permission == ExecutionPermission.DENY:
             return False
         
@@ -343,7 +348,30 @@ class DecisionGate:
         if freq_control.is_blocked:
             return False
         
-        # Rule 4: 其他情况允许
+        # Rule 4: 置信度门槛检查（方案D双门槛）
+        if thresholds:
+            exec_config = thresholds.config.get('executable_control', {})
+            min_normal_str = exec_config.get('min_confidence_normal', 'HIGH').upper()
+            min_reduced_str = exec_config.get('min_confidence_reduced', 'MEDIUM').upper()
+            
+            # 置信度等级映射
+            confidence_levels = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2, 'ULTRA': 3}
+            draft_level = confidence_levels.get(draft.confidence.value.upper(), 0)
+            
+            if draft.execution_permission == ExecutionPermission.ALLOW:
+                # ALLOW: 需要 >= min_confidence_normal
+                required_level = confidence_levels.get(min_normal_str, 2)
+                if draft_level < required_level:
+                    logger.debug(f"Executable blocked: ALLOW requires {min_normal_str}, got {draft.confidence.value}")
+                    return False
+            elif draft.execution_permission == ExecutionPermission.ALLOW_REDUCED:
+                # ALLOW_REDUCED: 需要 >= min_confidence_reduced
+                required_level = confidence_levels.get(min_reduced_str, 1)
+                if draft_level < required_level:
+                    logger.debug(f"Executable blocked: ALLOW_REDUCED requires {min_reduced_str}, got {draft.confidence.value}")
+                    return False
+        
+        # Rule 5: 其他情况允许
         return True
 
 
