@@ -307,7 +307,7 @@ class FeatureSnapshot:
 # 便捷构造函数
 # ============================================
 
-def create_empty_snapshot(symbol: str) -> FeatureSnapshot:
+def create_empty_snapshot(symbol: str, reason_tag=None) -> FeatureSnapshot:
     """
     创建空快照（所有特征为None）
     
@@ -315,6 +315,7 @@ def create_empty_snapshot(symbol: str) -> FeatureSnapshot:
     
     Args:
         symbol: 交易对符号
+        reason_tag: 可选的ReasonTag，表示创建空快照的原因
         
     Returns:
         空特征快照
@@ -326,10 +327,19 @@ def create_empty_snapshot(symbol: str) -> FeatureSnapshot:
         missing_windows=['5m', '15m', '1h', '6h', '24h']
     )
     
+    # 如果有reason_tag，记录到trace中
+    trace = None
+    if reason_tag is not None:
+        trace = FeatureTrace(
+            warnings=[f"Empty snapshot created due to: {reason_tag.value if hasattr(reason_tag, 'value') else reason_tag}"],
+            errors=[]
+        )
+    
     return FeatureSnapshot(
         features=MarketFeatures(),
         coverage=coverage,
         metadata=metadata,
+        trace=trace,
     )
 
 

@@ -127,58 +127,112 @@ class FeatureBuilder:
     
     def _validate_core_fields(self, features: MarketFeatures, symbol: str) -> Tuple[bool, List]:
         """
-        验证核心必需字段（P0-01 DataFix增强）
+        验证核心必需字段（P1-01 DataValidity增强）
         
-        核心字段分为两类：
-        1. 必须字段（缺失则阻断）：price
-        2. 重要字段（缺失则降级）：volume_24h, funding_rate
+        三层校验：
+        1. 缺失校验（None）：DATA_MISSING_*
+        2. 无效值校验（<=0）：DATA_INVALID_*（阻断）
+        3. 异常值校验（outlier）：DATA_OUTLIER_*（降级+cap）
         
         Args:
             features: 提取的特征
             symbol: 交易对符号（用于日志）
         
         Returns:
-            (is_valid, missing_tags): 是否通过验证，缺失字段的ReasonTag列表
+            (is_valid, validation_tags): 是否通过验证，校验标签列表
         """
         from models.reason_tags import ReasonTag
         
-        missing_tags = []
+        validation_tags = []
         is_valid = True
         
-        # 1. 检查price（必须字段，缺失则阻断）
+        # ========== 1. Price校验 ==========
         if features.price is None or features.price.current_price is None:
             logger.error(f"[{symbol}] Missing REQUIRED field: price")
-            missing_tags.append(ReasonTag.DATA_MISSING_PRICE)
-            is_valid = False  # price缺失直接阻断
+            validation_tags.append(ReasonTag.DATA_MISSING_PRICE)
+            is_valid = False
+        elif features.price.current_price <= 0:
+            logger.error(f"[{symbol}] INVALID price: {features.price.current_price} <= 0")
+            validation_tags.append(ReasonTag.DATA_INVALID_PRICE)
+            is_valid = False
         
-        # 2. 检查volume_24h（重要字段，缺失则降级）
+        # ========== 2. Volume校验 ==========
         if features.volume is None or features.volume.volume_24h is None:
             logger.warning(f"[{symbol}] Missing important field: volume_24h")
-            missing_tags.append(ReasonTag.DATA_MISSING_VOLUME)
-            # 不阻断，仅降级
+            validation_tags.append(ReasonTag.DATA_MISSING_VOLUME)
+        elif features.volume.volume_24h <= 0:
+            logger.error(f"[{symbol}] INVALID volume_24h: {features.volume.volume_24h} <= 0")
+            validation_tags.append(ReasonTag.DATA_INVALID_VOLUME)
+            is_valid = False  # 成交量无效也阻断
         
-        # 3. 检查funding_rate（重要字段，缺失则降级）
-        if features.funding is None or features.funding.funding_rate is None:
-            logger.warning(f"[{symbol}] Missing important field: funding_rate")
-            missing_tags.append(ReasonTag.DATA_MISSING_FUNDING_RATE)
-            # 不阻断，仅降级
-        
-        # 4. 检查open_interest（辅助字段，缺失则降级）
+        # ========== 3. Open Interest校验 ==========
         if features.open_interest is None or features.open_interest.current_oi is None:
             logger.debug(f"[{symbol}] Missing auxiliary field: open_interest")
-            missing_tags.append(ReasonTag.DATA_MISSING_OPEN_INTEREST)
+            validation_tags.append(ReasonTag.DATA_MISSING_OPEN_INTEREST)
+        elif features.open_interest.current_oi <= 0:
+            logger.error(f"[{symbol}] INVALID open_interest: {features.open_interest.current_oi} <= 0")
+            validation_tags.append(ReasonTag.DATA_INVALID_OI)
+            is_valid = False  # 持仓量无效也阻断
         
-        # 5. 检查taker_imbalance（辅助字段，缺失则降级）
+        # ========== 4. Funding Rate校验 ==========
+        if features.funding is None or features.funding.funding_rate is None:
+            logger.warning(f"[{symbol}] Missing important field: funding_rate")
+            validation_tags.append(ReasonTag.DATA_MISSING_FUNDING_RATE)
+        else:
+            # 资金费率异常值检测：通常在[-0.01, 0.01]范围内，超过0.05视为异常
+            funding = features.funding.funding_rate
+            if abs(funding) > 0.05:  # 5%是极端异常值
+                logger.warning(f"[{symbol}] OUTLIER funding_rate: {funding} (>5%)")
+                validation_tags.append(ReasonTag.DATA_OUTLIER_FUNDING_RATE)
+        
+        # ========== 5. Taker Imbalance校验 ==========
         if features.taker_imbalance is None or features.taker_imbalance.taker_imbalance_1h is None:
             logger.debug(f"[{symbol}] Missing auxiliary field: taker_imbalance_1h")
-            missing_tags.append(ReasonTag.DATA_MISSING_TAKER_IMBALANCE)
-        
-        if is_valid:
-            logger.debug(f"[{symbol}] Core fields validation passed (missing_count={len(missing_tags)})")
+            validation_tags.append(ReasonTag.DATA_MISSING_TAKER_IMBALANCE)
         else:
-            logger.error(f"[{symbol}] Core fields validation FAILED (missing={[t.value for t in missing_tags]})")
+            # taker失衡异常值检测：通常在[-1, 1]范围内
+            imbalance = features.taker_imbalance.taker_imbalance_1h
+            if abs(imbalance) > 1.0:  # 超过100%视为异常
+                logger.warning(f"[{symbol}] OUTLIER taker_imbalance_1h: {imbalance} (>100%)")
+                validation_tags.append(ReasonTag.DATA_OUTLIER_TAKER_IMBALANCE)
         
-        return is_valid, missing_tags
+        # ========== 6. Price Change异常值校验 ==========
+        price_changes = [
+            ('5m', features.price.price_change_5m if features.price else None),
+            ('15m', features.price.price_change_15m if features.price else None),
+            ('1h', features.price.price_change_1h if features.price else None),
+            ('6h', features.price.price_change_6h if features.price else None),
+        ]
+        for window, change in price_changes:
+            if change is not None and abs(change) > 1.0:  # 超过100%视为异常
+                logger.warning(f"[{symbol}] OUTLIER price_change_{window}: {change} (>100%)")
+                if ReasonTag.DATA_OUTLIER_PRICE_CHANGE not in validation_tags:
+                    validation_tags.append(ReasonTag.DATA_OUTLIER_PRICE_CHANGE)
+                break  # 只记录一次
+        
+        # ========== 7. OI Change异常值校验 ==========
+        oi_changes = [
+            ('15m', features.open_interest.oi_change_15m if features.open_interest else None),
+            ('1h', features.open_interest.oi_change_1h if features.open_interest else None),
+            ('6h', features.open_interest.oi_change_6h if features.open_interest else None),
+        ]
+        for window, change in oi_changes:
+            if change is not None and abs(change) > 1.0:  # 超过100%视为异常
+                logger.warning(f"[{symbol}] OUTLIER oi_change_{window}: {change} (>100%)")
+                if ReasonTag.DATA_OUTLIER_OI_CHANGE not in validation_tags:
+                    validation_tags.append(ReasonTag.DATA_OUTLIER_OI_CHANGE)
+                break  # 只记录一次
+        
+        # ========== 日志输出 ==========
+        if is_valid:
+            outlier_count = sum(1 for t in validation_tags if 'outlier' in t.value)
+            missing_count = sum(1 for t in validation_tags if 'missing' in t.value)
+            logger.debug(f"[{symbol}] Core fields validation passed (missing={missing_count}, outlier={outlier_count})")
+        else:
+            invalid_tags = [t.value for t in validation_tags if 'invalid' in t.value]
+            logger.error(f"[{symbol}] Core fields validation FAILED (invalid={invalid_tags})")
+        
+        return is_valid, validation_tags
     
     def _normalize_data(self, raw_data: Dict) -> Tuple[Dict, Optional[Dict]]:
         """

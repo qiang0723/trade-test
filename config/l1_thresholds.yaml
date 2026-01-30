@@ -211,6 +211,20 @@ confidence_scoring:
     tag_caps:
       noisy_market: "MEDIUM"         # MEDIUM（必须 >= min_confidence_reduced）
       weak_signal_in_range: "MEDIUM" # MEDIUM（禁止RANGE弱信号达到HIGH）
+      
+      # P1-01 DataValidity: 异常值的caps
+      data_outlier_price_change: "MEDIUM"      # 价格变化异常 → cap to MEDIUM
+      data_outlier_oi_change: "MEDIUM"         # OI变化异常 → cap to MEDIUM
+      data_outlier_taker_imbalance: "MEDIUM"   # taker失衡异常 → cap to MEDIUM
+      data_outlier_funding_rate: "HIGH"        # 资金费率异常 → cap to HIGH（相对宽松）
+      
+      # P2-2 Funding三段式caps
+      funding_elevated: "HIGH"                 # 中等风险 → cap to HIGH
+      funding_crowding: "MEDIUM"               # 高拥挤 → cap to MEDIUM
+      # funding_tailwind: 不设cap（逆风是增益）
+      
+      # P3-1 Dual Alignment caps
+      timeframe_conflict: "MEDIUM"             # 周期冲突 → cap to MEDIUM
   
   # 强信号突破
   strong_signal_boost:
@@ -270,6 +284,31 @@ auxiliary_tags:
   
   # 资金费率阈值（辅助信息标签）
   funding_rate_threshold: 0.0005  # 费率绝对值 > 0.05% → HIGH/LOW_FUNDING_RATE
+
+# ==================
+# P2-2: Funding三段式规则
+# ==================
+funding_tiered:
+  # 三段阈值（小数格式：0.001 = 0.1%）
+  f_low: 0.0005     # 第一档阈值：0.05%（低于此不处理）
+  f_high: 0.002     # 第二档阈值：0.2%（达到此为拥挤/逆风）
+  
+  # ELEVATED（中等风险）策略
+  elevated:
+    executability: "DEGRADE"      # 降级执行
+    confidence_cap: "HIGH"        # 置信度上限
+  
+  # CROWDING（高拥挤）策略
+  crowding:
+    executability: "DEGRADE"      # 默认降级（可改为BLOCK）
+    confidence_cap: "MEDIUM"      # 置信度上限
+    block_enabled: false          # 是否强制阻断
+  
+  # TAILWIND（逆风）策略
+  tailwind:
+    executability: "ALLOW"        # 不降级
+    quality_bonus: true           # 是否作为质量增益
+    confidence_cap: "ULTRA"       # 置信度上限（不限制）
 
 # ==================
 # PR-005: 多周期三层触发（1h/15m/5m）

@@ -156,6 +156,7 @@ class DecisionCore:
         双周期决策评估（纯函数）
         
         分别评估短期（5m/15m）和中期（1h/6h）
+        P3-1: 添加Alignment仲裁（同向加分，反向降级）
         
         Args:
             features: 特征快照
@@ -165,12 +166,9 @@ class DecisionCore:
         Returns:
             DualTimeframeDecisionDraft: 双周期决策草稿
         """
-        # TODO: 识别全局风险标签
-        
-        # ✅ P0-1修复：分别评估短期和中期，使用不同的timeframe参数
         from models.enums import Timeframe
         
-        # 短期评估（5m/15m）
+        # ===== Step 1: 分别评估短期和中期 =====
         short_draft = DecisionCore.evaluate_single(
             features, 
             thresholds, 
@@ -179,7 +177,6 @@ class DecisionCore:
         )
         logger.debug(f"[{symbol}] Short-term evaluated: {short_draft.decision.value}")
         
-        # 中期评估（1h/6h）
         medium_draft = DecisionCore.evaluate_single(
             features,
             thresholds,
@@ -188,11 +185,93 @@ class DecisionCore:
         )
         logger.debug(f"[{symbol}] Medium-term evaluated: {medium_draft.decision.value}")
         
+        # ===== Step 2: P3-1 Alignment仲裁 =====
+        global_risk_tags = []
+        short_draft, medium_draft = DecisionCore._apply_alignment_arbitration(
+            short_draft, medium_draft, thresholds, global_risk_tags, symbol
+        )
+        
         return DualTimeframeDecisionDraft(
             short_term=short_draft,
             medium_term=medium_draft,
-            global_risk_tags=[]
+            global_risk_tags=global_risk_tags
         )
+    
+    @staticmethod
+    def _apply_alignment_arbitration(
+        short_draft: TimeframeDecisionDraft,
+        medium_draft: TimeframeDecisionDraft,
+        thresholds: Thresholds,
+        global_tags: List[ReasonTag],
+        symbol: str
+    ) -> Tuple[TimeframeDecisionDraft, TimeframeDecisionDraft]:
+        """
+        P3-1: Dual Alignment仲裁
+        
+        规则：
+        - 同向（short和medium决策相同且非NO_TRADE）：ALIGNMENT_BONUS，置信度+1档
+        - 反向（short和medium决策不同且都非NO_TRADE）：TIMEFRAME_CONFLICT，强制降级
+        - 其他情况：不处理
+        
+        重要：不改写原始方向结论，只影响置信度和执行权限
+        
+        Args:
+            short_draft: 短期决策草稿
+            medium_draft: 中期决策草稿
+            thresholds: 阈值配置
+            global_tags: 全局标签列表（输出）
+            symbol: 交易对符号
+        
+        Returns:
+            (更新后的short_draft, 更新后的medium_draft)
+        """
+        short_decision = short_draft.decision
+        medium_decision = medium_draft.decision
+        
+        # 至少一个是NO_TRADE，不仲裁
+        if short_decision == Decision.NO_TRADE or medium_decision == Decision.NO_TRADE:
+            return short_draft, medium_draft
+        
+        # 同向：两个周期方向一致
+        if short_decision == medium_decision:
+            # 添加ALIGNMENT_BONUS标签
+            global_tags.append(ReasonTag.ALIGNMENT_BONUS)
+            
+            # 提升置信度（但不超过ULTRA）
+            CONF_ORDER = {Confidence.LOW: 1, Confidence.MEDIUM: 2, Confidence.HIGH: 3, Confidence.ULTRA: 4}
+            CONF_REVERSE = {1: Confidence.LOW, 2: Confidence.MEDIUM, 3: Confidence.HIGH, 4: Confidence.ULTRA}
+            
+            # 提升short_draft的置信度
+            short_conf_order = CONF_ORDER.get(short_draft.confidence, 1)
+            new_short_conf_order = min(short_conf_order + 1, 4)  # 最高ULTRA
+            short_draft.confidence = CONF_REVERSE[new_short_conf_order]
+            
+            # 将ALIGNMENT_BONUS添加到short_draft的reason_tags
+            if ReasonTag.ALIGNMENT_BONUS not in short_draft.reason_tags:
+                short_draft.reason_tags.append(ReasonTag.ALIGNMENT_BONUS)
+            
+            logger.debug(f"[{symbol}] Alignment BONUS: {short_decision.value} (conf {CONF_REVERSE[short_conf_order].value} -> {short_draft.confidence.value})")
+        
+        # 反向：两个周期方向相反
+        else:
+            # 添加TIMEFRAME_CONFLICT标签
+            global_tags.append(ReasonTag.TIMEFRAME_CONFLICT)
+            
+            # 添加到short_draft的reason_tags（会触发DEGRADE）
+            if ReasonTag.TIMEFRAME_CONFLICT not in short_draft.reason_tags:
+                short_draft.reason_tags.append(ReasonTag.TIMEFRAME_CONFLICT)
+            
+            # 强制设置permission为ALLOW_REDUCED
+            short_draft.permission = ExecutionPermission.ALLOW_REDUCED
+            
+            # 强制cap置信度到MEDIUM
+            CONF_ORDER = {Confidence.LOW: 1, Confidence.MEDIUM: 2, Confidence.HIGH: 3, Confidence.ULTRA: 4}
+            if CONF_ORDER.get(short_draft.confidence, 1) > 2:
+                short_draft.confidence = Confidence.MEDIUM
+            
+            logger.debug(f"[{symbol}] Alignment CONFLICT: short={short_decision.value}, medium={medium_decision.value} -> ALLOW_REDUCED")
+        
+        return short_draft, medium_draft
     
     # ========================================
     # Step 2: 市场环境识别
@@ -578,7 +657,7 @@ class DecisionCore:
         
         required_context = context_cfg.required_signals if hasattr(context_cfg, 'required_signals') else 2
         if context_signals < required_context:
-            tags.append(ReasonTag.LTF_CONTEXT_DENIED)
+            tags.append(ReasonTag.MTF_DENIED)  # P2-1: 使用新标签
             logger.debug(f"LONG Context denied: {context_signals}/{required_context}")
             return False, tags
         
@@ -605,19 +684,24 @@ class DecisionCore:
         required_confirm = confirm_cfg.required_confirmed if hasattr(confirm_cfg, 'required_confirmed') else 2
         required_partial = confirm_cfg.required_partial if hasattr(confirm_cfg, 'required_partial') else 1
         
-        if confirm_signals >= required_confirm:
-            tags.append(ReasonTag.LTF_CONFIRMED)
-        elif confirm_signals >= required_partial:
-            tags.append(ReasonTag.LTF_PARTIAL_CONFIRM)
-        else:
-            tags.append(ReasonTag.LTF_FAILED_CONFIRM)
-            logger.debug(f"LONG Confirm failed: {confirm_signals}/{required_confirm}")
+        # P2-1: 记录confirm状态，稍后根据trigger结果决定最终标签
+        confirm_full = confirm_signals >= required_confirm
+        confirm_partial = confirm_signals >= required_partial
+        
+        if not confirm_partial:
+            # 连部分确认都不满足
+            tags.append(ReasonTag.MTF_DENIED)  # P2-1: 使用新标签
+            logger.debug(f"LONG Confirm failed: {confirm_signals}/{required_partial}")
             return False, tags
         
         # ===== Layer 3: Trigger (5m) =====
         trigger_cfg = multi_tf_cfg.trigger_5m.long if hasattr(multi_tf_cfg.trigger_5m, 'long') else None
         if not trigger_cfg:
             # 如果没有trigger配置，Confirm通过即可
+            if confirm_full:
+                tags.append(ReasonTag.MTF_FULL)  # P2-1: context✅confirm✅(no trigger check)
+            else:
+                tags.append(ReasonTag.MTF_PARTIAL_CONFIRM)  # P2-1: context✅confirm部分
             tags.append(ReasonTag.STRONG_BUY_PRESSURE)
             return True, tags
         
@@ -634,16 +718,26 @@ class DecisionCore:
             trigger_signals += 1
         
         required_trigger = trigger_cfg.required_signals if hasattr(trigger_cfg, 'required_signals') else 2
-        if trigger_signals >= required_trigger:
+        trigger_ok = trigger_signals >= required_trigger
+        
+        # P2-1: 根据confirm和trigger状态决定最终标签
+        if confirm_full and trigger_ok:
+            tags.append(ReasonTag.MTF_FULL)  # context✅confirm✅trigger✅
             tags.append(ReasonTag.STRONG_BUY_PRESSURE)
-            logger.debug(f"LONG MultiTF triggered: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}")
+            logger.debug(f"LONG MTF_FULL: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}")
             return True, tags
+        elif confirm_full and not trigger_ok:
+            tags.append(ReasonTag.MTF_NO_TRIGGER)  # context✅confirm✅trigger❌
+            tags.append(ReasonTag.STRONG_BUY_PRESSURE)
+            logger.debug(f"LONG MTF_NO_TRIGGER: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}/{required_trigger}")
+            return True, tags  # 降级执行，仍返回True
+        elif confirm_partial:
+            tags.append(ReasonTag.MTF_PARTIAL_CONFIRM)  # context✅confirm部分
+            tags.append(ReasonTag.STRONG_BUY_PRESSURE)
+            logger.debug(f"LONG MTF_PARTIAL_CONFIRM: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}")
+            return True, tags  # 降级执行
         
-        # Trigger不足，但有部分确认，降级输出
-        if ReasonTag.LTF_PARTIAL_CONFIRM in tags:
-            logger.debug(f"LONG Trigger weak but partial confirm: trigger={trigger_signals}/{required_trigger}")
-            return True, tags
-        
+        # 不应该到这里
         logger.debug(f"LONG Trigger failed: {trigger_signals}/{required_trigger}")
         return False, tags
     
@@ -753,7 +847,7 @@ class DecisionCore:
         
         required_context = context_cfg.required_signals if hasattr(context_cfg, 'required_signals') else 2
         if context_signals < required_context:
-            tags.append(ReasonTag.LTF_CONTEXT_DENIED)
+            tags.append(ReasonTag.MTF_DENIED)  # P2-1: 使用新标签
             logger.debug(f"SHORT Context denied: {context_signals}/{required_context}")
             return False, tags
         
@@ -780,18 +874,24 @@ class DecisionCore:
         required_confirm = confirm_cfg.required_confirmed if hasattr(confirm_cfg, 'required_confirmed') else 2
         required_partial = confirm_cfg.required_partial if hasattr(confirm_cfg, 'required_partial') else 1
         
-        if confirm_signals >= required_confirm:
-            tags.append(ReasonTag.LTF_CONFIRMED)
-        elif confirm_signals >= required_partial:
-            tags.append(ReasonTag.LTF_PARTIAL_CONFIRM)
-        else:
-            tags.append(ReasonTag.LTF_FAILED_CONFIRM)
-            logger.debug(f"SHORT Confirm failed: {confirm_signals}/{required_confirm}")
+        # P2-1: 记录confirm状态，稍后根据trigger结果决定最终标签
+        confirm_full = confirm_signals >= required_confirm
+        confirm_partial = confirm_signals >= required_partial
+        
+        if not confirm_partial:
+            # 连部分确认都不满足
+            tags.append(ReasonTag.MTF_DENIED)  # P2-1: 使用新标签
+            logger.debug(f"SHORT Confirm failed: {confirm_signals}/{required_partial}")
             return False, tags
         
         # ===== Layer 3: Trigger (5m) =====
         trigger_cfg = multi_tf_cfg.trigger_5m.short if hasattr(multi_tf_cfg.trigger_5m, 'short') else None
         if not trigger_cfg:
+            # 如果没有trigger配置，Confirm通过即可
+            if confirm_full:
+                tags.append(ReasonTag.MTF_FULL)  # P2-1: context✅confirm✅(no trigger check)
+            else:
+                tags.append(ReasonTag.MTF_PARTIAL_CONFIRM)  # P2-1: context✅confirm部分
             tags.append(ReasonTag.STRONG_SELL_PRESSURE)
             return True, tags
         
@@ -808,15 +908,26 @@ class DecisionCore:
             trigger_signals += 1
         
         required_trigger = trigger_cfg.required_signals if hasattr(trigger_cfg, 'required_signals') else 2
-        if trigger_signals >= required_trigger:
+        trigger_ok = trigger_signals >= required_trigger
+        
+        # P2-1: 根据confirm和trigger状态决定最终标签
+        if confirm_full and trigger_ok:
+            tags.append(ReasonTag.MTF_FULL)  # context✅confirm✅trigger✅
             tags.append(ReasonTag.STRONG_SELL_PRESSURE)
-            logger.debug(f"SHORT MultiTF triggered: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}")
+            logger.debug(f"SHORT MTF_FULL: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}")
             return True, tags
+        elif confirm_full and not trigger_ok:
+            tags.append(ReasonTag.MTF_NO_TRIGGER)  # context✅confirm✅trigger❌
+            tags.append(ReasonTag.STRONG_SELL_PRESSURE)
+            logger.debug(f"SHORT MTF_NO_TRIGGER: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}/{required_trigger}")
+            return True, tags  # 降级执行，仍返回True
+        elif confirm_partial:
+            tags.append(ReasonTag.MTF_PARTIAL_CONFIRM)  # context✅confirm部分
+            tags.append(ReasonTag.STRONG_SELL_PRESSURE)
+            logger.debug(f"SHORT MTF_PARTIAL_CONFIRM: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}")
+            return True, tags  # 降级执行
         
-        if ReasonTag.LTF_PARTIAL_CONFIRM in tags:
-            logger.debug(f"SHORT Trigger weak but partial confirm: trigger={trigger_signals}/{required_trigger}")
-            return True, tags
-        
+        # 不应该到这里
         logger.debug(f"SHORT Trigger failed: {trigger_signals}/{required_trigger}")
         return False, tags
     
@@ -879,15 +990,14 @@ class DecisionCore:
         thresholds: Thresholds
     ) -> Tuple[Decision, List[ReasonTag]]:
         """
-        资金费率降级（纯函数）
+        P2-2: 资金费率三段式规则（纯函数）
         
-        TODO: 从market_state_machine_l1.py相关逻辑提取（PR-ARCH-02 M3-Step6）
-        
-        规则：
-        - LONG时，funding_rate > high_threshold → NO_TRADE
-        - SHORT时，funding_rate < -high_threshold → NO_TRADE
-        
-        注意：需要在models/thresholds.py中添加funding_rate降级阈值
+        三段逻辑：
+        1. |funding| < f_low: 不处理
+        2. f_low <= |funding| < f_high: ELEVATED（降级）
+        3. |funding| >= f_high:
+           - 顺势（LONG+正费率/SHORT+负费率）: CROWDING（高拥挤）
+           - 逆势（LONG+负费率/SHORT+正费率）: TAILWIND（逆风增益）
         
         Args:
             decision: 当前决策
@@ -899,9 +1009,60 @@ class DecisionCore:
         """
         tags = []
         
-        # TODO: 实现完整逻辑
-        # 需要在thresholds中添加funding_rate降级配置
-        # 临时实现：不降级
+        # 如果是NO_TRADE，不处理funding
+        if decision == Decision.NO_TRADE:
+            return decision, tags
+        
+        # 获取funding_rate
+        funding_rate = features.features.funding.funding_rate if features.features.funding else None
+        if funding_rate is None:
+            return decision, tags
+        
+        # 获取三段阈值配置
+        # 从thresholds.raw_config获取，因为funding_tiered是新增配置
+        raw_config = getattr(thresholds, 'raw_config', {}) if thresholds else {}
+        funding_cfg = raw_config.get('funding_tiered', {})
+        
+        f_low = funding_cfg.get('f_low', 0.0005)    # 默认0.05%
+        f_high = funding_cfg.get('f_high', 0.002)   # 默认0.2%
+        
+        abs_funding = abs(funding_rate)
+        
+        # === 第一段：|funding| < f_low，不处理 ===
+        if abs_funding < f_low:
+            return decision, tags
+        
+        # === 第二段：f_low <= |funding| < f_high，ELEVATED ===
+        if abs_funding < f_high:
+            tags.append(ReasonTag.FUNDING_ELEVATED)
+            logger.debug(f"Funding ELEVATED: |{funding_rate:.4f}| in [{f_low}, {f_high})")
+            return decision, tags
+        
+        # === 第三段：|funding| >= f_high ===
+        # 判断顺势还是逆势
+        is_same_direction = False
+        if decision == Decision.LONG and funding_rate > 0:
+            # LONG + 正费率 = 顺势（多头拥挤）
+            is_same_direction = True
+        elif decision == Decision.SHORT and funding_rate < 0:
+            # SHORT + 负费率 = 顺势（空头拥挤）
+            is_same_direction = True
+        
+        if is_same_direction:
+            # CROWDING: 顺势开仓 + 极端费率 = 高拥挤风险
+            tags.append(ReasonTag.FUNDING_CROWDING)
+            logger.debug(f"Funding CROWDING: {decision.value} with funding={funding_rate:.4f}")
+            
+            # 检查是否配置为强制阻断
+            crowding_cfg = funding_cfg.get('crowding', {})
+            if crowding_cfg.get('block_enabled', False):
+                # 如果配置为阻断，返回NO_TRADE
+                tags.append(ReasonTag.CROWDING_RISK)
+                return Decision.NO_TRADE, tags
+        else:
+            # TAILWIND: 逆势开仓 + 极端费率 = 潜在增益
+            tags.append(ReasonTag.FUNDING_TAILWIND)
+            logger.debug(f"Funding TAILWIND: {decision.value} with funding={funding_rate:.4f}")
         
         return decision, tags
     

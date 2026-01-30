@@ -43,6 +43,17 @@ class ReasonTag(Enum):
     DATA_MISSING_OPEN_INTEREST = "data_missing_open_interest"  # 持仓量缺失（降级）
     DATA_MISSING_TAKER_IMBALANCE = "data_missing_taker_imbalance"  # taker失衡缺失（降级）
     
+    # P1-01 DataValidity: 无效值校验（值存在但非法）
+    DATA_INVALID_PRICE = "data_invalid_price"              # 价格<=0（必须阻断）
+    DATA_INVALID_VOLUME = "data_invalid_volume"            # 成交量<=0（阻断）
+    DATA_INVALID_OI = "data_invalid_oi"                    # 持仓量<=0（阻断）
+    
+    # P1-01 DataValidity: 异常值校验（值合法但超出合理范围）
+    DATA_OUTLIER_PRICE_CHANGE = "data_outlier_price_change"        # 价格变化>100%（降级+cap）
+    DATA_OUTLIER_OI_CHANGE = "data_outlier_oi_change"              # 持仓量变化>100%（降级+cap）
+    DATA_OUTLIER_TAKER_IMBALANCE = "data_outlier_taker_imbalance"  # taker失衡>100%（降级+cap）
+    DATA_OUTLIER_FUNDING_RATE = "data_outlier_funding_rate"        # 资金费率异常（降级+cap）
+    
     # ===== 风险否决类 =====
     EXTREME_REGIME = "extreme_regime"
     LIQUIDATION_PHASE = "liquidation_phase"
@@ -59,6 +70,10 @@ class ReasonTag(Enum):
     CONFLICTING_SIGNALS = "conflicting_signals"
     NO_CLEAR_DIRECTION = "no_clear_direction"
     
+    # P3-1 Dual Alignment仲裁
+    ALIGNMENT_BONUS = "alignment_bonus"            # 双周期同向，置信度+1档
+    TIMEFRAME_CONFLICT = "timeframe_conflict"      # 双周期反向，强制降级
+    
     # ===== 决策频率控制类（PR-C）=====
     MIN_INTERVAL_BLOCK = "min_interval_block"
     FLIP_COOLDOWN_BLOCK = "flip_cooldown_block"
@@ -66,6 +81,11 @@ class ReasonTag(Enum):
     # ===== 辅助信息类（非否决）=====
     HIGH_FUNDING_RATE = "high_funding_rate"
     LOW_FUNDING_RATE = "low_funding_rate"
+    
+    # P2-2 Funding三段式规则
+    FUNDING_ELEVATED = "funding_elevated"          # |funding| 在 [f_low, f_high)，中等风险
+    FUNDING_CROWDING = "funding_crowding"          # |funding| >= f_high + 顺势，高拥挤风险
+    FUNDING_TAILWIND = "funding_tailwind"          # |funding| >= f_high + 逆势，逆风增益
     STRONG_BUY_PRESSURE = "strong_buy_pressure"
     STRONG_SELL_PRESSURE = "strong_sell_pressure"
     OI_GROWING = "oi_growing"
@@ -80,11 +100,18 @@ class ReasonTag(Enum):
     SHORT_TERM_STRONG_BUY = "short_term_strong_buy"      # 短期强买压
     SHORT_TERM_STRONG_SELL = "short_term_strong_sell"    # 短期强卖压
     
-    # ===== 三层触发状态类（PR-005新增）=====
-    LTF_CONFIRMED = "ltf_confirmed"                      # 低时间框架确认（1h+15m+5m）
-    LTF_PARTIAL_CONFIRM = "ltf_partial_confirm"          # 部分确认（Confirm弱）
-    LTF_FAILED_CONFIRM = "ltf_failed_confirm"            # 确认失败
-    LTF_CONTEXT_DENIED = "ltf_context_denied"            # Context层不允许该方向
+    # ===== 三层触发状态类（PR-005新增 → P2-1语义细分）=====
+    # 旧标签保留用于向后兼容
+    LTF_CONFIRMED = "ltf_confirmed"                      # [Deprecated] 使用MTF_FULL
+    LTF_PARTIAL_CONFIRM = "ltf_partial_confirm"          # [Deprecated] 使用MTF_PARTIAL_CONFIRM
+    LTF_FAILED_CONFIRM = "ltf_failed_confirm"            # [Deprecated] 使用MTF_NO_TRIGGER
+    LTF_CONTEXT_DENIED = "ltf_context_denied"            # [Deprecated] 使用MTF_DENIED
+    
+    # P2-1 MultiTF语义细分（新标签）
+    MTF_FULL = "mtf_full"                          # 全确认：context✅ confirm✅ trigger✅
+    MTF_NO_TRIGGER = "mtf_no_trigger"              # 无触发：context✅ confirm✅ trigger❌
+    MTF_PARTIAL_CONFIRM = "mtf_partial_confirm"    # 部分确认：context✅ confirm部分
+    MTF_DENIED = "mtf_denied"                      # 拒绝：context❌
 
 
 # 中文解释映射
@@ -108,6 +135,17 @@ REASON_TAG_EXPLANATIONS = {
     "data_missing_open_interest": "📈 持仓量缺失：open_interest字段缺失，信号质量降级",
     "data_missing_taker_imbalance": "⚖️ taker失衡缺失：taker_imbalance字段缺失，信号质量降级",
     
+    # P1-01 DataValidity: 无效值
+    "data_invalid_price": "🚫 价格无效：价格<=0，数据异常，决策阻断",
+    "data_invalid_volume": "🚫 成交量无效：成交量<=0，数据异常，决策阻断",
+    "data_invalid_oi": "🚫 持仓量无效：持仓量<=0，数据异常，决策阻断",
+    
+    # P1-01 DataValidity: 异常值
+    "data_outlier_price_change": "⚠️ 价格变化异常：变化幅度>100%，可能为脏数据，置信度受限",
+    "data_outlier_oi_change": "⚠️ 持仓量变化异常：变化幅度>100%，可能为脏数据，置信度受限",
+    "data_outlier_taker_imbalance": "⚠️ taker失衡异常：失衡比例>100%，可能为脏数据，置信度受限",
+    "data_outlier_funding_rate": "⚠️ 资金费率异常：费率超出合理范围，置信度受限",
+    
     # 风险否决类
     "extreme_regime": "🚨 极端行情：市场波动超过安全阈值，暂停交易",
     "liquidation_phase": "⚡ 清算阶段：价格急变且持仓量骤降，疑似大规模清算",
@@ -124,6 +162,10 @@ REASON_TAG_EXPLANATIONS = {
     "conflicting_signals": "⚠️ 信号冲突：做多做空信号同时出现，保守选择观望",
     "no_clear_direction": "🤷 方向不明：未检测到明确的做多或做空信号",
     
+    # P3-1 Dual Alignment仲裁
+    "alignment_bonus": "✅ 双周期同向：短期与中期方向一致，信号质量增强",
+    "timeframe_conflict": "⚠️ 周期冲突：短期与中期方向相反，降级执行",
+    
     # 决策频率控制类（PR-C）
     "min_interval_block": "⏱️ 间隔过短：距离上次决策时间过短，防止频繁输出",
     "flip_cooldown_block": "🔄 翻转冷却：方向翻转冷却期内，防止频繁切换",
@@ -131,6 +173,11 @@ REASON_TAG_EXPLANATIONS = {
     # 辅助信息类
     "high_funding_rate": "💸 高资金费率：当前资金费率较高（辅助参考）",
     "low_funding_rate": "💰 低资金费率：当前资金费率较低（辅助参考）",
+    
+    # P2-2 Funding三段式
+    "funding_elevated": "⚠️ 资金费率升高：费率在警戒区间，信号质量降级",
+    "funding_crowding": "🚨 资金费率拥挤：费率极端且顺势开仓，高风险拥挤",
+    "funding_tailwind": "🎯 资金费率逆风：费率极端但逆势开仓，潜在质量增益",
     "strong_buy_pressure": "🟢 强买压：检测到强烈的买方力量",
     "strong_sell_pressure": "🔴 强卖压：检测到强烈的卖方力量",
     "oi_growing": "📈 持仓增长：持仓量持续增长",
@@ -145,11 +192,18 @@ REASON_TAG_EXPLANATIONS = {
     "short_term_strong_buy": "🔥 短期强买压：买卖失衡>65%",
     "short_term_strong_sell": "🔥 短期强卖压：买卖失衡<-65%",
     
-    # 三层触发状态类（PR-005新增）
-    "ltf_confirmed": "✅ 三层确认：1h方向+15m确认+5m触发全部满足（高质量信号）",
-    "ltf_partial_confirm": "⚠️ 部分确认：Context满足但Confirm信号较弱（降级执行）",
-    "ltf_failed_confirm": "❌ 确认失败：Context满足但15m/5m信号不足（短期机会取消）",
-    "ltf_context_denied": "🚫 Context拒绝：1h方向与信号不符（方向冲突）",
+    # 三层触发状态类（PR-005新增 → P2-1语义细分）
+    # 旧标签（向后兼容）
+    "ltf_confirmed": "✅ [旧]三层确认：请使用mtf_full",
+    "ltf_partial_confirm": "⚠️ [旧]部分确认：请使用mtf_partial_confirm",
+    "ltf_failed_confirm": "❌ [旧]确认失败：请使用mtf_no_trigger",
+    "ltf_context_denied": "🚫 [旧]Context拒绝：请使用mtf_denied",
+    
+    # P2-1 新标签
+    "mtf_full": "✅ MultiTF全确认：1h方向+15m确认+5m触发全部满足（高质量信号）",
+    "mtf_no_trigger": "⏸️ MultiTF无触发：1h方向+15m确认满足，但5m入场信号不足（等待时机）",
+    "mtf_partial_confirm": "⚠️ MultiTF部分确认：1h方向满足，15m确认信号较弱（降级执行）",
+    "mtf_denied": "🚫 MultiTF拒绝：1h方向不符（Context层否决）",
 }
 
 
@@ -189,6 +243,17 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.DATA_MISSING_OPEN_INTEREST: ExecutabilityLevel.DEGRADE, # 持仓量缺失降级
     ReasonTag.DATA_MISSING_TAKER_IMBALANCE: ExecutabilityLevel.DEGRADE,  # taker失衡缺失降级
     
+    # P1-01 DataValidity: 无效值（必须阻断）
+    ReasonTag.DATA_INVALID_PRICE: ExecutabilityLevel.BLOCK,   # 价格无效必须阻断
+    ReasonTag.DATA_INVALID_VOLUME: ExecutabilityLevel.BLOCK,  # 成交量无效阻断
+    ReasonTag.DATA_INVALID_OI: ExecutabilityLevel.BLOCK,      # 持仓量无效阻断
+    
+    # P1-01 DataValidity: 异常值（降级）
+    ReasonTag.DATA_OUTLIER_PRICE_CHANGE: ExecutabilityLevel.DEGRADE,      # 价格变化异常降级
+    ReasonTag.DATA_OUTLIER_OI_CHANGE: ExecutabilityLevel.DEGRADE,         # 持仓量变化异常降级
+    ReasonTag.DATA_OUTLIER_TAKER_IMBALANCE: ExecutabilityLevel.DEGRADE,   # taker失衡异常降级
+    ReasonTag.DATA_OUTLIER_FUNDING_RATE: ExecutabilityLevel.DEGRADE,      # 资金费率异常降级
+    
     # 风险否决类 - 全部阻断
     ReasonTag.EXTREME_REGIME: ExecutabilityLevel.BLOCK,
     ReasonTag.LIQUIDATION_PHASE: ExecutabilityLevel.BLOCK,
@@ -207,6 +272,10 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.CONFLICTING_SIGNALS: ExecutabilityLevel.BLOCK,
     ReasonTag.NO_CLEAR_DIRECTION: ExecutabilityLevel.BLOCK,
     
+    # P3-1 Dual Alignment仲裁
+    ReasonTag.ALIGNMENT_BONUS: ExecutabilityLevel.ALLOW,     # 同向增益→不降级
+    ReasonTag.TIMEFRAME_CONFLICT: ExecutabilityLevel.DEGRADE,  # 冲突→降级
+    
     # 决策频率控制类（PR-C）- 阻断
     ReasonTag.MIN_INTERVAL_BLOCK: ExecutabilityLevel.BLOCK,
     ReasonTag.FLIP_COOLDOWN_BLOCK: ExecutabilityLevel.BLOCK,
@@ -214,6 +283,11 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     # 辅助信息类 - 不影响
     ReasonTag.HIGH_FUNDING_RATE: ExecutabilityLevel.ALLOW,
     ReasonTag.LOW_FUNDING_RATE: ExecutabilityLevel.ALLOW,
+    
+    # P2-2 Funding三段式
+    ReasonTag.FUNDING_ELEVATED: ExecutabilityLevel.DEGRADE,   # 中等风险→降级
+    ReasonTag.FUNDING_CROWDING: ExecutabilityLevel.DEGRADE,   # 高拥挤→降级（可配置为BLOCK）
+    ReasonTag.FUNDING_TAILWIND: ExecutabilityLevel.ALLOW,     # 逆风增益→不降级
     ReasonTag.STRONG_BUY_PRESSURE: ExecutabilityLevel.ALLOW,
     ReasonTag.STRONG_SELL_PRESSURE: ExecutabilityLevel.ALLOW,
     ReasonTag.OI_GROWING: ExecutabilityLevel.ALLOW,
@@ -231,11 +305,18 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.SHORT_TERM_STRONG_BUY: ExecutabilityLevel.ALLOW,     # 短期强买压
     ReasonTag.SHORT_TERM_STRONG_SELL: ExecutabilityLevel.ALLOW,    # 短期强卖压
     
-    # 三层触发状态类（PR-005新增）
-    ReasonTag.LTF_CONFIRMED: ExecutabilityLevel.ALLOW,         # 三层确认，正常执行
-    ReasonTag.LTF_PARTIAL_CONFIRM: ExecutabilityLevel.DEGRADE, # 部分确认，降级执行
-    ReasonTag.LTF_FAILED_CONFIRM: ExecutabilityLevel.BLOCK,    # 确认失败，阻断执行
-    ReasonTag.LTF_CONTEXT_DENIED: ExecutabilityLevel.BLOCK,    # Context拒绝，阻断执行
+    # 三层触发状态类（PR-005新增 → P2-1语义细分）
+    # 旧标签（向后兼容，但不推荐使用）
+    ReasonTag.LTF_CONFIRMED: ExecutabilityLevel.ALLOW,         # [旧]三层确认
+    ReasonTag.LTF_PARTIAL_CONFIRM: ExecutabilityLevel.DEGRADE, # [旧]部分确认
+    ReasonTag.LTF_FAILED_CONFIRM: ExecutabilityLevel.BLOCK,    # [旧]确认失败
+    ReasonTag.LTF_CONTEXT_DENIED: ExecutabilityLevel.BLOCK,    # [旧]Context拒绝
+    
+    # P2-1 新标签
+    ReasonTag.MTF_FULL: ExecutabilityLevel.ALLOW,              # 全确认→正常执行
+    ReasonTag.MTF_NO_TRIGGER: ExecutabilityLevel.DEGRADE,      # 无触发→降级（等待时机）
+    ReasonTag.MTF_PARTIAL_CONFIRM: ExecutabilityLevel.DEGRADE, # 部分确认→降级
+    ReasonTag.MTF_DENIED: ExecutabilityLevel.ALLOW,            # 拒绝→由decision=NO_TRADE自然DENY
 }
 
 
