@@ -118,13 +118,15 @@ class DecisionCore:
             decision, features, thresholds
         )
         
-        # Step 8: 执行权限判断（策略层） ✅（简化版本）
+        # 收集所有标签（Step 8和9需要）
+        all_tags = regime_tags + risk_tags + quality_tags + long_tags + short_tags + direction_tags + funding_tags
+        
+        # Step 8: 执行权限判断（P0-04: 完全由ReasonTagRules驱动）
         execution_permission = DecisionCore._determine_execution_permission(
-            regime, quality, decision, thresholds
+            regime, quality, decision, thresholds, all_tags
         )
         
-        # Step 9: 置信度计算（TODO：实现PR-D混合模式）
-        all_tags = regime_tags + risk_tags + quality_tags + long_tags + short_tags + direction_tags + funding_tags
+        # Step 9: 置信度计算（PR-D混合模式）
         confidence = DecisionCore._compute_confidence(
             decision, regime, quality, all_tags, thresholds
         )
@@ -484,12 +486,9 @@ class DecisionCore:
         """
         做多方向评估（纯函数）
         
-        提取自: market_state_machine_l1.py._eval_long_direction() (PR-ARCH-02 M3-Step4)
-        
-        逻辑：
-        - TREND: imbalance > threshold AND oi_change > threshold AND price_change > threshold
-        - RANGE: imbalance > threshold AND oi_change > threshold
-        - RANGE短期机会: 3选1确认
+        P0-02/P0-03 重构：
+        - SHORT_TERM: 使用MultiTF三层触发（context_1h → confirm_15m → trigger_5m）
+        - MEDIUM_TERM: 使用传统1h/6h判定
         
         None-safe: 关键字段缺失时返回False（不误判LONG）
         
@@ -497,91 +496,156 @@ class DecisionCore:
             features: 特征快照
             regime: 市场环境
             thresholds: 阈值配置
-            timeframe: 时间框架（SHORT_TERM使用15m数据，MEDIUM_TERM使用1h数据）
+            timeframe: 时间框架
         
         Returns:
             (是否允许做多, 原因标签列表)
         """
         direction_tags = []
         
-        # PR-FIX: 根据timeframe选择数据字段
-        # SHORT_TERM (5m/15m): 优先使用15分钟数据
-        # MEDIUM_TERM (1h/6h): 使用1小时数据
+        # P0-02/P0-03: SHORT_TERM使用MultiTF三层触发
         if timeframe == Timeframe.SHORT_TERM:
-            # 短期评估：优先使用15分钟数据，回退到1小时
-            price_change = features.features.price.price_change_15m
-            oi_change = features.features.open_interest.oi_change_15m
-            if price_change is None:
-                price_change = features.features.price.price_change_1h
-            if oi_change is None:
-                oi_change = features.features.open_interest.oi_change_1h
-        else:
-            # 中期评估或默认：使用1小时数据
-            price_change = features.features.price.price_change_1h
-            oi_change = features.features.open_interest.oi_change_1h
+            return DecisionCore._eval_long_multi_tf(features, regime, thresholds)
         
-        # imbalance 使用1小时数据（更稳定）
+        # MEDIUM_TERM或默认：使用传统1h/6h判定
+        price_change = features.features.price.price_change_1h
+        oi_change = features.features.open_interest.oi_change_1h
         imbalance = features.features.taker_imbalance.taker_imbalance_1h
         
-        # 关键字段检查（回滚：LONG需要严格的3/3条件）
-        # 回测结论：LONG信号2/3条件模式胜率仅12.7%，需要恢复严格条件
         if imbalance is None or price_change is None:
-            logger.debug(f"Long direction eval skipped (key fields missing: imbalance={imbalance}, price={price_change})")
+            logger.debug(f"Long direction eval skipped (key fields missing)")
             return False, direction_tags
         
-        # 从配置读取方向阈值
         if regime == MarketRegime.TREND:
-            # 趋势市：多方强势（回滚：恢复严格3/3条件）
-            # 回测数据：2/3条件LONG胜率12.7%，严格条件胜率98%
             trend_cfg = thresholds.direction.trend.long
-            long_imbalance_trend = trend_cfg.imbalance
-            long_oi_change_trend = trend_cfg.oi_change
-            long_price_change_trend = trend_cfg.price_change or 0.004
+            imbalance_ok = imbalance > trend_cfg.imbalance
+            price_ok = price_change > (trend_cfg.price_change or 0.004)
             
-            # LONG必须同时满足：imbalance + price_change（oi_change可选）
-            # 核心条件：买压 + 价格上涨
-            imbalance_ok = imbalance > long_imbalance_trend
-            price_ok = price_change > long_price_change_trend
-            oi_ok = oi_change is not None and oi_change > long_oi_change_trend
-            
-            # 严格模式：imbalance + price 必须满足，oi可选加分
             if imbalance_ok and price_ok:
                 direction_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
                 return True, direction_tags
         
         elif regime == MarketRegime.RANGE:
-            # 震荡市：从配置读取阈值
-            # 注意：RANGE环境信号会被置信度系统降级到MEDIUM以下
             range_cfg = thresholds.direction.range.long
-            long_imbalance_range = range_cfg.imbalance
-            long_oi_change_range = range_cfg.oi_change
-            
-            # 严格模式：需要imbalance和oi_change同时满足（None检查）
-            if (imbalance is not None and imbalance > long_imbalance_range and 
-                oi_change is not None and oi_change > long_oi_change_range):
+            if (imbalance > range_cfg.imbalance and 
+                oi_change is not None and oi_change > range_cfg.oi_change):
                 direction_tags.append(ReasonTag.STRONG_BUY_PRESSURE)
                 return True, direction_tags
-            
-            # 短期机会识别（3选N确认，需要None检查）
-            if 'long' in thresholds.direction.range.short_term_opportunity:
-                opp = thresholds.direction.range.short_term_opportunity['long']
-                signals_met = 0
-                
-                # 信号1: 价格上涨（需要None检查）
-                if price_change is not None and price_change > opp.min_price_change_1h:
-                    signals_met += 1
-                # 信号2: OI增长（需要None检查）
-                if oi_change is not None and oi_change > opp.min_oi_change_1h:
-                    signals_met += 1
-                # 信号3: 买压（需要None检查）
-                if imbalance is not None and imbalance > opp.min_taker_imbalance:
-                    signals_met += 1
-                
-                if signals_met >= opp.required_signals:
-                    direction_tags.append(ReasonTag.RANGE_SHORT_TERM_LONG)
-                    return True, direction_tags
         
         return False, direction_tags
+    
+    @staticmethod
+    def _eval_long_multi_tf(
+        features: FeatureSnapshot,
+        regime: MarketRegime,
+        thresholds: Thresholds
+    ) -> Tuple[bool, List[ReasonTag]]:
+        """
+        P0-03: MultiTF三层触发LONG评估（context_1h → confirm_15m → trigger_5m）
+        
+        三层逻辑：
+        1. Context(1h): 大方向偏多（3选2）
+        2. Confirm(15m): 确认信号（4选2）
+        3. Trigger(5m): 入场触发（3选2）
+        
+        Returns:
+            (是否触发LONG, 原因标签列表)
+        """
+        tags = []
+        
+        # 获取MultiTF配置
+        multi_tf_cfg = thresholds.multi_tf
+        if not multi_tf_cfg or not multi_tf_cfg.enabled:
+            # MultiTF未启用，fallback到传统逻辑
+            return False, tags
+        
+        # ===== Layer 1: Context (1h) =====
+        context_cfg = multi_tf_cfg.context_1h.long if hasattr(multi_tf_cfg.context_1h, 'long') else None
+        if not context_cfg:
+            return False, tags
+        
+        price_1h = features.features.price.price_change_1h
+        imbalance_1h = features.features.taker_imbalance.taker_imbalance_1h
+        oi_1h = features.features.open_interest.oi_change_1h
+        
+        context_signals = 0
+        if price_1h is not None and price_1h > context_cfg.min_price_change:
+            context_signals += 1
+        if imbalance_1h is not None and imbalance_1h > context_cfg.min_taker_imbalance:
+            context_signals += 1
+        if oi_1h is not None and oi_1h > context_cfg.min_oi_change:
+            context_signals += 1
+        
+        required_context = context_cfg.required_signals if hasattr(context_cfg, 'required_signals') else 2
+        if context_signals < required_context:
+            tags.append(ReasonTag.LTF_CONTEXT_DENIED)
+            logger.debug(f"LONG Context denied: {context_signals}/{required_context}")
+            return False, tags
+        
+        # ===== Layer 2: Confirm (15m) =====
+        confirm_cfg = multi_tf_cfg.confirm_15m.long if hasattr(multi_tf_cfg.confirm_15m, 'long') else None
+        if not confirm_cfg:
+            return False, tags
+        
+        price_15m = features.features.price.price_change_15m
+        imbalance_15m = features.features.taker_imbalance.taker_imbalance_15m
+        volume_ratio_15m = features.features.volume.volume_ratio_15m
+        oi_15m = features.features.open_interest.oi_change_15m
+        
+        confirm_signals = 0
+        if price_15m is not None and price_15m > confirm_cfg.min_price_change:
+            confirm_signals += 1
+        if imbalance_15m is not None and imbalance_15m > confirm_cfg.min_taker_imbalance:
+            confirm_signals += 1
+        if volume_ratio_15m is not None and volume_ratio_15m > confirm_cfg.min_volume_ratio:
+            confirm_signals += 1
+        if oi_15m is not None and oi_15m > confirm_cfg.min_oi_change:
+            confirm_signals += 1
+        
+        required_confirm = confirm_cfg.required_confirmed if hasattr(confirm_cfg, 'required_confirmed') else 2
+        required_partial = confirm_cfg.required_partial if hasattr(confirm_cfg, 'required_partial') else 1
+        
+        if confirm_signals >= required_confirm:
+            tags.append(ReasonTag.LTF_CONFIRMED)
+        elif confirm_signals >= required_partial:
+            tags.append(ReasonTag.LTF_PARTIAL_CONFIRM)
+        else:
+            tags.append(ReasonTag.LTF_FAILED_CONFIRM)
+            logger.debug(f"LONG Confirm failed: {confirm_signals}/{required_confirm}")
+            return False, tags
+        
+        # ===== Layer 3: Trigger (5m) =====
+        trigger_cfg = multi_tf_cfg.trigger_5m.long if hasattr(multi_tf_cfg.trigger_5m, 'long') else None
+        if not trigger_cfg:
+            # 如果没有trigger配置，Confirm通过即可
+            tags.append(ReasonTag.STRONG_BUY_PRESSURE)
+            return True, tags
+        
+        price_5m = features.features.price.price_change_5m
+        imbalance_5m = features.features.taker_imbalance.taker_imbalance_5m
+        volume_ratio_5m = features.features.volume.volume_ratio_5m
+        
+        trigger_signals = 0
+        if price_5m is not None and price_5m > trigger_cfg.min_price_change:
+            trigger_signals += 1
+        if imbalance_5m is not None and imbalance_5m > trigger_cfg.min_taker_imbalance:
+            trigger_signals += 1
+        if volume_ratio_5m is not None and volume_ratio_5m > trigger_cfg.min_volume_ratio:
+            trigger_signals += 1
+        
+        required_trigger = trigger_cfg.required_signals if hasattr(trigger_cfg, 'required_signals') else 2
+        if trigger_signals >= required_trigger:
+            tags.append(ReasonTag.STRONG_BUY_PRESSURE)
+            logger.debug(f"LONG MultiTF triggered: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}")
+            return True, tags
+        
+        # Trigger不足，但有部分确认，降级输出
+        if ReasonTag.LTF_PARTIAL_CONFIRM in tags:
+            logger.debug(f"LONG Trigger weak but partial confirm: trigger={trigger_signals}/{required_trigger}")
+            return True, tags
+        
+        logger.debug(f"LONG Trigger failed: {trigger_signals}/{required_trigger}")
+        return False, tags
     
     @staticmethod
     def _eval_short_direction(
@@ -593,12 +657,9 @@ class DecisionCore:
         """
         做空方向评估（纯函数）
         
-        提取自: market_state_machine_l1.py._eval_short_direction() (PR-ARCH-02 M3-Step4)
-        
-        逻辑：
-        - TREND: imbalance < -threshold AND oi_change > threshold AND price_change < -threshold
-        - RANGE: imbalance < -threshold AND oi_change > threshold
-        - RANGE短期机会: 3选1确认
+        P0-02/P0-03 重构：
+        - SHORT_TERM: 使用MultiTF三层触发（context_1h → confirm_15m → trigger_5m）
+        - MEDIUM_TERM: 使用传统1h/6h判定
         
         None-safe: 关键字段缺失时返回False（不误判SHORT）
         
@@ -606,90 +667,158 @@ class DecisionCore:
             features: 特征快照
             regime: 市场环境
             thresholds: 阈值配置
-            timeframe: 时间框架（SHORT_TERM使用15m数据，MEDIUM_TERM使用1h数据）
+            timeframe: 时间框架
         
         Returns:
             (是否允许做空, 原因标签列表)
         """
         direction_tags = []
         
-        # PR-FIX: 根据timeframe选择数据字段
+        # P0-02/P0-03: SHORT_TERM使用MultiTF三层触发
         if timeframe == Timeframe.SHORT_TERM:
-            # 短期评估：优先使用15分钟数据，回退到1小时
-            price_change = features.features.price.price_change_15m
-            oi_change = features.features.open_interest.oi_change_15m
-            if price_change is None:
-                price_change = features.features.price.price_change_1h
-            if oi_change is None:
-                oi_change = features.features.open_interest.oi_change_1h
-        else:
-            # 中期评估或默认：使用1小时数据
-            price_change = features.features.price.price_change_1h
-            oi_change = features.features.open_interest.oi_change_1h
+            return DecisionCore._eval_short_multi_tf(features, regime, thresholds)
         
-        # imbalance 使用1小时数据（更稳定）
+        # MEDIUM_TERM或默认：使用传统1h/6h判定
+        price_change = features.features.price.price_change_1h
+        oi_change = features.features.open_interest.oi_change_1h
         imbalance = features.features.taker_imbalance.taker_imbalance_1h
         
-        # 关键字段检查（回测优化：放宽条件，允许oi_change缺失）
         if imbalance is None and price_change is None:
-            logger.debug(f"Short direction eval skipped (both imbalance and price_change missing)")
+            logger.debug(f"Short direction eval skipped (key fields missing)")
             return False, direction_tags
         
-        # 从配置读取方向阈值（PR-FIX: 替换硬编码TODO值）
         if regime == MarketRegime.TREND:
-            # 趋势市：空方强势（回测优化：2/3条件满足即可）
             trend_cfg = thresholds.direction.trend.short
-            short_imbalance_trend = trend_cfg.imbalance
-            short_oi_change_trend = trend_cfg.oi_change
-            short_price_change_trend = trend_cfg.price_change or 0.004  # 默认0.4%
-            
-            # 计算满足的条件数
             conditions_met = 0
-            if imbalance is not None and imbalance < -short_imbalance_trend:
+            if imbalance is not None and imbalance < -trend_cfg.imbalance:
                 conditions_met += 1
-            if oi_change is not None and oi_change > short_oi_change_trend:
+            if oi_change is not None and oi_change > trend_cfg.oi_change:
                 conditions_met += 1
-            if price_change is not None and price_change < -short_price_change_trend:
+            if price_change is not None and price_change < -(trend_cfg.price_change or 0.004):
                 conditions_met += 1
             
-            # TREND环境：2/3条件满足即可（回测优化）
             if conditions_met >= 2:
                 direction_tags.append(ReasonTag.STRONG_SELL_PRESSURE)
                 return True, direction_tags
         
         elif regime == MarketRegime.RANGE:
-            # 震荡市：从配置读取阈值
-            # 注意：RANGE环境信号会被置信度系统降级到MEDIUM以下
             range_cfg = thresholds.direction.range.short
-            short_imbalance_range = range_cfg.imbalance
-            short_oi_change_range = range_cfg.oi_change
-            
-            # 严格模式：需要imbalance和oi_change同时满足（None检查）
-            if (imbalance is not None and imbalance < -short_imbalance_range and 
-                oi_change is not None and oi_change > short_oi_change_range):
+            if (imbalance is not None and imbalance < -range_cfg.imbalance and 
+                oi_change is not None and oi_change > range_cfg.oi_change):
                 direction_tags.append(ReasonTag.STRONG_SELL_PRESSURE)
                 return True, direction_tags
-            
-            # 短期机会识别（3选N确认，需要None检查）
-            if 'short' in thresholds.direction.range.short_term_opportunity:
-                opp = thresholds.direction.range.short_term_opportunity['short']
-                signals_met = 0
-                
-                # 信号1: 价格下跌（需要None检查）
-                if price_change is not None and price_change < opp.min_price_change_1h:
-                    signals_met += 1
-                # 信号2: OI增长（需要None检查）
-                if oi_change is not None and oi_change > opp.min_oi_change_1h:
-                    signals_met += 1
-                # 信号3: 卖压（需要None检查）
-                if imbalance is not None and imbalance < opp.min_taker_imbalance:
-                    signals_met += 1
-                
-                if signals_met >= opp.required_signals:
-                    direction_tags.append(ReasonTag.RANGE_SHORT_TERM_SHORT)
-                    return True, direction_tags
         
         return False, direction_tags
+    
+    @staticmethod
+    def _eval_short_multi_tf(
+        features: FeatureSnapshot,
+        regime: MarketRegime,
+        thresholds: Thresholds
+    ) -> Tuple[bool, List[ReasonTag]]:
+        """
+        P0-03: MultiTF三层触发SHORT评估（context_1h → confirm_15m → trigger_5m）
+        
+        三层逻辑：
+        1. Context(1h): 大方向偏空（3选2）
+        2. Confirm(15m): 确认信号（4选2）
+        3. Trigger(5m): 入场触发（3选2）
+        
+        Returns:
+            (是否触发SHORT, 原因标签列表)
+        """
+        tags = []
+        
+        # 获取MultiTF配置
+        multi_tf_cfg = thresholds.multi_tf
+        if not multi_tf_cfg or not multi_tf_cfg.enabled:
+            return False, tags
+        
+        # ===== Layer 1: Context (1h) =====
+        context_cfg = multi_tf_cfg.context_1h.short if hasattr(multi_tf_cfg.context_1h, 'short') else None
+        if not context_cfg:
+            return False, tags
+        
+        price_1h = features.features.price.price_change_1h
+        imbalance_1h = features.features.taker_imbalance.taker_imbalance_1h
+        oi_1h = features.features.open_interest.oi_change_1h
+        
+        context_signals = 0
+        if price_1h is not None and price_1h < context_cfg.max_price_change:
+            context_signals += 1
+        if imbalance_1h is not None and imbalance_1h < context_cfg.max_taker_imbalance:
+            context_signals += 1
+        if oi_1h is not None and oi_1h > context_cfg.min_oi_change:
+            context_signals += 1
+        
+        required_context = context_cfg.required_signals if hasattr(context_cfg, 'required_signals') else 2
+        if context_signals < required_context:
+            tags.append(ReasonTag.LTF_CONTEXT_DENIED)
+            logger.debug(f"SHORT Context denied: {context_signals}/{required_context}")
+            return False, tags
+        
+        # ===== Layer 2: Confirm (15m) =====
+        confirm_cfg = multi_tf_cfg.confirm_15m.short if hasattr(multi_tf_cfg.confirm_15m, 'short') else None
+        if not confirm_cfg:
+            return False, tags
+        
+        price_15m = features.features.price.price_change_15m
+        imbalance_15m = features.features.taker_imbalance.taker_imbalance_15m
+        volume_ratio_15m = features.features.volume.volume_ratio_15m
+        oi_15m = features.features.open_interest.oi_change_15m
+        
+        confirm_signals = 0
+        if price_15m is not None and price_15m < confirm_cfg.max_price_change:
+            confirm_signals += 1
+        if imbalance_15m is not None and imbalance_15m < confirm_cfg.max_taker_imbalance:
+            confirm_signals += 1
+        if volume_ratio_15m is not None and volume_ratio_15m > confirm_cfg.min_volume_ratio:
+            confirm_signals += 1
+        if oi_15m is not None and oi_15m > confirm_cfg.min_oi_change:
+            confirm_signals += 1
+        
+        required_confirm = confirm_cfg.required_confirmed if hasattr(confirm_cfg, 'required_confirmed') else 2
+        required_partial = confirm_cfg.required_partial if hasattr(confirm_cfg, 'required_partial') else 1
+        
+        if confirm_signals >= required_confirm:
+            tags.append(ReasonTag.LTF_CONFIRMED)
+        elif confirm_signals >= required_partial:
+            tags.append(ReasonTag.LTF_PARTIAL_CONFIRM)
+        else:
+            tags.append(ReasonTag.LTF_FAILED_CONFIRM)
+            logger.debug(f"SHORT Confirm failed: {confirm_signals}/{required_confirm}")
+            return False, tags
+        
+        # ===== Layer 3: Trigger (5m) =====
+        trigger_cfg = multi_tf_cfg.trigger_5m.short if hasattr(multi_tf_cfg.trigger_5m, 'short') else None
+        if not trigger_cfg:
+            tags.append(ReasonTag.STRONG_SELL_PRESSURE)
+            return True, tags
+        
+        price_5m = features.features.price.price_change_5m
+        imbalance_5m = features.features.taker_imbalance.taker_imbalance_5m
+        volume_ratio_5m = features.features.volume.volume_ratio_5m
+        
+        trigger_signals = 0
+        if price_5m is not None and price_5m < trigger_cfg.max_price_change:
+            trigger_signals += 1
+        if imbalance_5m is not None and imbalance_5m < trigger_cfg.max_taker_imbalance:
+            trigger_signals += 1
+        if volume_ratio_5m is not None and volume_ratio_5m > trigger_cfg.min_volume_ratio:
+            trigger_signals += 1
+        
+        required_trigger = trigger_cfg.required_signals if hasattr(trigger_cfg, 'required_signals') else 2
+        if trigger_signals >= required_trigger:
+            tags.append(ReasonTag.STRONG_SELL_PRESSURE)
+            logger.debug(f"SHORT MultiTF triggered: context={context_signals}, confirm={confirm_signals}, trigger={trigger_signals}")
+            return True, tags
+        
+        if ReasonTag.LTF_PARTIAL_CONFIRM in tags:
+            logger.debug(f"SHORT Trigger weak but partial confirm: trigger={trigger_signals}/{required_trigger}")
+            return True, tags
+        
+        logger.debug(f"SHORT Trigger failed: {trigger_signals}/{required_trigger}")
+        return False, tags
     
     # ========================================
     # Step 6: 决策优先级
@@ -785,44 +914,61 @@ class DecisionCore:
         regime: MarketRegime,
         quality: TradeQuality,
         decision: Decision,
-        thresholds: Thresholds
+        thresholds: Thresholds,
+        reason_tags: List[ReasonTag] = None
     ) -> ExecutionPermission:
         """
-        执行权限判断（策略层，纯函数）
+        执行权限判断（P0-04: 完全由ReasonTagRules驱动）
         
-        提取自: market_state_machine_l1.py相关逻辑（PR-ARCH-02 M3-Step7）
-        
-        规则（方案D）：
-        - NO_TRADE → DENY
-        - UNCERTAIN quality → ALLOW_REDUCED
-        - POOR quality → DENY (should not reach here due to earlier filtering)
-        - RANGE + GOOD → ALLOW
-        - TREND + GOOD → ALLOW
-        
-        TODO: 需要完善规则，添加更多条件判断
+        规则：
+        1. NO_TRADE → DENY（最高优先）
+        2. 检查所有ReasonTag的ExecutabilityLevel
+           - 任何BLOCK级别标签 → DENY
+           - 任何DEGRADE级别标签 → ALLOW_REDUCED
+           - 全是ALLOW级别 → ALLOW
         
         Args:
-            regime: 市场环境
-            quality: 交易质量
+            regime: 市场环境（仅用于日志，不影响Permission）
+            quality: 交易质量（仅用于日志，不影响Permission）
             decision: 决策
             thresholds: 阈值配置
+            reason_tags: 原因标签列表
         
         Returns:
             ExecutionPermission
         """
+        from models.reason_tags import REASON_TAG_EXECUTABILITY, ExecutabilityLevel
+        
         # Rule 1: NO_TRADE总是DENY
         if decision == Decision.NO_TRADE:
             return ExecutionPermission.DENY
         
-        # Rule 2: UNCERTAIN quality降级
-        if quality == TradeQuality.UNCERTAIN:
-            return ExecutionPermission.ALLOW_REDUCED
+        # P0-04: 完全由ReasonTags驱动
+        if reason_tags is None:
+            reason_tags = []
         
-        # Rule 3: POOR quality（理论上不应该到这里，因为前面已过滤）
-        if quality == TradeQuality.POOR:
+        has_block = False
+        has_degrade = False
+        
+        for tag in reason_tags:
+            level = REASON_TAG_EXECUTABILITY.get(tag, ExecutabilityLevel.ALLOW)
+            if level == ExecutabilityLevel.BLOCK:
+                has_block = True
+                logger.debug(f"Permission: BLOCK tag found - {tag.value}")
+                break  # BLOCK立即终止
+            elif level == ExecutabilityLevel.DEGRADE:
+                has_degrade = True
+                logger.debug(f"Permission: DEGRADE tag found - {tag.value}")
+        
+        # Rule 2: BLOCK标签 → DENY
+        if has_block:
             return ExecutionPermission.DENY
         
-        # Rule 4: GOOD quality允许
+        # Rule 3: DEGRADE标签 → ALLOW_REDUCED
+        if has_degrade:
+            return ExecutionPermission.ALLOW_REDUCED
+        
+        # Rule 4: 全是ALLOW级别 → ALLOW
         return ExecutionPermission.ALLOW
     
     # ========================================
@@ -838,18 +984,18 @@ class DecisionCore:
         thresholds: Thresholds
     ) -> Confidence:
         """
-        置信度计算（PR-D混合模式，纯函数）
-        
-        TODO: 从market_state_machine_l1.py._compute_confidence()提取（PR-ARCH-02 M3-Step8）
+        置信度计算（P0-05增强：tag_caps生效）
         
         流程：
         1. 基础加分（保持PR-005的加分制）
-        2. 硬降级上限（caps）
-        3. 强信号突破（+1档，不突破cap）
+        2. 档位映射
+        3. tag_caps应用（只cap，不硬降）
+        4. 强信号突破（+1档，不突破cap）
         
-        需要在models/thresholds.py中添加:
-        - thresholds.confidence_scoring.caps (EXTREME/RANGE caps)
-        - thresholds.confidence_scoring.boosts (强信号加分)
+        P0-05改进：
+        - UNCERTAIN不再总是LOW，而是参与正常评分
+        - tag_caps按标签类型独立cap
+        - caps只限制上限，不强制降级
         
         Args:
             decision: 决策
@@ -861,13 +1007,15 @@ class DecisionCore:
         Returns:
             Confidence
         """
-        # PR-D混合模式置信度计算（使用配置文件中的评分系统）
-        
+        # NO_TRADE总是LOW
         if decision == Decision.NO_TRADE:
             return Confidence.LOW
         
         # 从配置读取评分参数
         scoring = thresholds.confidence_scoring
+        
+        # 置信度优先级映射
+        CONF_PRIORITY = {Confidence.ULTRA: 4, Confidence.HIGH: 3, Confidence.MEDIUM: 2, Confidence.LOW: 1}
         
         # Step 1: 基础加分
         score = 0
@@ -877,23 +1025,24 @@ class DecisionCore:
         
         # 市场环境分
         if regime == MarketRegime.TREND:
-            score += scoring.regime_trend_score  # 30分
+            score += scoring.regime_trend_score  # 35分
         elif regime == MarketRegime.RANGE:
-            score += scoring.regime_range_score  # 20分
+            score += scoring.regime_range_score  # 0分（回测优化后）
         elif regime == MarketRegime.EXTREME:
             score += scoring.regime_extreme_score  # 0分
         
-        # 质量分
+        # 质量分（P0-05: UNCERTAIN不再总是LOW，参与正常评分）
         if quality == TradeQuality.GOOD:
             score += scoring.quality_good_score  # 30分
         elif quality == TradeQuality.UNCERTAIN:
-            score += scoring.quality_uncertain_score  # 25分
+            score += scoring.quality_uncertain_score  # 15分（不再强制LOW）
         elif quality == TradeQuality.POOR:
             score += scoring.quality_poor_score  # 0分
         
-        # 强信号加分
+        # 强信号加分（在cap之前）
         strong_tags = {ReasonTag.STRONG_BUY_PRESSURE, ReasonTag.STRONG_SELL_PRESSURE}
-        if scoring.strong_signal_boost.enabled and any(t in strong_tags for t in reason_tags):
+        has_strong_signal = scoring.strong_signal_boost.enabled and any(t in strong_tags for t in reason_tags)
+        if has_strong_signal:
             score += scoring.strong_signal_bonus  # 15分
         
         # Step 2: 档位映射
@@ -907,21 +1056,58 @@ class DecisionCore:
         else:
             confidence = Confidence.LOW
         
-        # Step 3: 硬降级上限（caps）
+        logger.debug(f"Confidence before caps: score={score}, confidence={confidence.value}")
+        
+        # Step 3: tag_caps应用（P0-05核心：只cap，不硬降）
         caps = scoring.caps
-        reduce_tags = set(thresholds.reason_tag_rules.reduce_tags) if thresholds.reason_tag_rules else set()
         
-        # 检查是否有降级标签
-        has_reduce_tag = any(t.value in [rt.value if hasattr(rt, 'value') else rt for rt in reduce_tags] for t in reason_tags)
+        # 3.1 检查tag_caps（每个标签独立cap）
+        tag_caps_config = caps.tag_caps if hasattr(caps, 'tag_caps') and caps.tag_caps else {}
+        applied_caps = []
         
-        if has_reduce_tag and caps.uncertain_quality_max:
-            cap_confidence = Confidence[caps.uncertain_quality_max.upper()]
-            # 置信度优先级映射
-            conf_priority = {Confidence.ULTRA: 4, Confidence.HIGH: 3, Confidence.MEDIUM: 2, Confidence.LOW: 1}
-            if conf_priority.get(confidence, 0) > conf_priority.get(cap_confidence, 0):
+        for tag in reason_tags:
+            tag_key = tag.value
+            if tag_key in tag_caps_config:
+                cap_str = tag_caps_config[tag_key]
+                try:
+                    cap_conf = Confidence[cap_str.upper()]
+                    applied_caps.append((tag_key, cap_conf))
+                except KeyError:
+                    logger.warning(f"Invalid cap confidence: {cap_str}")
+        
+        # 3.2 应用最严格的cap
+        if applied_caps:
+            min_cap = min(applied_caps, key=lambda x: CONF_PRIORITY.get(x[1], 0))
+            cap_confidence = min_cap[1]
+            if CONF_PRIORITY.get(confidence, 0) > CONF_PRIORITY.get(cap_confidence, 0):
+                logger.debug(f"Confidence capped by {min_cap[0]}: {confidence.value} → {cap_confidence.value}")
                 confidence = cap_confidence
         
-        logger.debug(f"Confidence computed: score={score}, confidence={confidence.value}")
+        # 3.3 检查reduce_tags的默认cap
+        reduce_tags = set(thresholds.reason_tag_rules.reduce_tags) if thresholds.reason_tag_rules else set()
+        reduce_tag_values = {rt.value if hasattr(rt, 'value') else rt for rt in reduce_tags}
+        has_reduce_tag = any(t.value in reduce_tag_values for t in reason_tags)
+        
+        if has_reduce_tag and caps.reduce_default_max:
+            try:
+                default_cap = Confidence[caps.reduce_default_max.upper()]
+                if CONF_PRIORITY.get(confidence, 0) > CONF_PRIORITY.get(default_cap, 0):
+                    logger.debug(f"Confidence capped by reduce_default_max: {confidence.value} → {default_cap.value}")
+                    confidence = default_cap
+            except KeyError:
+                pass
+        
+        # 3.4 UNCERTAIN质量上限（可选，如果配置了）
+        if quality == TradeQuality.UNCERTAIN and caps.uncertain_quality_max:
+            try:
+                uncertain_cap = Confidence[caps.uncertain_quality_max.upper()]
+                if CONF_PRIORITY.get(confidence, 0) > CONF_PRIORITY.get(uncertain_cap, 0):
+                    logger.debug(f"Confidence capped by uncertain_quality: {confidence.value} → {uncertain_cap.value}")
+                    confidence = uncertain_cap
+            except KeyError:
+                pass
+        
+        logger.debug(f"Confidence final: score={score}, confidence={confidence.value}")
         return confidence
 
 

@@ -10,6 +10,11 @@ PR-ARCH-01: FeatureBuilder/MarketFeaturePipeline
 4. None-safe：缺失字段保留None，不使用0伪装
 5. Coverage明确：lookback/gap/missing_windows可追溯
 
+P0-01 DataFix增强：
+- 核心字段验证返回细粒度的ReasonTag
+- 区分必须字段（price）和重要字段（volume/funding_rate）
+- 缺失字段显性化，禁止None→0伪中性
+
 职责边界：
 - FeatureBuilder：特征生成的唯一入口
 - DataCache：提供历史数据查询
@@ -83,12 +88,15 @@ class FeatureBuilder:
         # Step 2: 提取特征
         features = self._extract_features(normalized_data)
         
-        # P0-2修复：验证核心必需字段
-        if not self._validate_core_fields(features, symbol):
-            logger.error(f"[{symbol}] Core fields validation failed")
-            # 返回空快照，标记数据无效
+        # P0-01 DataFix：验证核心字段（增强版）
+        is_valid, missing_tags = self._validate_core_fields(features, symbol)
+        
+        if not is_valid:
+            logger.error(f"[{symbol}] Core fields validation failed - returning empty snapshot")
+            # 返回空快照，使用第一个缺失标签（通常是DATA_MISSING_PRICE）
             from models.reason_tags import ReasonTag
-            return create_empty_snapshot(symbol, ReasonTag.INVALID_DATA)
+            primary_tag = missing_tags[0] if missing_tags else ReasonTag.INVALID_DATA
+            return create_empty_snapshot(symbol, primary_tag)
         
         # Step 3: 计算覆盖度信息
         coverage = self._extract_coverage(raw_data, data_cache, symbol)
@@ -117,40 +125,60 @@ class FeatureBuilder:
         
         return snapshot
     
-    def _validate_core_fields(self, features: MarketFeatures, symbol: str) -> bool:
+    def _validate_core_fields(self, features: MarketFeatures, symbol: str) -> Tuple[bool, List]:
         """
-        验证核心必需字段（P0-2修复）
+        验证核心必需字段（P0-01 DataFix增强）
         
-        核心必需字段（最小不可缺集合）：
-        - price: 当前价格
-        - volume_24h: 24小时成交量
-        - funding_rate: 资金费率
+        核心字段分为两类：
+        1. 必须字段（缺失则阻断）：price
+        2. 重要字段（缺失则降级）：volume_24h, funding_rate
         
         Args:
             features: 提取的特征
             symbol: 交易对符号（用于日志）
         
         Returns:
-            bool: 是否通过验证
+            (is_valid, missing_tags): 是否通过验证，缺失字段的ReasonTag列表
         """
-        # 检查price
+        from models.reason_tags import ReasonTag
+        
+        missing_tags = []
+        is_valid = True
+        
+        # 1. 检查price（必须字段，缺失则阻断）
         if features.price is None or features.price.current_price is None:
-            logger.error(f"[{symbol}] Missing core field: price")
-            return False
+            logger.error(f"[{symbol}] Missing REQUIRED field: price")
+            missing_tags.append(ReasonTag.DATA_MISSING_PRICE)
+            is_valid = False  # price缺失直接阻断
         
-        # 检查volume_24h
+        # 2. 检查volume_24h（重要字段，缺失则降级）
         if features.volume is None or features.volume.volume_24h is None:
-            logger.error(f"[{symbol}] Missing core field: volume_24h")
-            return False
+            logger.warning(f"[{symbol}] Missing important field: volume_24h")
+            missing_tags.append(ReasonTag.DATA_MISSING_VOLUME)
+            # 不阻断，仅降级
         
-        # 检查funding_rate
+        # 3. 检查funding_rate（重要字段，缺失则降级）
         if features.funding is None or features.funding.funding_rate is None:
-            logger.error(f"[{symbol}] Missing core field: funding_rate")
-            return False
+            logger.warning(f"[{symbol}] Missing important field: funding_rate")
+            missing_tags.append(ReasonTag.DATA_MISSING_FUNDING_RATE)
+            # 不阻断，仅降级
         
-        # 所有核心字段验证通过
-        logger.debug(f"[{symbol}] Core fields validation passed")
-        return True
+        # 4. 检查open_interest（辅助字段，缺失则降级）
+        if features.open_interest is None or features.open_interest.current_oi is None:
+            logger.debug(f"[{symbol}] Missing auxiliary field: open_interest")
+            missing_tags.append(ReasonTag.DATA_MISSING_OPEN_INTEREST)
+        
+        # 5. 检查taker_imbalance（辅助字段，缺失则降级）
+        if features.taker_imbalance is None or features.taker_imbalance.taker_imbalance_1h is None:
+            logger.debug(f"[{symbol}] Missing auxiliary field: taker_imbalance_1h")
+            missing_tags.append(ReasonTag.DATA_MISSING_TAKER_IMBALANCE)
+        
+        if is_valid:
+            logger.debug(f"[{symbol}] Core fields validation passed (missing_count={len(missing_tags)})")
+        else:
+            logger.error(f"[{symbol}] Core fields validation FAILED (missing={[t.value for t in missing_tags]})")
+        
+        return is_valid, missing_tags
     
     def _normalize_data(self, raw_data: Dict) -> Tuple[Dict, Optional[Dict]]:
         """

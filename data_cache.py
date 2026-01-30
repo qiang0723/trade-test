@@ -51,33 +51,49 @@ class TickData:
     """
     单个tick数据
     
-    PATCH-P0-1改进：
+    P0-01 DataFix改进：
+    - 缺失字段使用 None 而非 0（消除"伪中性"）
+    - 0 仅代表真实的零值
+    - _incomplete 标记和 _missing_fields 列表追踪缺失
     - volume优先读取volume_24h（权威来源），兼容旧volume键
     - buy_volume/sell_volume标记为已废弃（fetcher不再提供）
     """
     def __init__(self, timestamp: datetime, data: dict):
         self.timestamp = timestamp
-        self.price = data.get('price', 0)
+        self._missing_fields: List[str] = []  # P0-01: 追踪缺失字段
         
-        # PATCH-P0-1: volume优先读取volume_24h，兼容旧volume键
-        self.volume = data.get('volume_24h') or data.get('volume', 0)
+        # P0-01: price 缺失时为 None（不再默认0）
+        self.price = data.get('price')
+        if self.price is None:
+            self._missing_fields.append('price')
         
-        # PATCH-P0-1: 如果两个键都缺失，记录警告（显性化缺失）
-        if self.volume == 0 and 'volume_24h' not in data and 'volume' not in data:
+        # P0-01: volume 优先读取volume_24h，缺失时为 None
+        self.volume = data.get('volume_24h')
+        if self.volume is None:
+            self.volume = data.get('volume')
+        if self.volume is None:
+            self._missing_fields.append('volume')
             logger.debug(f"Volume data missing at {timestamp}")
-            self._incomplete = True
-        else:
-            self._incomplete = False
         
-        self.open_interest = data.get('open_interest', 0)
-        self.funding_rate = data.get('funding_rate', 0)
+        # P0-01: open_interest 缺失时为 None
+        self.open_interest = data.get('open_interest')
+        if self.open_interest is None:
+            self._missing_fields.append('open_interest')
         
-        # PATCH-P0-1: buy_volume/sell_volume已废弃（fetcher不再提供）
-        # 保留字段仅用于向后兼容，但标记为不可信
-        self.buy_volume = data.get('buy_volume', 0)  # ⚠️ DEPRECATED
-        self.sell_volume = data.get('sell_volume', 0)  # ⚠️ DEPRECATED
+        # P0-01: funding_rate 缺失时为 None
+        self.funding_rate = data.get('funding_rate')
+        if self.funding_rate is None:
+            self._missing_fields.append('funding_rate')
         
-        if self.buy_volume > 0 or self.sell_volume > 0:
+        # P0-01: _incomplete 基于核心字段是否缺失
+        self._incomplete = len(self._missing_fields) > 0
+        
+        # DEPRECATED: buy_volume/sell_volume（fetcher不再提供）
+        # 保留字段仅用于向后兼容
+        self.buy_volume = data.get('buy_volume')  # ⚠️ DEPRECATED
+        self.sell_volume = data.get('sell_volume')  # ⚠️ DEPRECATED
+        
+        if self.buy_volume is not None or self.sell_volume is not None:
             logger.warning(f"buy_volume/sell_volume are deprecated and should not be used (at {timestamp})")
     
     def to_dict(self) -> dict:
@@ -335,7 +351,10 @@ class MarketDataCache:
             
             past_tick = result.tick
             
-            if past_tick.price == 0:
+            # P0-01: None-safe检查（price可能为None）
+            if past_tick.price is None or past_tick.price == 0:
+                return None
+            if current_tick.price is None:
                 return None
             
             change_percent = ((current_tick.price - past_tick.price) / past_tick.price) * 100
@@ -372,7 +391,10 @@ class MarketDataCache:
             
             past_tick = result.tick
             
-            if past_tick.open_interest == 0:
+            # P0-01: None-safe检查（open_interest可能为None）
+            if past_tick.open_interest is None or past_tick.open_interest == 0:
+                return None
+            if current_tick.open_interest is None:
                 return None
             
             change_percent = ((current_tick.open_interest - past_tick.open_interest) / past_tick.open_interest) * 100
@@ -470,6 +492,10 @@ class MarketDataCache:
             
             past_tick = result.tick
             
+            # P0-01: None-safe检查（volume可能为None）
+            if current_tick.volume is None or past_tick.volume is None:
+                return None
+            
             # P0-BugFix-2: volume是24h累计量，必须取差值
             # 不能累加，否则会高估几十倍
             volume_1h = current_tick.volume - past_tick.volume
@@ -506,14 +532,15 @@ class MarketDataCache:
         if len(ticks) == 0:
             return None
         
-        total_buy = sum(tick.buy_volume for tick in ticks)
-        total_sell = sum(tick.sell_volume for tick in ticks)
+        # P0-01: None-safe求和（过滤掉None值）
+        total_buy = sum(tick.buy_volume for tick in ticks if tick.buy_volume is not None)
+        total_sell = sum(tick.sell_volume for tick in ticks if tick.sell_volume is not None)
         
         total = total_buy + total_sell
         
-        # PATCH-P0-1: buy/sell全为0时返回None（显性化缺失）
+        # P0-01: buy/sell全为0或None时返回None（显性化缺失）
         if total == 0:
-            logger.debug(f"buy/sell volumes all zero for {symbol}, returning None [DEPRECATED]")
+            logger.debug(f"buy/sell volumes all zero/None for {symbol}, returning None [DEPRECATED]")
             return None
         
         # 失衡度 = (买量 - 卖量) / 总量

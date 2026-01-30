@@ -36,6 +36,13 @@ class ReasonTag(Enum):
     DATA_GAP_6H = "data_gap_6h"                # PATCH-2: 6小时窗口数据缺口过大
     MTF_DEGRADED_TO_1H = "mtf_degraded_to_1h"  # P0-CodeFix-2: 中期降级为1h-only评估（6h缺失）
     
+    # P0-01 DataFix: 核心字段缺失的细粒度标签
+    DATA_MISSING_PRICE = "data_missing_price"              # 价格缺失（必须阻断）
+    DATA_MISSING_VOLUME = "data_missing_volume"            # 成交量缺失（降级）
+    DATA_MISSING_FUNDING_RATE = "data_missing_funding_rate"  # 资金费率缺失（降级）
+    DATA_MISSING_OPEN_INTEREST = "data_missing_open_interest"  # 持仓量缺失（降级）
+    DATA_MISSING_TAKER_IMBALANCE = "data_missing_taker_imbalance"  # taker失衡缺失（降级）
+    
     # ===== 风险否决类 =====
     EXTREME_REGIME = "extreme_regime"
     LIQUIDATION_PHASE = "liquidation_phase"
@@ -93,6 +100,13 @@ REASON_TAG_EXPLANATIONS = {
     "data_gap_1h": "⏳ 1小时数据缺口：历史点与目标时间gap过大，lookback失败",
     "data_gap_6h": "⏳ 6小时数据缺口：历史点与目标时间gap过大，lookback失败",
     "mtf_degraded_to_1h": "⚠️ 中期降级：6h数据缺失，降级为1h-only评估（置信度受限）",
+    
+    # P0-01 DataFix: 核心字段缺失
+    "data_missing_price": "❌ 价格缺失：无法获取当前价格，决策阻断",
+    "data_missing_volume": "📊 成交量缺失：volume_24h字段缺失，信号质量降级",
+    "data_missing_funding_rate": "💸 资金费率缺失：funding_rate字段缺失，信号质量降级",
+    "data_missing_open_interest": "📈 持仓量缺失：open_interest字段缺失，信号质量降级",
+    "data_missing_taker_imbalance": "⚖️ taker失衡缺失：taker_imbalance字段缺失，信号质量降级",
     
     # 风险否决类
     "extreme_regime": "🚨 极端行情：市场波动超过安全阈值，暂停交易",
@@ -167,6 +181,13 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.DATA_GAP_1H: ExecutabilityLevel.DEGRADE,    # PATCH-2: 1小时数据缺口降级（不完全阻断）
     ReasonTag.DATA_GAP_6H: ExecutabilityLevel.DEGRADE,    # PATCH-2: 6小时数据缺口降级
     ReasonTag.MTF_DEGRADED_TO_1H: ExecutabilityLevel.DEGRADE,  # P0-CodeFix-2: 中期降级为1h-only
+    
+    # P0-01 DataFix: 核心字段缺失
+    ReasonTag.DATA_MISSING_PRICE: ExecutabilityLevel.BLOCK,           # 价格缺失必须阻断
+    ReasonTag.DATA_MISSING_VOLUME: ExecutabilityLevel.DEGRADE,        # 成交量缺失降级
+    ReasonTag.DATA_MISSING_FUNDING_RATE: ExecutabilityLevel.DEGRADE,  # 资金费率缺失降级
+    ReasonTag.DATA_MISSING_OPEN_INTEREST: ExecutabilityLevel.DEGRADE, # 持仓量缺失降级
+    ReasonTag.DATA_MISSING_TAKER_IMBALANCE: ExecutabilityLevel.DEGRADE,  # taker失衡缺失降级
     
     # 风险否决类 - 全部阻断
     ReasonTag.EXTREME_REGIME: ExecutabilityLevel.BLOCK,
