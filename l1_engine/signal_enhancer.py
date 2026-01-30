@@ -53,9 +53,29 @@ class SignalEnhancer:
         # Phase 1.3: 多周期一致性
         'alignment_imbalance_threshold': 0.05, # 方向判定阈值 5%
         
-        # Phase 2: 大户多空比（预留）
+        # Phase 2: 大户多空比（P0-3优化：增强权重）
         'top_trader_bias_threshold': 0.55,     # 偏向阈值 55%
         'top_trader_extreme_threshold': 0.70,  # 极端阈值 70%
+        'smart_money_divergence_boost': 16,    # 聪明钱背离加分（12→16）
+        'bias_confirm_boost': 10,              # 偏向确认加分（8→10）
+        'extreme_reverse_boost': 8,            # 极端逆向加分（5→8）
+        'extreme_follow_penalty': -8,          # 极端顺向惩罚（-5→-8）
+        'retail_divergence_threshold': 0.15,   # 大户-散户偏差阈值
+        'retail_divergence_bonus': 3,          # 偏差加分
+        
+        # P0-1: 24h长期趋势
+        'long_term_strong_threshold': 0.05,    # 强趋势 5%
+        'long_term_range_threshold': 0.02,     # 震荡 2%
+        'long_term_trend_boost': 8,            # 趋势确认加分
+        'long_term_counter_penalty': -5,       # 逆势惩罚
+        
+        # P0-4: 1h放量确认
+        'volume_surge_threshold': 2.0,         # 大幅放量 2x
+        'volume_moderate_threshold': 1.5,      # 中度放量 1.5x
+        'volume_low_threshold': 0.5,           # 缩量 0.5x
+        'volume_surge_boost': 8,               # 大幅放量加分
+        'volume_moderate_boost': 5,            # 中度放量加分
+        'volume_low_penalty': -3,              # 缩量惩罚
     }
     
     def __init__(self, thresholds: Dict = None):
@@ -355,7 +375,7 @@ class SignalEnhancer:
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
     
     # ========================================
-    # Phase 2: 大户多空比（预留接口）
+    # Phase 2: 大户多空比（P0-3优化：增强权重）
     # ========================================
     
     def eval_top_trader_ratio(
@@ -365,7 +385,7 @@ class SignalEnhancer:
         decision: Decision
     ) -> EnhancementResult:
         """
-        评估大户多空比信号（Phase 2实现）
+        评估大户多空比信号（P0-3优化：增强权重）
         
         Args:
             top_long_ratio: 大户做多比例（0-1）
@@ -389,6 +409,14 @@ class SignalEnhancer:
         bias_threshold = self.thresholds['top_trader_bias_threshold']
         extreme_threshold = self.thresholds['top_trader_extreme_threshold']
         
+        # P0-3: 使用配置的权重（增强版）
+        bias_confirm_boost = self.thresholds.get('bias_confirm_boost', 10)
+        extreme_reverse_boost = self.thresholds.get('extreme_reverse_boost', 8)
+        extreme_follow_penalty = self.thresholds.get('extreme_follow_penalty', -8)
+        smart_money_boost = self.thresholds.get('smart_money_divergence_boost', 16)
+        retail_divergence_threshold = self.thresholds.get('retail_divergence_threshold', 0.15)
+        retail_divergence_bonus = self.thresholds.get('retail_divergence_bonus', 3)
+        
         # 大户偏多
         if top_long_ratio > bias_threshold:
             if top_long_ratio > extreme_threshold:
@@ -396,14 +424,14 @@ class SignalEnhancer:
                 details['top_trader_status'] = 'extreme_long'
                 # 极端偏多可能预示反转
                 if decision == Decision.SHORT:
-                    confidence_boost = 5  # 逆向信号加分
+                    confidence_boost = extreme_reverse_boost  # 逆向信号加分（5→8）
                 else:
-                    confidence_boost = -5  # 警告
+                    confidence_boost = extreme_follow_penalty  # 警告（-5→-8）
             else:
                 tags.append(ReasonTag.TOP_TRADER_LONG_BIAS)
                 details['top_trader_status'] = 'long_bias'
                 if decision == Decision.LONG:
-                    confidence_boost = 8
+                    confidence_boost = bias_confirm_boost  # 偏向确认（8→10）
                     signal_quality = 'moderate'
         
         # 大户偏空
@@ -412,14 +440,14 @@ class SignalEnhancer:
                 tags.append(ReasonTag.TOP_TRADER_EXTREME_SHORT)
                 details['top_trader_status'] = 'extreme_short'
                 if decision == Decision.LONG:
-                    confidence_boost = 5  # 逆向信号加分
+                    confidence_boost = extreme_reverse_boost  # 逆向信号加分
                 else:
-                    confidence_boost = -5
+                    confidence_boost = extreme_follow_penalty  # 警告
             else:
                 tags.append(ReasonTag.TOP_TRADER_SHORT_BIAS)
                 details['top_trader_status'] = 'short_bias'
                 if decision == Decision.SHORT:
-                    confidence_boost = 8
+                    confidence_boost = bias_confirm_boost  # 偏向确认
                     signal_quality = 'moderate'
         
         # 聪明钱背离：大户与散户方向相反
@@ -431,7 +459,7 @@ class SignalEnhancer:
                 tags.append(ReasonTag.SMART_MONEY_DIVERGENCE)
                 details['smart_money_divergence'] = 'top_long_retail_short'
                 if decision == Decision.LONG:
-                    confidence_boost += 12
+                    confidence_boost += smart_money_boost  # 聪明钱背离（12→16）
                     signal_quality = 'strong'
                     logger.info(f"Smart money divergence (LONG): top={top_long_ratio:.2%}, retail_short={retail_short_ratio:.2%}")
             
@@ -440,9 +468,166 @@ class SignalEnhancer:
                 tags.append(ReasonTag.SMART_MONEY_DIVERGENCE)
                 details['smart_money_divergence'] = 'top_short_retail_long'
                 if decision == Decision.SHORT:
-                    confidence_boost += 12
+                    confidence_boost += smart_money_boost  # 聪明钱背离（12→16）
                     signal_quality = 'strong'
                     logger.info(f"Smart money divergence (SHORT): top_short={1-top_long_ratio:.2%}, retail_long={retail_long_ratio:.2%}")
+            
+            # P0-3新增：大户-散户偏差分析
+            divergence = abs(top_long_ratio - retail_long_ratio)
+            if divergence > retail_divergence_threshold:
+                details['retail_divergence'] = divergence
+                # 高偏差时，如果方向与大户一致，额外加分
+                is_aligned_with_top = (
+                    (decision == Decision.LONG and top_long_ratio > bias_threshold) or
+                    (decision == Decision.SHORT and top_long_ratio < (1 - bias_threshold))
+                )
+                if is_aligned_with_top:
+                    confidence_boost += retail_divergence_bonus
+                    logger.debug(f"Retail divergence bonus: divergence={divergence:.2%}, bonus=+{retail_divergence_bonus}")
+        
+        return EnhancementResult(tags, confidence_boost, signal_quality, details)
+    
+    # ========================================
+    # P0-1: 24h长期趋势评估
+    # ========================================
+    
+    def eval_long_term_trend(
+        self,
+        price_change_24h: Optional[float],
+        decision: Decision
+    ) -> EnhancementResult:
+        """
+        评估24h长期趋势信号（P0-1优化）
+        
+        逻辑：
+        - 24h强势上涨（>5%）+ LONG → 顺势加分
+        - 24h强势下跌（<-5%）+ SHORT → 顺势加分
+        - 逆势开仓 → 扣分
+        - 震荡（<2%）→ 标记但不加减分
+        
+        Args:
+            price_change_24h: 24小时价格变化（小数格式）
+            decision: 当前决策方向
+        
+        Returns:
+            EnhancementResult
+        """
+        tags = []
+        confidence_boost = 0
+        signal_quality = 'neutral'
+        details = {'price_change_24h': price_change_24h}
+        
+        if price_change_24h is None or decision == Decision.NO_TRADE:
+            return EnhancementResult(tags, confidence_boost, signal_quality, details)
+        
+        strong_threshold = self.thresholds.get('long_term_strong_threshold', 0.05)
+        range_threshold = self.thresholds.get('long_term_range_threshold', 0.02)
+        trend_boost = self.thresholds.get('long_term_trend_boost', 8)
+        counter_penalty = self.thresholds.get('long_term_counter_penalty', -5)
+        
+        abs_change = abs(price_change_24h)
+        
+        # 强势上涨
+        if price_change_24h > strong_threshold:
+            tags.append(ReasonTag.LONG_TERM_UPTREND)
+            details['long_term_status'] = 'uptrend'
+            
+            if decision == Decision.LONG:
+                # 顺势做多
+                confidence_boost = trend_boost
+                signal_quality = 'strong'
+                logger.info(f"Long-term uptrend confirmed (LONG): 24h={price_change_24h:.2%}, boost=+{trend_boost}")
+            else:
+                # 逆势做空
+                confidence_boost = counter_penalty
+                signal_quality = 'weak'
+                details['warning'] = 'counter_trend_short'
+        
+        # 强势下跌
+        elif price_change_24h < -strong_threshold:
+            tags.append(ReasonTag.LONG_TERM_DOWNTREND)
+            details['long_term_status'] = 'downtrend'
+            
+            if decision == Decision.SHORT:
+                # 顺势做空
+                confidence_boost = trend_boost
+                signal_quality = 'strong'
+                logger.info(f"Long-term downtrend confirmed (SHORT): 24h={price_change_24h:.2%}, boost=+{trend_boost}")
+            else:
+                # 逆势做多
+                confidence_boost = counter_penalty
+                signal_quality = 'weak'
+                details['warning'] = 'counter_trend_long'
+        
+        # 震荡
+        elif abs_change < range_threshold:
+            tags.append(ReasonTag.LONG_TERM_RANGE)
+            details['long_term_status'] = 'range'
+            # 震荡不加减分
+        
+        return EnhancementResult(tags, confidence_boost, signal_quality, details)
+    
+    # ========================================
+    # P0-4: 1h放量确认
+    # ========================================
+    
+    def eval_volume_confirmation(
+        self,
+        volume_ratio_1h: Optional[float],
+        decision: Decision
+    ) -> EnhancementResult:
+        """
+        评估1h放量确认信号（P0-4优化）
+        
+        逻辑：
+        - 大幅放量（>2x）+ 有方向 → 资金强势进场，加分
+        - 中度放量（>1.5x）+ 有方向 → 资金增加，适度加分
+        - 缩量（<0.5x）→ 交投清淡，扣分
+        
+        Args:
+            volume_ratio_1h: 1小时成交量比率（相对于历史均值）
+            decision: 当前决策方向
+        
+        Returns:
+            EnhancementResult
+        """
+        tags = []
+        confidence_boost = 0
+        signal_quality = 'neutral'
+        details = {'volume_ratio_1h': volume_ratio_1h}
+        
+        if volume_ratio_1h is None or decision == Decision.NO_TRADE:
+            return EnhancementResult(tags, confidence_boost, signal_quality, details)
+        
+        surge_threshold = self.thresholds.get('volume_surge_threshold', 2.0)
+        moderate_threshold = self.thresholds.get('volume_moderate_threshold', 1.5)
+        low_threshold = self.thresholds.get('volume_low_threshold', 0.5)
+        surge_boost = self.thresholds.get('volume_surge_boost', 8)
+        moderate_boost = self.thresholds.get('volume_moderate_boost', 5)
+        low_penalty = self.thresholds.get('volume_low_penalty', -3)
+        
+        # 大幅放量
+        if volume_ratio_1h > surge_threshold:
+            tags.append(ReasonTag.VOLUME_SURGE_1H)
+            details['volume_status'] = 'surge'
+            confidence_boost = surge_boost
+            signal_quality = 'strong'
+            logger.info(f"Volume surge confirmed: ratio={volume_ratio_1h:.2f}x, boost=+{surge_boost}")
+        
+        # 中度放量
+        elif volume_ratio_1h > moderate_threshold:
+            tags.append(ReasonTag.VOLUME_MODERATE_1H)
+            details['volume_status'] = 'moderate'
+            confidence_boost = moderate_boost
+            signal_quality = 'moderate'
+        
+        # 缩量
+        elif volume_ratio_1h < low_threshold:
+            tags.append(ReasonTag.VOLUME_LOW_1H)
+            details['volume_status'] = 'low'
+            confidence_boost = low_penalty
+            signal_quality = 'weak'
+            details['warning'] = 'low_volume'
         
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
     
@@ -460,10 +645,12 @@ class SignalEnhancer:
         imbalance_1h: Optional[float],
         decision: Decision,
         top_long_ratio: Optional[float] = None,
-        retail_long_ratio: Optional[float] = None
+        retail_long_ratio: Optional[float] = None,
+        price_change_24h: Optional[float] = None,
+        volume_ratio_1h: Optional[float] = None
     ) -> EnhancementResult:
         """
-        综合评估所有增强信号
+        综合评估所有增强信号（第一批优化：增加24h趋势和1h放量）
         
         Args:
             funding_rate: 资金费率
@@ -473,6 +660,8 @@ class SignalEnhancer:
             decision: 当前决策方向
             top_long_ratio: 大户做多比例（可选）
             retail_long_ratio: 散户做多比例（可选）
+            price_change_24h: 24小时价格变化（P0-1新增）
+            volume_ratio_1h: 1小时成交量比率（P0-4新增）
         
         Returns:
             EnhancementResult: 综合结果
@@ -501,7 +690,7 @@ class SignalEnhancer:
         total_boost += alignment_result.confidence_boost
         all_details['alignment'] = alignment_result.details
         
-        # Phase 2: 大户多空比（如果有数据）
+        # Phase 2: 大户多空比（P0-3优化：增强权重）
         if top_long_ratio is not None:
             top_trader_result = self.eval_top_trader_ratio(
                 top_long_ratio, retail_long_ratio, decision
@@ -509,6 +698,20 @@ class SignalEnhancer:
             all_tags.extend(top_trader_result.tags)
             total_boost += top_trader_result.confidence_boost
             all_details['top_trader'] = top_trader_result.details
+        
+        # P0-1: 24h长期趋势
+        if price_change_24h is not None:
+            long_term_result = self.eval_long_term_trend(price_change_24h, decision)
+            all_tags.extend(long_term_result.tags)
+            total_boost += long_term_result.confidence_boost
+            all_details['long_term_trend'] = long_term_result.details
+        
+        # P0-4: 1h放量确认
+        if volume_ratio_1h is not None:
+            volume_result = self.eval_volume_confirmation(volume_ratio_1h, decision)
+            all_tags.extend(volume_result.tags)
+            total_boost += volume_result.confidence_boost
+            all_details['volume_1h'] = volume_result.details
         
         # 综合信号质量
         if total_boost >= 20:

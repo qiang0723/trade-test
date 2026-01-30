@@ -135,6 +135,17 @@ class ReasonTag(Enum):
     TOP_TRADER_EXTREME_LONG = "top_trader_extreme_long"    # 大户极端偏多（>70%）→警惕反转
     TOP_TRADER_EXTREME_SHORT = "top_trader_extreme_short"  # 大户极端偏空（>70%）→警惕反转
     SMART_MONEY_DIVERGENCE = "smart_money_divergence"      # 大户与散户方向相反→跟随大户
+    
+    # ===== 第一批优化新增标签 =====
+    # P0-1: 24h长期趋势
+    LONG_TERM_UPTREND = "long_term_uptrend"                # 24h强势上涨（>5%）
+    LONG_TERM_DOWNTREND = "long_term_downtrend"            # 24h强势下跌（<-5%）
+    LONG_TERM_RANGE = "long_term_range"                    # 24h震荡（<2%）
+    
+    # P0-4: 1h放量确认
+    VOLUME_SURGE_1H = "volume_surge_1h"                    # 1h大幅放量（>2x）
+    VOLUME_MODERATE_1H = "volume_moderate_1h"              # 1h中度放量（>1.5x）
+    VOLUME_LOW_1H = "volume_low_1h"                        # 1h缩量（<0.5x）
 
 
 # 中文解释映射
@@ -249,6 +260,17 @@ REASON_TAG_EXPLANATIONS = {
     "top_trader_extreme_long": "⚠️ 大户极端偏多：多单占比>70%，市场可能过热",
     "top_trader_extreme_short": "⚠️ 大户极端偏空：空单占比>70%，市场可能超卖",
     "smart_money_divergence": "🎯 聪明钱背离：大户与散户方向相反，跟随大户信号",
+    
+    # 第一批优化新增标签
+    # P0-1: 24h长期趋势
+    "long_term_uptrend": "📈 24h强势上涨：24小时涨幅>5%，中期趋势向上",
+    "long_term_downtrend": "📉 24h强势下跌：24小时跌幅>5%，中期趋势向下",
+    "long_term_range": "➡️ 24h震荡：24小时波动<2%，无明显中期方向",
+    
+    # P0-4: 1h放量确认
+    "volume_surge_1h": "🔥 1h大幅放量：1小时成交量>2倍均值，资金强势进场",
+    "volume_moderate_1h": "📊 1h中度放量：1小时成交量>1.5倍均值，资金有所增加",
+    "volume_low_1h": "📉 1h缩量：1小时成交量<0.5倍均值，市场交投清淡",
 }
 
 
@@ -385,6 +407,17 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.TOP_TRADER_EXTREME_LONG: ExecutabilityLevel.DEGRADE,  # 大户极端偏多→警惕反转
     ReasonTag.TOP_TRADER_EXTREME_SHORT: ExecutabilityLevel.DEGRADE, # 大户极端偏空→警惕反转
     ReasonTag.SMART_MONEY_DIVERGENCE: ExecutabilityLevel.ALLOW,     # 聪明钱背离→高质量信号
+    
+    # 第一批优化新增标签
+    # P0-1: 24h长期趋势
+    ReasonTag.LONG_TERM_UPTREND: ExecutabilityLevel.ALLOW,         # 24h上涨→正面信号
+    ReasonTag.LONG_TERM_DOWNTREND: ExecutabilityLevel.ALLOW,       # 24h下跌→正面信号
+    ReasonTag.LONG_TERM_RANGE: ExecutabilityLevel.ALLOW,           # 24h震荡→中性
+    
+    # P0-4: 1h放量确认
+    ReasonTag.VOLUME_SURGE_1H: ExecutabilityLevel.ALLOW,           # 大幅放量→正面信号
+    ReasonTag.VOLUME_MODERATE_1H: ExecutabilityLevel.ALLOW,        # 中度放量→正面信号
+    ReasonTag.VOLUME_LOW_1H: ExecutabilityLevel.DEGRADE,           # 缩量→降级警告
 }
 
 

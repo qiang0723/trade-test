@@ -72,6 +72,7 @@ class VolumeFeatures:
     volume_24h: Optional[float] = None           # 24小时成交量
     volume_ratio_5m: Optional[float] = None      # 5分钟成交量比率
     volume_ratio_15m: Optional[float] = None     # 15分钟成交量比率
+    volume_ratio_1h: Optional[float] = None      # 1小时成交量比率（P0-4优化）
 
 
 @dataclass

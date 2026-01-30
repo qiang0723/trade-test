@@ -479,3 +479,34 @@ signal_enhancement:
     max_single_boost: 10              # 单项增强最大加分（收紧：15→10）
     max_total_boost: 15               # 总增强最大加分（收紧：30→15）
     min_total_boost: -15              # 总增强最小扣分（收紧：-20→-15）
+  
+  # ==================
+  # 第一批优化新增配置
+  # ==================
+  
+  # P0-1: 24h长期趋势阈值
+  long_term_trend:
+    strong_threshold: 0.05            # 5%：强趋势判定
+    range_threshold: 0.02             # 2%以下：震荡判定
+    trend_confirm_boost: 8            # 趋势确认加分
+    counter_trend_penalty: -5         # 逆势惩罚
+  
+  # P0-4: 1h放量确认阈值
+  volume_1h:
+    surge_threshold: 2.0              # 大幅放量：>2倍均值
+    moderate_threshold: 1.5           # 中度放量：>1.5倍均值
+    low_threshold: 0.5                # 缩量：<0.5倍均值
+    surge_boost: 8                    # 大幅放量加分
+    moderate_boost: 5                 # 中度放量加分
+    low_penalty: -3                   # 缩量惩罚
+  
+  # P0-3: 大户多空比权重调整
+  top_trader:
+    bias_threshold: 0.55              # 偏向阈值：55%
+    extreme_threshold: 0.70           # 极端阈值：70%
+    smart_money_divergence_boost: 16  # 聪明钱背离加分（12→16）
+    bias_confirm_boost: 10            # 偏向确认加分（8→10）
+    extreme_reverse_boost: 8          # 极端逆向加分（5→8）
+    extreme_follow_penalty: -8        # 极端顺向惩罚（-5→-8）
+    retail_divergence_threshold: 0.15 # 大户-散户偏差阈值
+    retail_divergence_bonus: 3        # 偏差加分

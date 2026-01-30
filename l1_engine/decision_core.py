@@ -1119,7 +1119,11 @@ class DecisionCore:
         top_long_ratio = features.features.top_trader.top_long_ratio if features.features.top_trader else None
         retail_long_ratio = features.features.top_trader.retail_long_ratio if features.features.top_trader else None
         
-        # 综合评估
+        # P0-1/P0-4: 获取新增特征数据
+        price_change_24h = features.features.price.price_change_24h if features.features.price else None
+        volume_ratio_1h = features.features.volume.volume_ratio_1h if features.features.volume else None
+        
+        # 综合评估（第一批优化：增加24h趋势和1h放量）
         result = enhancer.evaluate_all(
             funding_rate=funding_rate,
             price_change_1h=price_change_1h,
@@ -1129,7 +1133,9 @@ class DecisionCore:
             imbalance_1h=imbalance_1h,
             decision=decision,
             top_long_ratio=top_long_ratio,
-            retail_long_ratio=retail_long_ratio
+            retail_long_ratio=retail_long_ratio,
+            price_change_24h=price_change_24h,
+            volume_ratio_1h=volume_ratio_1h
         )
         
         if result.tags:

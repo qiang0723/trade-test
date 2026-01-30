@@ -297,12 +297,13 @@ class FeatureBuilder:
             taker_imbalance_1h=taker_imbalance_1h
         )
         
-        # Volume features
+        # Volume features (P0-4: 添加 volume_ratio_1h)
         volume_features = VolumeFeatures(
             volume_1h=normalized_data.get('volume_1h'),
             volume_24h=normalized_data.get('volume_24h'),
             volume_ratio_5m=normalized_data.get('volume_ratio_5m'),
-            volume_ratio_15m=normalized_data.get('volume_ratio_15m')
+            volume_ratio_15m=normalized_data.get('volume_ratio_15m'),
+            volume_ratio_1h=normalized_data.get('volume_ratio_1h')
         )
         
         # Funding features
@@ -561,11 +562,12 @@ def build_features_from_dict(
     features.taker_imbalance.taker_imbalance_15m = features_dict.get('taker_imbalance_15m')
     features.taker_imbalance.taker_imbalance_1h = features_dict.get('taker_imbalance_1h')
     
-    # Volume
+    # Volume (P0-4: 添加 volume_ratio_1h)
     features.volume.volume_1h = features_dict.get('volume_1h')
     features.volume.volume_24h = features_dict.get('volume_24h')
     features.volume.volume_ratio_5m = features_dict.get('volume_ratio_5m')
     features.volume.volume_ratio_15m = features_dict.get('volume_ratio_15m')
+    features.volume.volume_ratio_1h = features_dict.get('volume_ratio_1h')
     
     # Funding
     features.funding.funding_rate = features_dict.get('funding_rate')
