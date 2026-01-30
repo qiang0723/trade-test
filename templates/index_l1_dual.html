@@ -1129,6 +1129,7 @@
             // 止损止盈信息
             let slTpHtml = '';
             if (stopLossTarget) {
+                const entryPrice = price ? price.toFixed(4) : '--';
                 const slPrice = stopLossTarget.stop_loss_price?.toFixed(4) || '--';
                 const tpPrice = stopLossTarget.take_profit_price?.toFixed(4) || '--';
                 const slPct = stopLossTarget.stop_loss_pct?.toFixed(1) || '--';
@@ -1138,6 +1139,10 @@
                 slTpHtml = `
                     <div style="margin: 8px 0; padding: 8px; background: #f5f5f5; border-radius: 6px; font-size: 11px;">
                         <div style="font-weight: bold; margin-bottom: 4px; color: #333;">⚡ 风控建议</div>
+                        <div style="display: flex; justify-content: space-between; margin: 2px 0;">
+                            <span>开仓价</span>
+                            <span style="color: #333; font-weight: bold;">$${entryPrice}</span>
+                        </div>
                         <div style="display: flex; justify-content: space-between; margin: 2px 0;">
                             <span>止损</span>
                             <span style="color: #f44336; font-weight: bold;">$${slPrice} (-${slPct}%)</span>
@@ -1191,12 +1196,7 @@
             // 动画显示
             setTimeout(() => popup.classList.add('show'), 10);
             
-            // 15秒后自动关闭
-            setTimeout(() => {
-                if (popup.parentNode) {
-                    closePopup(popup);
-                }
-            }, 15000);
+            // 弹窗常驻，不自动消失，只能手动关闭
         }
         
         // 关闭弹窗
@@ -1341,6 +1341,7 @@
             // 止损止盈显示（仅在有交易信号时显示）
             let slTpHtml = '';
             if (stop_loss_target && recAction !== 'no_trade') {
+                const entryPrice = price?.toFixed(4) || '--';
                 const slPrice = stop_loss_target.stop_loss_price?.toFixed(4) || '--';
                 const tpPrice = stop_loss_target.take_profit_price?.toFixed(4) || '--';
                 const slPct = stop_loss_target.stop_loss_pct?.toFixed(1) || '--';
@@ -1350,6 +1351,10 @@
                 slTpHtml = `
                     <div class="sl-tp-info">
                         <div class="sl-tp-header">⚡ 风控建议</div>
+                        <div class="sl-tp-row">
+                            <span class="sl-label">开仓价</span>
+                            <span class="sl-value" style="color: #333; font-weight: bold;">$${entryPrice}</span>
+                        </div>
                         <div class="sl-tp-row">
                             <span class="sl-label">止损</span>
                             <span class="sl-value stop-loss">$${slPrice} (-${slPct}%)</span>
