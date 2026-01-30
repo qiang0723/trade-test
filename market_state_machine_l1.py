@@ -10,11 +10,11 @@ L1 Advisory Layer - 核心决策引擎
 6. ExecutionPermission三级执行许可（方案D）
 7. 置信度混合模式计算（PR-D）
 8. 输出标准化AdvisoryResult（含executable双门槛判定）
+9. 止损止盈建议（基于波动率动态计算）
 
 不包含：
 - 执行逻辑
 - 仓位管理
-- 止损止盈
 - 订单下达
 """
 
@@ -2117,9 +2117,11 @@ class L1AdvisoryEngine:
             DualTimeframeResult: 向后兼容的结果对象
         """
         from models.dual_timeframe_result import (
-            DualTimeframeResult, TimeframeConclusion, AlignmentAnalysis
+            DualTimeframeResult, TimeframeConclusion, AlignmentAnalysis,
+            StopLossTarget as StopLossTargetModel
         )
         from models.enums import Timeframe
+        from services.stop_loss_service import StopLossService
         
         logger.debug(f"[{symbol}] Converting DualTimeframeDecisionFinal to DualTimeframeResult")
         
@@ -2159,6 +2161,40 @@ class L1AdvisoryEngine:
         if features and features.features and features.features.price:
             price = features.features.price.current_price
         
+        # ===== 计算止损止盈建议 =====
+        stop_loss_target = None
+        if alignment.recommended_action != Decision.NO_TRADE and price and price > 0:
+            try:
+                sl_service = StopLossService()
+                sl_result = sl_service.calculate(
+                    entry_price=price,
+                    direction=alignment.recommended_action,
+                    regime=medium_conclusion.market_regime,
+                    price_change_1h=features.features.price.price_change_1h if features.features.price else None,
+                    price_change_15m=features.features.price.price_change_15m if features.features.price else None,
+                    price_change_5m=features.features.price.price_change_5m if features.features.price else None
+                )
+                
+                if sl_result:
+                    # 转换为模型类
+                    stop_loss_target = StopLossTargetModel(
+                        stop_loss_price=sl_result.stop_loss_price,
+                        stop_loss_pct=sl_result.stop_loss_pct,
+                        take_profit_price=sl_result.take_profit_price,
+                        take_profit_pct=sl_result.take_profit_pct,
+                        risk_reward_ratio=sl_result.risk_reward_ratio,
+                        volatility_used=sl_result.volatility_used,
+                        calculation_method=sl_result.calculation_method
+                    )
+                    logger.info(
+                        f"[{symbol}] Stop loss calculated: "
+                        f"SL={sl_result.stop_loss_price:.4f} ({sl_result.stop_loss_pct*100:.2f}%), "
+                        f"TP={sl_result.take_profit_price:.4f} ({sl_result.take_profit_pct*100:.2f}%), "
+                        f"RR={sl_result.risk_reward_ratio:.1f}:1"
+                    )
+            except Exception as e:
+                logger.warning(f"[{symbol}] Stop loss calculation failed: {e}")
+        
         # 构建DualTimeframeResult
         return DualTimeframeResult(
             symbol=symbol,
@@ -2168,7 +2204,8 @@ class L1AdvisoryEngine:
             alignment=alignment,
             price=price,
             risk_exposure_allowed=True,  # 新架构中风险评估已在DecisionCore中完成
-            global_risk_tags=final.global_risk_tags.copy()
+            global_risk_tags=final.global_risk_tags.copy(),
+            stop_loss_target=stop_loss_target
         )
     
     def _analyze_alignment_from_final(

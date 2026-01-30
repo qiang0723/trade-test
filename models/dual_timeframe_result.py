@@ -133,6 +133,45 @@ class AlignmentAnalysis:
 
 
 @dataclass
+class StopLossTarget:
+    """止损止盈建议（内嵌到Result中）"""
+    stop_loss_price: float = 0.0          # 止损价格
+    stop_loss_pct: float = 0.0            # 止损百分比
+    take_profit_price: float = 0.0        # 止盈价格
+    take_profit_pct: float = 0.0          # 止盈百分比
+    risk_reward_ratio: float = 0.0        # 盈亏比
+    volatility_used: float = 0.0          # 使用的波动率
+    calculation_method: str = ""          # 计算方法
+    
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            'stop_loss_price': round(self.stop_loss_price, 4),
+            'stop_loss_pct': round(self.stop_loss_pct * 100, 2),
+            'take_profit_price': round(self.take_profit_price, 4),
+            'take_profit_pct': round(self.take_profit_pct * 100, 2),
+            'risk_reward_ratio': round(self.risk_reward_ratio, 2),
+            'volatility_used': round(self.volatility_used * 100, 2),
+            'calculation_method': self.calculation_method
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'StopLossTarget':
+        """从字典构造"""
+        if not data:
+            return cls()
+        return cls(
+            stop_loss_price=data.get('stop_loss_price', 0),
+            stop_loss_pct=data.get('stop_loss_pct', 0) / 100,  # 从百分比转回小数
+            take_profit_price=data.get('take_profit_price', 0),
+            take_profit_pct=data.get('take_profit_pct', 0) / 100,
+            risk_reward_ratio=data.get('risk_reward_ratio', 0),
+            volatility_used=data.get('volatility_used', 0) / 100,
+            calculation_method=data.get('calculation_method', '')
+        )
+
+
+@dataclass
 class DualTimeframeResult:
     """
     L1双周期独立结论 - 最终输出
@@ -142,6 +181,7 @@ class DualTimeframeResult:
     2. 中长期结论（1h/6h）
     3. 一致性分析
     4. 综合建议（向后兼容）
+    5. 止损止盈建议（新增）
     """
     
     # ===== 双周期独立结论 =====
@@ -160,6 +200,9 @@ class DualTimeframeResult:
     risk_exposure_allowed: bool = True  # 全局风险准入
     global_risk_tags: List[ReasonTag] = field(default_factory=list)  # 全局风险标签
     
+    # ===== 止损止盈建议（新增）=====
+    stop_loss_target: Optional[StopLossTarget] = None  # 止损止盈建议
+    
     def to_dict(self) -> dict:
         """
         转换为字典，用于JSON序列化
@@ -168,6 +211,7 @@ class DualTimeframeResult:
         - short_term: 短期结论
         - medium_term: 中长期结论
         - alignment: 一致性分析
+        - stop_loss_target: 止损止盈建议（新增）
         - 向后兼容字段（decision, confidence, executable等）
         """
         return {
@@ -182,6 +226,9 @@ class DualTimeframeResult:
             'price': self.price,
             'risk_exposure_allowed': self.risk_exposure_allowed,
             'global_risk_tags': [tag.value for tag in self.global_risk_tags],
+            
+            # 止损止盈建议（新增）
+            'stop_loss_target': self.stop_loss_target.to_dict() if self.stop_loss_target else None,
             
             # 向后兼容字段（使用综合建议）
             'decision': self.alignment.recommended_action.value,
@@ -235,14 +282,17 @@ class DualTimeframeResult:
     @classmethod
     def from_dict(cls, data: dict) -> 'DualTimeframeResult':
         """从字典构造"""
+        stop_loss_data = data.get('stop_loss_target')
         return cls(
             short_term=TimeframeConclusion.from_dict(data['short_term']),
             medium_term=TimeframeConclusion.from_dict(data['medium_term']),
             alignment=AlignmentAnalysis.from_dict(data['alignment']),
             symbol=data['symbol'],
             timestamp=datetime.fromisoformat(data['timestamp']),
+            price=data.get('price'),
             risk_exposure_allowed=data.get('risk_exposure_allowed', True),
-            global_risk_tags=[ReasonTag(tag) for tag in data.get('global_risk_tags', [])]
+            global_risk_tags=[ReasonTag(tag) for tag in data.get('global_risk_tags', [])],
+            stop_loss_target=StopLossTarget.from_dict(stop_loss_data) if stop_loss_data else None
         )
     
     def get_summary(self) -> str:
@@ -262,7 +312,12 @@ class DualTimeframeResult:
         
         exec_str = "可执行" if self._compute_combined_executable() else "不可执行"
         
-        return f"{short_str} | {medium_str} | {align_str} | {exec_str}"
+        # 止损止盈信息
+        sl_str = ""
+        if self.stop_loss_target and self.alignment.recommended_action.value != 'no_trade':
+            sl_str = f" | 止损{self.stop_loss_target.stop_loss_pct*100:.1f}% 止盈{self.stop_loss_target.take_profit_pct*100:.1f}%"
+        
+        return f"{short_str} | {medium_str} | {align_str} | {exec_str}{sl_str}"
     
     def __str__(self) -> str:
         return self.get_summary()

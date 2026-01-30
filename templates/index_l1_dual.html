@@ -647,6 +647,51 @@
             color: white;
         }
         
+        /* 止损止盈显示 */
+        .sl-tp-info {
+            margin-top: 8px;
+            padding: 8px;
+            background: linear-gradient(135deg, #f5f5f5, #e8e8e8);
+            border-radius: 6px;
+            font-size: 11px;
+        }
+        
+        .sl-tp-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 3px 0;
+        }
+        
+        .sl-label {
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .sl-value {
+            font-weight: bold;
+        }
+        
+        .sl-value.stop-loss {
+            color: #f44336;
+        }
+        
+        .sl-value.take-profit {
+            color: #4caf50;
+        }
+        
+        .sl-value.risk-reward {
+            color: #2196f3;
+        }
+        
+        .sl-tp-header {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 4px;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+        
         /* 白名单胜率显示 */
         .whitelist-info {
             display: flex;
@@ -1036,7 +1081,8 @@
                             shortDecision: newDual.short_term?.decision,
                             mediumDecision: newDual.medium_term?.decision,
                             isAligned: newDual.alignment?.is_aligned,
-                            isReversal: oldDual && oldRecAction !== 'no_trade' && oldRecAction !== recAction
+                            isReversal: oldDual && oldRecAction !== 'no_trade' && oldRecAction !== recAction,
+                            stopLossTarget: newDual.stop_loss_target  // 止损止盈数据
                         });
                     }
                 }
@@ -1056,7 +1102,7 @@
         
         // 显示信号弹窗卡片
         function showSignalPopup(signal) {
-            const { symbol, decision, confidence, price, shortDecision, mediumDecision, isAligned, isReversal } = signal;
+            const { symbol, decision, confidence, price, shortDecision, mediumDecision, isAligned, isReversal, stopLossTarget } = signal;
             
             // 获取白名单状态
             const wlStatus = getWhitelistStatus(symbol, decision);
@@ -1080,6 +1126,34 @@
                 'high': '⭐ 高置信度'
             }[confidence] || confidence.toUpperCase();
             
+            // 止损止盈信息
+            let slTpHtml = '';
+            if (stopLossTarget) {
+                const slPrice = stopLossTarget.stop_loss_price?.toFixed(4) || '--';
+                const tpPrice = stopLossTarget.take_profit_price?.toFixed(4) || '--';
+                const slPct = stopLossTarget.stop_loss_pct?.toFixed(1) || '--';
+                const tpPct = stopLossTarget.take_profit_pct?.toFixed(1) || '--';
+                const rrRatio = stopLossTarget.risk_reward_ratio?.toFixed(1) || '--';
+                
+                slTpHtml = `
+                    <div style="margin: 8px 0; padding: 8px; background: #f5f5f5; border-radius: 6px; font-size: 11px;">
+                        <div style="font-weight: bold; margin-bottom: 4px; color: #333;">⚡ 风控建议</div>
+                        <div style="display: flex; justify-content: space-between; margin: 2px 0;">
+                            <span>止损</span>
+                            <span style="color: #f44336; font-weight: bold;">$${slPrice} (-${slPct}%)</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin: 2px 0;">
+                            <span>止盈</span>
+                            <span style="color: #4caf50; font-weight: bold;">$${tpPrice} (+${tpPct}%)</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin: 2px 0;">
+                            <span>盈亏比</span>
+                            <span style="color: #2196f3; font-weight: bold;">${rrRatio}:1</span>
+                        </div>
+                    </div>
+                `;
+            }
+            
             popup.innerHTML = `
                 <div class="signal-popup-header">
                     <span class="signal-icon">${icon}</span>
@@ -1096,6 +1170,7 @@
                     <div style="margin: 8px 0; padding: 6px 10px; background: ${isInWhitelist ? '#e8f5e9' : '#fff3e0'}; border-radius: 6px; font-size: 12px; font-weight: bold; color: ${isInWhitelist ? '#2e7d32' : '#e65100'};">
                         ${wlLabel}
                     </div>
+                    ${slTpHtml}
                     <div style="margin: 10px 0; font-size: 12px; color: #666;">
                         短期: ${getDecisionIcon(shortDecision)} ${getDecisionLabel(shortDecision)} | 
                         中期: ${getDecisionIcon(mediumDecision)} ${getDecisionLabel(mediumDecision)}
@@ -1224,7 +1299,7 @@
         
         // 创建币种卡片
         function createSymbolCard(symbol, data) {
-            const { short_term, medium_term, alignment, price, timestamp, global_risk_tags } = data;
+            const { short_term, medium_term, alignment, price, timestamp, global_risk_tags, stop_loss_target } = data;
             
             const card = document.createElement('div');
             card.className = 'symbol-card';
@@ -1263,6 +1338,34 @@
             const recAction = alignment.recommended_action;
             const whitelistHtml = recAction !== 'no_trade' ? getWhitelistHtml(symbol, recAction) : '';
             
+            // 止损止盈显示（仅在有交易信号时显示）
+            let slTpHtml = '';
+            if (stop_loss_target && recAction !== 'no_trade') {
+                const slPrice = stop_loss_target.stop_loss_price?.toFixed(4) || '--';
+                const tpPrice = stop_loss_target.take_profit_price?.toFixed(4) || '--';
+                const slPct = stop_loss_target.stop_loss_pct?.toFixed(1) || '--';
+                const tpPct = stop_loss_target.take_profit_pct?.toFixed(1) || '--';
+                const rrRatio = stop_loss_target.risk_reward_ratio?.toFixed(1) || '--';
+                
+                slTpHtml = `
+                    <div class="sl-tp-info">
+                        <div class="sl-tp-header">⚡ 风控建议</div>
+                        <div class="sl-tp-row">
+                            <span class="sl-label">止损</span>
+                            <span class="sl-value stop-loss">$${slPrice} (-${slPct}%)</span>
+                        </div>
+                        <div class="sl-tp-row">
+                            <span class="sl-label">止盈</span>
+                            <span class="sl-value take-profit">$${tpPrice} (+${tpPct}%)</span>
+                        </div>
+                        <div class="sl-tp-row">
+                            <span class="sl-label">盈亏比</span>
+                            <span class="sl-value risk-reward">${rrRatio}:1</span>
+                        </div>
+                    </div>
+                `;
+            }
+            
             card.innerHTML = `
                 <div class="card-header">
                     <div>
@@ -1297,6 +1400,8 @@
                 </div>
                 
                 ${whitelistHtml}
+                
+                ${slTpHtml}
                 
                 ${riskTagsHtml}
                 
