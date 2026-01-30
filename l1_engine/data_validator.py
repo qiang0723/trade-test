@@ -216,3 +216,147 @@ class DataValidator:
         dq = config.get('data_quality', {})
         flat['data_max_staleness_seconds'] = dq.get('max_staleness_seconds', 120)
         return flat
+    
+    # ========================================
+    # P2-1: 数据质量评分系统
+    # ========================================
+    
+    def calculate_quality_score(self, data: Dict) -> Dict:
+        """
+        计算数据质量评分（P2-1优化）
+        
+        评分维度：
+        1. 字段完整性（40%）：核心+可选字段覆盖率
+        2. 数据新鲜度（30%）：数据延迟程度
+        3. Lookback覆盖（30%）：历史数据窗口完整性
+        
+        Args:
+            data: 规范化后的市场数据
+        
+        Returns:
+            质量评分详情字典：
+            {
+                'total_score': 0-100,
+                'field_score': 0-100,
+                'freshness_score': 0-100,
+                'coverage_score': 0-100,
+                'confidence_cap': Confidence枚举值字符串,
+                'details': {...}
+            }
+        """
+        from models.enums import Confidence
+        
+        details = {}
+        
+        # 1. 字段完整性评分（40分）
+        field_gaps = data.get('_field_gaps', {'short_term': [], 'medium_term': []})
+        
+        # 核心字段满分（已通过验证）
+        core_score = 100
+        
+        # 短期字段评分
+        short_term_missing = len(field_gaps.get('short_term', []))
+        short_term_total = len(self.SHORT_TERM_OPTIONAL_FIELDS)
+        short_term_score = max(0, 100 - (short_term_missing / short_term_total * 100)) if short_term_total > 0 else 100
+        
+        # 中期字段评分
+        medium_term_missing = len(field_gaps.get('medium_term', []))
+        medium_term_total = len(self.MEDIUM_TERM_OPTIONAL_FIELDS)
+        medium_term_score = max(0, 100 - (medium_term_missing / medium_term_total * 100)) if medium_term_total > 0 else 100
+        
+        # 综合字段评分（核心50%，短期25%，中期25%）
+        field_score = core_score * 0.5 + short_term_score * 0.25 + medium_term_score * 0.25
+        
+        details['field'] = {
+            'core_score': core_score,
+            'short_term_score': round(short_term_score, 1),
+            'medium_term_score': round(medium_term_score, 1),
+            'short_term_missing': short_term_missing,
+            'medium_term_missing': medium_term_missing
+        }
+        
+        # 2. 数据新鲜度评分（30分）
+        freshness_score = 100
+        staleness_seconds = 0
+        
+        if 'timestamp' in data or 'source_timestamp' in data:
+            data_time = data.get('source_timestamp') or data.get('timestamp')
+            if data_time is not None:
+                try:
+                    if isinstance(data_time, str):
+                        data_time = datetime.fromisoformat(data_time)
+                    elif isinstance(data_time, int):
+                        data_time = datetime.fromtimestamp(data_time / 1000)
+                    elif isinstance(data_time, datetime):
+                        pass
+                    else:
+                        data_time = datetime.fromtimestamp(int(data_time) / 1000)
+                    
+                    staleness_seconds = (datetime.now() - data_time).total_seconds()
+                    max_staleness = self.thresholds.get('data_max_staleness_seconds', 120)
+                    
+                    # 线性衰减：0秒=100分，max_staleness秒=0分
+                    freshness_score = max(0, 100 - (staleness_seconds / max_staleness * 100))
+                except:
+                    pass  # 无法解析时间，使用默认满分
+        
+        details['freshness'] = {
+            'staleness_seconds': round(staleness_seconds, 1),
+            'score': round(freshness_score, 1)
+        }
+        
+        # 3. Lookback覆盖评分（30分）
+        coverage_score = 100
+        metadata = data.get('_metadata', {})
+        coverage = metadata.get('lookback_coverage', {})
+        
+        if coverage and coverage.get('has_data'):
+            windows = coverage.get('windows', {})
+            window_scores = []
+            
+            # 各窗口权重：1h最重要
+            window_weights = {'1h': 0.4, '15m': 0.3, '5m': 0.2, '6h': 0.1}
+            
+            for window_key, weight in window_weights.items():
+                window_info = windows.get(window_key, {})
+                is_valid = window_info.get('is_valid', True)
+                if is_valid:
+                    window_scores.append(100 * weight)
+                else:
+                    window_scores.append(0)
+            
+            coverage_score = sum(window_scores)
+        
+        details['coverage'] = {
+            'score': round(coverage_score, 1),
+            'has_metadata': bool(coverage)
+        }
+        
+        # 4. 计算总分（加权平均）
+        total_score = field_score * 0.4 + freshness_score * 0.3 + coverage_score * 0.3
+        
+        # 5. 确定置信度上限
+        # 规则：
+        # - 90+ 分：不限制（ULTRA）
+        # - 70-89 分：最高 HIGH
+        # - 50-69 分：最高 MEDIUM
+        # - <50 分：最高 LOW
+        if total_score >= 90:
+            confidence_cap = Confidence.ULTRA
+        elif total_score >= 70:
+            confidence_cap = Confidence.HIGH
+        elif total_score >= 50:
+            confidence_cap = Confidence.MEDIUM
+        else:
+            confidence_cap = Confidence.LOW
+        
+        logger.info(f"Data quality score: {total_score:.1f}/100 (cap={confidence_cap.value})")
+        
+        return {
+            'total_score': round(total_score, 1),
+            'field_score': round(field_score, 1),
+            'freshness_score': round(freshness_score, 1),
+            'coverage_score': round(coverage_score, 1),
+            'confidence_cap': confidence_cap.value,
+            'details': details
+        }
