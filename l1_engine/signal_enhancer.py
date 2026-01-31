@@ -120,6 +120,7 @@ class SignalEnhancer:
         'cvd_confirm_boost': 8,                  # CVD趋势确认加分
         'cvd_divergence_boost': 10,              # CVD背离加分
         'cvd_conflict_penalty': -6,              # CVD冲突惩罚
+        'cvd_consistency_boost': 5,              # P0-1: CVD多周期一致性加分
         
         # 短期-3: 波动率自适应
         'high_vol_signal_multiplier': 0.7,       # 高波动时信号权重降低
@@ -814,6 +815,25 @@ class SignalEnhancer:
         confirm_boost = self.thresholds.get('cvd_confirm_boost', 8)
         divergence_boost = self.thresholds.get('cvd_divergence_boost', 10)
         conflict_penalty = self.thresholds.get('cvd_conflict_penalty', -6)
+        consistency_boost = self.thresholds.get('cvd_consistency_boost', 5)
+        
+        # P0-1: CVD多周期一致性评分
+        if cvd_5m is not None and cvd_15m is not None and cvd_1h is not None:
+            all_bullish = cvd_5m > 0 and cvd_15m > 0 and cvd_1h > 0
+            all_bearish = cvd_5m < 0 and cvd_15m < 0 and cvd_1h < 0
+            
+            if all_bullish:
+                details['cvd_consistency'] = 'all_bullish'
+                if decision == Decision.LONG:
+                    confidence_boost += consistency_boost
+                    logger.debug(f"CVD 3-period bullish consistency: +{consistency_boost}")
+            elif all_bearish:
+                details['cvd_consistency'] = 'all_bearish'
+                if decision == Decision.SHORT:
+                    confidence_boost += consistency_boost
+                    logger.debug(f"CVD 3-period bearish consistency: +{consistency_boost}")
+            else:
+                details['cvd_consistency'] = 'mixed'
         
         # 1. CVD趋势确认
         if cvd_trend == 'bullish' and decision == Decision.LONG:
@@ -1463,28 +1483,40 @@ class SignalEnhancer:
         # Phase 1.1: 资金费率极端反转
         funding_result = self.eval_funding_extreme(funding_rate, decision)
         all_tags.extend(funding_result.tags)
-        total_boost += funding_result.confidence_boost
+        # P0-2: 波动率调整
+        funding_boost = self.apply_volatility_adjustment(funding_result.confidence_boost, volatility_regime)
+        total_boost += funding_boost
         all_details['funding'] = funding_result.details
+        all_details['funding']['adjusted_boost'] = funding_boost
         
         # P1-3: 资金费率趋势分析
         funding_trend_result = self.eval_funding_trend(funding_rate, oi_change_1h, decision)
         all_tags.extend(funding_trend_result.tags)
-        total_boost += funding_trend_result.confidence_boost
+        # P0-2: 波动率调整
+        funding_trend_boost = self.apply_volatility_adjustment(funding_trend_result.confidence_boost, volatility_regime)
+        total_boost += funding_trend_boost
         all_details['funding_trend'] = funding_trend_result.details
+        all_details['funding_trend']['adjusted_boost'] = funding_trend_boost
         
         # Phase 1.2: OI与价格背离
         divergence_result = self.eval_oi_price_divergence(price_change_1h, oi_change_1h, decision)
         all_tags.extend(divergence_result.tags)
-        total_boost += divergence_result.confidence_boost
+        # P0-2: 波动率调整
+        divergence_boost = self.apply_volatility_adjustment(divergence_result.confidence_boost, volatility_regime)
+        total_boost += divergence_boost
         all_details['divergence'] = divergence_result.details
+        all_details['divergence']['adjusted_boost'] = divergence_boost
         
         # Phase 1.3: 多周期一致性
         alignment_result = self.eval_timeframe_alignment(
             imbalance_5m, imbalance_15m, imbalance_1h, decision
         )
         all_tags.extend(alignment_result.tags)
-        total_boost += alignment_result.confidence_boost
+        # P0-2: 波动率调整
+        alignment_boost = self.apply_volatility_adjustment(alignment_result.confidence_boost, volatility_regime)
+        total_boost += alignment_boost
         all_details['alignment'] = alignment_result.details
+        all_details['alignment']['adjusted_boost'] = alignment_boost
         
         # Phase 2: 大户多空比（P0-3优化：增强权重）
         if top_long_ratio is not None:
@@ -1492,8 +1524,11 @@ class SignalEnhancer:
                 top_long_ratio, retail_long_ratio, decision
             )
             all_tags.extend(top_trader_result.tags)
-            total_boost += top_trader_result.confidence_boost
+            # P0-2: 波动率调整
+            top_trader_boost = self.apply_volatility_adjustment(top_trader_result.confidence_boost, volatility_regime)
+            total_boost += top_trader_boost
             all_details['top_trader'] = top_trader_result.details
+            all_details['top_trader']['adjusted_boost'] = top_trader_boost
         
         # P0-1: 24h长期趋势
         if price_change_24h is not None:
