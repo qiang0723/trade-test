@@ -1113,10 +1113,25 @@ class DecisionCore:
             (增强标签列表, 置信度加分)
         """
         from l1_engine.signal_enhancer import SignalEnhancer
+        import yaml
+        import os
         
         # 获取增强阈值配置
-        raw_config = getattr(thresholds, 'raw_config', {}) if thresholds else {}
-        enhancement_cfg = raw_config.get('signal_enhancement', {})
+        enhancement_cfg = {}
+        cg_cfg = {}
+        
+        # 尝试从配置文件加载
+        config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'l1_thresholds.yaml')
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    raw_config = yaml.safe_load(f)
+                    enhancement_cfg = raw_config.get('signal_enhancement', {})
+                    cg_cfg = raw_config.get('coinglass', {})
+                    if cg_cfg:
+                        enhancement_cfg.update(cg_cfg.get('fusion', {}))
+            except Exception as e:
+                logger.warning(f"Failed to load config for signal enhancement: {e}")
         
         # 创建增强器
         enhancer = SignalEnhancer(enhancement_cfg)
@@ -1138,7 +1153,43 @@ class DecisionCore:
         price_change_24h = features.features.price.price_change_24h if features.features.price else None
         volume_ratio_1h = features.features.volume.volume_ratio_1h if features.features.volume else None
         
-        # 综合评估（第一批优化：增加24h趋势和1h放量）
+        # ========================================
+        # Coinglass数据获取（STARTUP套餐）
+        # ========================================
+        cg_liquidation_summary = None
+        cg_fear_greed = None
+        cg_long_short_ratio = None
+        cg_oi_history = None
+        cg_funding_history = None
+        
+        # 检查是否启用Coinglass
+        cg_enabled = cg_cfg.get('enabled', False)
+        if cg_enabled:
+            try:
+                from coinglass_data_fetcher import CoinglassDataFetcher
+                cg_fetcher = CoinglassDataFetcher()
+                
+                if cg_fetcher.is_enabled():
+                    # 获取当前价格用于Coinglass查询
+                    current_price = features.features.price.current_price if features.features.price else None
+                    symbol = features.symbol if hasattr(features, 'symbol') else 'BTC'
+                    
+                    # 获取完整指标
+                    cg_metrics = cg_fetcher.fetch_all_metrics(symbol, current_price)
+                    
+                    if cg_metrics:
+                        cg_liquidation_summary = cg_metrics.liquidation_summary
+                        cg_fear_greed = cg_metrics.fear_greed
+                        cg_long_short_ratio = cg_metrics.long_short_ratio
+                        cg_oi_history = cg_metrics.oi_history
+                        cg_funding_history = cg_metrics.funding_rate_history
+                        
+                        logger.info(f"Coinglass data fetched: liq={cg_liquidation_summary is not None}, "
+                                   f"fg={cg_fear_greed is not None}, ls={cg_long_short_ratio is not None}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch Coinglass data: {e}")
+        
+        # 综合评估（含Coinglass数据融合）
         result = enhancer.evaluate_all(
             funding_rate=funding_rate,
             price_change_1h=price_change_1h,
@@ -1150,11 +1201,19 @@ class DecisionCore:
             top_long_ratio=top_long_ratio,
             retail_long_ratio=retail_long_ratio,
             price_change_24h=price_change_24h,
-            volume_ratio_1h=volume_ratio_1h
+            volume_ratio_1h=volume_ratio_1h,
+            # Coinglass数据
+            cg_liquidation_summary=cg_liquidation_summary,
+            cg_fear_greed=cg_fear_greed,
+            cg_long_short_ratio=cg_long_short_ratio,
+            cg_oi_history=cg_oi_history,
+            cg_funding_history=cg_funding_history
         )
         
         if result.tags:
-            logger.info(f"Signal enhancement: tags={[t.value for t in result.tags]}, boost={result.confidence_boost}")
+            cg_boost = result.details.get('coinglass_contribution', 0)
+            logger.info(f"Signal enhancement: tags={[t.value for t in result.tags]}, "
+                       f"boost={result.confidence_boost}, cg_boost={cg_boost}")
         
         return result.tags, result.confidence_boost
     

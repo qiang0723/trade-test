@@ -82,6 +82,21 @@ class SignalEnhancer:
         'funding_trend_elevated': 0.0008,      # 升高费率区间 0.08%
         'funding_acceleration_boost': 6,       # 费率加速加分
         'funding_reversal_boost': 10,          # 费率反转信号加分
+        
+        # Coinglass数据融合
+        'cg_long_liquidation_threshold': 0.7,  # 多头清算占比阈值 70%
+        'cg_short_liquidation_threshold': 0.3, # 空头清算占比阈值 30%
+        'cg_liquidation_boost': 8,             # 清算信号加分
+        'cg_fear_greed_extreme_fear': 25,      # 极度恐惧阈值
+        'cg_fear_greed_extreme_greed': 75,     # 极度贪婪阈值
+        'cg_fear_greed_boost': 6,              # 恐惧贪婪加分
+        'cg_long_ratio_crowded': 0.70,         # 多头拥挤阈值
+        'cg_short_ratio_crowded': 0.30,        # 空头拥挤阈值
+        'cg_crowded_penalty': -5,              # 拥挤惩罚
+        'cg_contrarian_boost': 8,              # 逆向加分
+        'cg_oi_surge_threshold': 0.03,         # OI激增阈值 3%
+        'cg_oi_drop_threshold': -0.02,         # OI下降阈值 -2%
+        'cg_oi_boost': 5,                      # OI信号加分
     }
     
     def __init__(self, thresholds: Dict = None):
@@ -724,6 +739,246 @@ class SignalEnhancer:
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
     
     # ========================================
+    # Coinglass数据融合评估
+    # ========================================
+    
+    def eval_coinglass_liquidation(
+        self,
+        liquidation_summary: Optional[Dict],
+        decision: Decision
+    ) -> EnhancementResult:
+        """
+        评估Coinglass清算数据
+        
+        逻辑：
+        - 多头清算占比>70% + 做多 → 加分（可能触底反弹）
+        - 空头清算占比>70% + 做空 → 加分（可能见顶回落）
+        - 顺势拥挤 → 惩罚
+        
+        Args:
+            liquidation_summary: 清算汇总数据
+            decision: 当前决策
+        
+        Returns:
+            EnhancementResult
+        """
+        tags = []
+        confidence_boost = 0
+        signal_quality = 'neutral'
+        details = {'source': 'coinglass_liquidation'}
+        
+        if not liquidation_summary:
+            return EnhancementResult(tags, confidence_boost, signal_quality, details)
+        
+        long_ratio = liquidation_summary.get('long_ratio', 0.5)
+        liq_intensity = liquidation_summary.get('liquidation_intensity', 'low')
+        
+        long_threshold = self.thresholds.get('cg_long_liquidation_threshold', 0.7)
+        short_threshold = self.thresholds.get('cg_short_liquidation_threshold', 0.3)
+        boost = self.thresholds.get('cg_liquidation_boost', 8)
+        
+        details['long_ratio'] = long_ratio
+        details['intensity'] = liq_intensity
+        
+        # 高强度清算时信号更强
+        intensity_multiplier = 1.5 if liq_intensity == 'high' else 1.0
+        
+        if long_ratio > long_threshold:
+            # 多头被大量清算
+            tags.append(ReasonTag.LIQUIDATION_IMBALANCE_LONG)
+            details['signal'] = 'long_liquidation_dominant'
+            
+            if decision == Decision.LONG:
+                # 做多 + 多头清算 → 可能反弹
+                confidence_boost = int(boost * intensity_multiplier)
+                signal_quality = 'strong'
+                details['interpretation'] = 'potential_bounce'
+            elif decision == Decision.SHORT:
+                # 做空 + 多头清算 → 顺势但要警惕反弹
+                confidence_boost = -3
+                signal_quality = 'weak'
+                details['interpretation'] = 'trend_but_bounce_risk'
+        
+        elif long_ratio < short_threshold:
+            # 空头被大量清算
+            tags.append(ReasonTag.LIQUIDATION_IMBALANCE_SHORT)
+            details['signal'] = 'short_liquidation_dominant'
+            
+            if decision == Decision.SHORT:
+                # 做空 + 空头清算 → 可能回调
+                confidence_boost = int(boost * intensity_multiplier)
+                signal_quality = 'strong'
+                details['interpretation'] = 'potential_pullback'
+            elif decision == Decision.LONG:
+                # 做多 + 空头清算 → 顺势但要警惕回调
+                confidence_boost = -3
+                signal_quality = 'weak'
+                details['interpretation'] = 'trend_but_pullback_risk'
+        
+        return EnhancementResult(tags, confidence_boost, signal_quality, details)
+    
+    def eval_coinglass_sentiment(
+        self,
+        fear_greed: Optional[Dict],
+        long_short_ratio: Optional[Dict],
+        decision: Decision
+    ) -> EnhancementResult:
+        """
+        评估Coinglass市场情绪（恐惧贪婪指数 + 多空比）
+        
+        逻辑：
+        - 极度恐惧 + 做多 → 逆向加分
+        - 极度贪婪 + 做空 → 逆向加分
+        - 多头拥挤 + 做多 → 惩罚
+        - 空头拥挤 + 做空 → 惩罚
+        
+        Args:
+            fear_greed: 恐惧贪婪指数数据
+            long_short_ratio: 多空比数据
+            decision: 当前决策
+        
+        Returns:
+            EnhancementResult
+        """
+        tags = []
+        confidence_boost = 0
+        signal_quality = 'neutral'
+        details = {'source': 'coinglass_sentiment'}
+        
+        extreme_fear = self.thresholds.get('cg_fear_greed_extreme_fear', 25)
+        extreme_greed = self.thresholds.get('cg_fear_greed_extreme_greed', 75)
+        fg_boost = self.thresholds.get('cg_fear_greed_boost', 6)
+        
+        long_crowded = self.thresholds.get('cg_long_ratio_crowded', 0.70)
+        short_crowded = self.thresholds.get('cg_short_ratio_crowded', 0.30)
+        crowded_penalty = self.thresholds.get('cg_crowded_penalty', -5)
+        contrarian_boost = self.thresholds.get('cg_contrarian_boost', 8)
+        
+        # 1. 恐惧贪婪指数分析
+        if fear_greed:
+            fg_value = fear_greed.get('current', 50)
+            fg_sentiment = fear_greed.get('sentiment', 'neutral')
+            details['fear_greed'] = {'value': fg_value, 'sentiment': fg_sentiment}
+            
+            if fg_value <= extreme_fear:
+                # 极度恐惧
+                if decision == Decision.LONG:
+                    confidence_boost += fg_boost
+                    details['fg_signal'] = 'extreme_fear_long_opportunity'
+                    signal_quality = 'moderate'
+            elif fg_value >= extreme_greed:
+                # 极度贪婪
+                if decision == Decision.SHORT:
+                    confidence_boost += fg_boost
+                    details['fg_signal'] = 'extreme_greed_short_opportunity'
+                    signal_quality = 'moderate'
+        
+        # 2. 多空比分析
+        if long_short_ratio:
+            long_pct = long_short_ratio.get('long_percent', 50) / 100
+            ls_sentiment = long_short_ratio.get('sentiment', 'neutral')
+            details['long_short'] = {'long_pct': long_pct, 'sentiment': ls_sentiment}
+            
+            if long_pct > long_crowded:
+                # 多头拥挤
+                if decision == Decision.LONG:
+                    # 顺势拥挤 → 惩罚
+                    confidence_boost += crowded_penalty
+                    details['ls_signal'] = 'long_crowded_penalty'
+                    signal_quality = 'weak'
+                elif decision == Decision.SHORT:
+                    # 逆势 → 加分
+                    confidence_boost += contrarian_boost
+                    tags.append(ReasonTag.LIQUIDATION_CASCADE_RISK)
+                    details['ls_signal'] = 'contrarian_short_opportunity'
+                    signal_quality = 'strong'
+            
+            elif long_pct < short_crowded:
+                # 空头拥挤（或多头稀少）
+                if decision == Decision.SHORT:
+                    # 顺势拥挤 → 惩罚
+                    confidence_boost += crowded_penalty
+                    details['ls_signal'] = 'short_crowded_penalty'
+                    signal_quality = 'weak'
+                elif decision == Decision.LONG:
+                    # 逆势 → 加分
+                    confidence_boost += contrarian_boost
+                    tags.append(ReasonTag.LIQUIDATION_CASCADE_RISK)
+                    details['ls_signal'] = 'contrarian_long_opportunity'
+                    signal_quality = 'strong'
+        
+        return EnhancementResult(tags, confidence_boost, signal_quality, details)
+    
+    def eval_coinglass_oi(
+        self,
+        oi_history: Optional[Dict],
+        funding_history: Optional[Dict],
+        decision: Decision
+    ) -> EnhancementResult:
+        """
+        评估Coinglass OI和费率历史数据
+        
+        逻辑：
+        - OI激增 + 趋势方向 → 加分
+        - OI下降 → 趋势可能终结
+        - 费率极高 + 顺势 → 惩罚（拥挤风险）
+        
+        Args:
+            oi_history: OI历史数据
+            funding_history: 费率历史数据
+            decision: 当前决策
+        
+        Returns:
+            EnhancementResult
+        """
+        tags = []
+        confidence_boost = 0
+        signal_quality = 'neutral'
+        details = {'source': 'coinglass_oi'}
+        
+        oi_surge = self.thresholds.get('cg_oi_surge_threshold', 0.03)
+        oi_drop = self.thresholds.get('cg_oi_drop_threshold', -0.02)
+        oi_boost = self.thresholds.get('cg_oi_boost', 5)
+        
+        # 1. OI变化分析
+        if oi_history:
+            oi_change = oi_history.get('oi_change_1h')
+            oi_trend = oi_history.get('trend', 'stable')
+            details['oi'] = {'change_1h': oi_change, 'trend': oi_trend}
+            
+            if oi_change is not None:
+                if oi_change > oi_surge:
+                    # OI激增
+                    tags.append(ReasonTag.AGGREGATED_OI_SURGE)
+                    if decision in [Decision.LONG, Decision.SHORT]:
+                        confidence_boost += oi_boost
+                        details['oi_signal'] = 'oi_surge_trend_confirm'
+                        signal_quality = 'moderate'
+                
+                elif oi_change < oi_drop:
+                    # OI下降
+                    tags.append(ReasonTag.AGGREGATED_OI_DROP)
+                    confidence_boost -= 3
+                    details['oi_signal'] = 'oi_drop_trend_exhaustion'
+                    signal_quality = 'weak'
+        
+        # 2. 费率历史分析
+        if funding_history:
+            current_rate = funding_history.get('current_rate', 0)
+            fr_sentiment = funding_history.get('sentiment', 'neutral')
+            details['funding'] = {'rate': current_rate, 'sentiment': fr_sentiment}
+            
+            # 费率极端时的拥挤警告
+            if fr_sentiment == 'extremely_bullish' and decision == Decision.LONG:
+                confidence_boost -= 5
+                details['funding_signal'] = 'extreme_bullish_crowded'
+            elif fr_sentiment == 'extremely_bearish' and decision == Decision.SHORT:
+                confidence_boost -= 5
+                details['funding_signal'] = 'extreme_bearish_crowded'
+        
+        return EnhancementResult(tags, confidence_boost, signal_quality, details)
+    
+    # ========================================
     # 综合评估入口
     # ========================================
     
@@ -739,10 +994,16 @@ class SignalEnhancer:
         top_long_ratio: Optional[float] = None,
         retail_long_ratio: Optional[float] = None,
         price_change_24h: Optional[float] = None,
-        volume_ratio_1h: Optional[float] = None
+        volume_ratio_1h: Optional[float] = None,
+        # Coinglass数据（新增）
+        cg_liquidation_summary: Optional[Dict] = None,
+        cg_fear_greed: Optional[Dict] = None,
+        cg_long_short_ratio: Optional[Dict] = None,
+        cg_oi_history: Optional[Dict] = None,
+        cg_funding_history: Optional[Dict] = None
     ) -> EnhancementResult:
         """
-        综合评估所有增强信号（第一批优化：增加24h趋势和1h放量）
+        综合评估所有增强信号（含Coinglass数据融合）
         
         Args:
             funding_rate: 资金费率
@@ -754,6 +1015,11 @@ class SignalEnhancer:
             retail_long_ratio: 散户做多比例（可选）
             price_change_24h: 24小时价格变化（P0-1新增）
             volume_ratio_1h: 1小时成交量比率（P0-4新增）
+            cg_liquidation_summary: Coinglass清算汇总（新增）
+            cg_fear_greed: Coinglass恐惧贪婪指数（新增）
+            cg_long_short_ratio: Coinglass多空比（新增）
+            cg_oi_history: Coinglass OI历史（新增）
+            cg_funding_history: Coinglass费率历史（新增）
         
         Returns:
             EnhancementResult: 综合结果
@@ -811,6 +1077,33 @@ class SignalEnhancer:
             total_boost += volume_result.confidence_boost
             all_details['volume_1h'] = volume_result.details
         
+        # ========================================
+        # Coinglass数据融合（STARTUP套餐）
+        # ========================================
+        
+        # CG-1: 清算数据分析
+        if cg_liquidation_summary is not None:
+            cg_liq_result = self.eval_coinglass_liquidation(cg_liquidation_summary, decision)
+            all_tags.extend(cg_liq_result.tags)
+            total_boost += cg_liq_result.confidence_boost
+            all_details['cg_liquidation'] = cg_liq_result.details
+        
+        # CG-2: 市场情绪分析（恐惧贪婪 + 多空比）
+        if cg_fear_greed is not None or cg_long_short_ratio is not None:
+            cg_sentiment_result = self.eval_coinglass_sentiment(
+                cg_fear_greed, cg_long_short_ratio, decision
+            )
+            all_tags.extend(cg_sentiment_result.tags)
+            total_boost += cg_sentiment_result.confidence_boost
+            all_details['cg_sentiment'] = cg_sentiment_result.details
+        
+        # CG-3: OI和费率历史分析
+        if cg_oi_history is not None or cg_funding_history is not None:
+            cg_oi_result = self.eval_coinglass_oi(cg_oi_history, cg_funding_history, decision)
+            all_tags.extend(cg_oi_result.tags)
+            total_boost += cg_oi_result.confidence_boost
+            all_details['cg_oi'] = cg_oi_result.details
+        
         # 综合信号质量
         if total_boost >= 20:
             signal_quality = 'strong'
@@ -823,6 +1116,14 @@ class SignalEnhancer:
         
         all_details['total_boost'] = total_boost
         all_details['signal_quality'] = signal_quality
+        
+        # 记录Coinglass贡献
+        cg_boost = sum([
+            all_details.get('cg_liquidation', {}).get('confidence_boost', 0) if isinstance(all_details.get('cg_liquidation'), dict) else 0,
+            all_details.get('cg_sentiment', {}).get('confidence_boost', 0) if isinstance(all_details.get('cg_sentiment'), dict) else 0,
+            all_details.get('cg_oi', {}).get('confidence_boost', 0) if isinstance(all_details.get('cg_oi'), dict) else 0,
+        ])
+        all_details['coinglass_contribution'] = cg_boost
         
         return EnhancementResult(all_tags, total_boost, signal_quality, all_details)
 
