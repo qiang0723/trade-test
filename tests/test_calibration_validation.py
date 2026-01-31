@@ -53,7 +53,7 @@ def test_percentage_point_format_rejected():
         },
         'risk_exposure': {
             'liquidation': {'price_change': 0.05, 'oi_drop': -0.15},
-            'crowding': {'funding_abs': 0.001, 'oi_growth': 0.30},
+            'crowding': {'funding_abs': 0.0005, 'oi_growth': 0.15},
             'extreme_volume': {'multiplier': 10.0}
         },
         'trade_quality': {
@@ -152,7 +152,7 @@ def test_direction_threshold_rejected():
         },
         'risk_exposure': {
             'liquidation': {'price_change': 0.05, 'oi_drop': -0.15},
-            'crowding': {'funding_abs': 0.001, 'oi_growth': 0.30},
+            'crowding': {'funding_abs': 0.0005, 'oi_growth': 0.15},
             'extreme_volume': {'multiplier': 10.0}
         },
         'trade_quality': {

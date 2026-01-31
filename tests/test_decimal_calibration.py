@@ -39,7 +39,7 @@ def test_config_decimal_format():
     re = config['risk_exposure']
     assert re['liquidation']['price_change'] == 0.05, "liquidation.price_change应为0.05"
     assert re['liquidation']['oi_drop'] == -0.15, "liquidation.oi_drop应为-0.15"
-    assert re['crowding']['oi_growth'] == 0.30, "crowding.oi_growth应为0.30"
+    assert re['crowding']['oi_growth'] == 0.15, "crowding.oi_growth应为0.15"
     print(f"✅ 风险准入阈值: liquidation={re['liquidation']['price_change']}, oi_growth={re['crowding']['oi_growth']}")
     
     # 交易质量

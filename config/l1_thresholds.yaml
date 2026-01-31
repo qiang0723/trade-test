@@ -139,8 +139,11 @@ risk_exposure:
   
   # 拥挤风险检测
   crowding:
-    funding_abs: 0.001            # 费率绝对值阈值（小数格式：0.001=0.1%）
-    oi_growth: 0.30               # 6h OI增长阈值（小数格式：0.30=30%）
+    # P0-BugFix-4（固化测试口径）
+    # - funding_abs: 0.0005 代表 0.05%（decimal）
+    # - oi_growth: 0.15 代表 15%（decimal）
+    funding_abs: 0.0005           # 费率绝对值阈值（小数格式：0.0005=0.05%）
+    oi_growth: 0.15               # 6h OI增长阈值（小数格式：0.15=15%）
   
   # 极端成交量检测
   extreme_volume:
