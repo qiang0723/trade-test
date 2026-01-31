@@ -1164,10 +1164,12 @@ class DecisionCore:
         
         # 检查是否启用Coinglass
         cg_enabled = cg_cfg.get('enabled', False)
+        market_sentiment = None  # 市场整体情绪
+        
         if cg_enabled:
             try:
-                from coinglass_data_fetcher import CoinglassDataFetcher
-                cg_fetcher = CoinglassDataFetcher()
+                from coinglass_data_fetcher import get_coinglass_fetcher, get_market_sentiment_summary
+                cg_fetcher = get_coinglass_fetcher()  # 使用单例
                 
                 if cg_fetcher.is_enabled():
                     # 获取当前价格用于Coinglass查询
@@ -1183,11 +1185,15 @@ class DecisionCore:
                         cg_long_short_ratio = cg_metrics.long_short_ratio
                         cg_oi_history = cg_metrics.oi_history
                         cg_funding_history = cg_metrics.funding_rate_history
-                        
-                        logger.info(f"Coinglass data fetched: liq={cg_liquidation_summary is not None}, "
-                                   f"fg={cg_fear_greed is not None}, ls={cg_long_short_ratio is not None}")
+                    
+                    # 获取市场整体情绪（会预加载主流币种数据，充分利用API配额）
+                    market_sentiment = get_market_sentiment_summary(cg_fetcher)
+                    
+                    logger.info(f"Coinglass[{symbol}]: liq={cg_liquidation_summary is not None}, "
+                               f"fg={cg_fear_greed is not None}, market={market_sentiment.get('major_ls_bias', 'N/A')}")
             except Exception as e:
-                logger.warning(f"Failed to fetch Coinglass data: {e}")
+                import traceback
+                logger.warning(f"Failed to fetch Coinglass data: {e}\n{traceback.format_exc()}")
         
         # 综合评估（含Coinglass数据融合）
         result = enhancer.evaluate_all(
@@ -1207,7 +1213,9 @@ class DecisionCore:
             cg_fear_greed=cg_fear_greed,
             cg_long_short_ratio=cg_long_short_ratio,
             cg_oi_history=cg_oi_history,
-            cg_funding_history=cg_funding_history
+            cg_funding_history=cg_funding_history,
+            # 市场整体情绪（新增：充分利用API配额）
+            market_sentiment=market_sentiment
         )
         
         if result.tags:

@@ -5,18 +5,16 @@
 # PR-010: Symbol Universe（币种宇宙）
 # ==================
 symbol_universe:
-  # 支持的币种列表（合约市场）
+  # ========================================
+  # 只处理5个主流币种
+  # 原因：小币种庄家操控性强、数据质量差、信号不可靠
+  # ========================================
   enabled_symbols:
-    - BTC    # Bitcoin
-    - ETH    # Ethereum
-    - SOL    # Solana
-    - TA     # TA
-    - AT     # AT
-    - HANA   # HANA
-    - BTR    # BTR
-    - GPS    # GPS
-    - RIVER  # RIVER
-    - BULLA  # BULLA
+    - BTC    # Bitcoin - 市值最大，流动性最好
+    - ETH    # Ethereum - 第二大币种
+    - SOL    # Solana - 高性能公链代表
+    - XRP    # Ripple - 传统金融桥梁
+    - BNB    # BNB - 交易所代币龙头
   
   # 默认币种（前端初始化）
   default_symbol: BTC
@@ -24,22 +22,28 @@ symbol_universe:
 # ==================
 # 币种级别策略配置（基于回测数据）
 # ==================
+# 币种级别策略配置（主流币种）
+# ==================
 symbol_strategy:
-  # 高质量币种 - 可产生HIGH以上信号
-  # 回测结果：BTR LONG 84.2%, GPS SHORT 63.1%
+  # 主流币种全部为高质量币种
   high_quality_symbols:
-    - BTR    # LONG信号84.2%胜率
-    - GPS    # SHORT信号63.1%胜率
+    - BTC    # 市值最大，信号最可靠
+    - ETH    # 第二大币种
+    - SOL    # 高流动性
+    - XRP    # 传统金融桥梁
+    - BNB    # 交易所代币
   
-  # 币种方向偏好（基于回测胜率）
-  # 只允许指定方向产生HIGH以上信号
+  # 币种方向偏好（主流币种允许双向）
   symbol_direction_bias:
-    BTR: long      # BTR只允许LONG (84.2%胜率)
-    GPS: short     # GPS只允许SHORT (63.1%胜率)
-    # 其他币种：默认允许双向，但需要ULTRA置信度
+    # 主流币种允许双向交易
+    BTC: both
+    ETH: both
+    SOL: both
+    XRP: both
+    BNB: both
   
-  # 默认策略：非高质量币种需要ULTRA才能输出信号
-  default_min_confidence: ultra
+  # 主流币种统一使用HIGH置信度门槛
+  default_min_confidence: high
   
   # 高质量币种的最低置信度
   high_quality_min_confidence: high

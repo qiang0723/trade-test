@@ -1339,7 +1339,7 @@ class L1AdvisoryEngine:
         """
         return {
             'symbol_universe': {
-                'enabled_symbols': ['BTC', 'ETH', 'BNB', 'SOL', 'XRP'],
+                'enabled_symbols': ['BTC', 'ETH', 'SOL', 'XRP', 'BNB'],  # 只处理5个主流币种
                 'default_symbol': 'BTC'
             },
             'data_quality': {

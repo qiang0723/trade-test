@@ -158,6 +158,10 @@ class ReasonTag(Enum):
     AGGREGATED_OI_SURGE = "aggregated_oi_surge"                        # 全市场OI激增
     AGGREGATED_OI_DROP = "aggregated_oi_drop"                          # 全市场OI下降
     LIQUIDATION_CASCADE_RISK = "liquidation_cascade_risk"              # 清算级联风险
+    
+    # 市场整体情绪（主流币种汇总）
+    CROWDED_LONG_CONTRARIAN = "crowded_long_contrarian"                # 市场多头拥挤→逆向做空
+    CROWDED_SHORT_CONTRARIAN = "crowded_short_contrarian"              # 市场空头拥挤→逆向做多
 
 
 # 中文解释映射
@@ -295,6 +299,10 @@ REASON_TAG_EXPLANATIONS = {
     "aggregated_oi_surge": "🔥 全市场OI激增：跨交易所持仓量大幅增加，趋势可能延续",
     "aggregated_oi_drop": "📉 全市场OI下降：跨交易所持仓量减少，趋势可能终结",
     "liquidation_cascade_risk": "⚡ 清算级联风险：近期大量爆仓，市场可能出现反转",
+    
+    # 市场整体情绪（主流币种汇总）
+    "crowded_long_contrarian": "🎯 市场多头拥挤：主流币种整体多头拥挤，逆向做空信号",
+    "crowded_short_contrarian": "🎯 市场空头拥挤：主流币种整体空头拥挤，逆向做多信号",
 }
 
 
@@ -454,6 +462,10 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     ReasonTag.AGGREGATED_OI_SURGE: ExecutabilityLevel.ALLOW,           # OI激增→趋势确认
     ReasonTag.AGGREGATED_OI_DROP: ExecutabilityLevel.DEGRADE,          # OI下降→趋势警告
     ReasonTag.LIQUIDATION_CASCADE_RISK: ExecutabilityLevel.ALLOW,      # 级联风险→反转信号
+    
+    # 市场整体情绪（主流币种汇总）
+    ReasonTag.CROWDED_LONG_CONTRARIAN: ExecutabilityLevel.ALLOW,       # 市场多头拥挤→逆向信号
+    ReasonTag.CROWDED_SHORT_CONTRARIAN: ExecutabilityLevel.ALLOW,      # 市场空头拥挤→逆向信号
 }
 
 

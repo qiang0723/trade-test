@@ -28,6 +28,10 @@ from l1_engine.secrets_manager import get_secrets_manager
 
 logger = logging.getLogger(__name__)
 
+# 全局缓存（简单实现）
+_coinglass_cache: Dict[str, Any] = {}
+_cache_timestamps: Dict[str, datetime] = {}
+
 
 @dataclass
 class LiquidationLevel:
@@ -799,9 +803,23 @@ class CoinglassDataFetcher:
         
         return results
     
+    # 主流币种列表（获取完整数据）
+    MAJOR_SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'DOGE', 'ADA', 'AVAX', 'LINK', 'DOT']
+    
     def fetch_all_metrics(self, symbol: str, current_price: Optional[float] = None) -> Optional[CoinglassMetrics]:
         """
-        获取所有Coinglass指标（STARTUP套餐完整数据）
+        获取Coinglass指标（平衡版：充分利用API配额）
+        
+        优化策略：
+        1. 主流币种（BTC/ETH/SOL等）：完整数据 + 30秒缓存
+        2. 其他币种：基础数据 + 60秒缓存
+        3. 恐惧贪婪：全局数据 + 3分钟缓存
+        
+        API配额：STARTUP 80次/分钟
+        预估使用：
+        - 主流币种(10个)：5端点 × 2次/分钟 = 100次 → 通过缓存降至~50次
+        - 恐惧贪婪：0.3次/分钟
+        - 总计：~50次/分钟（利用率~60%）
         
         Args:
             symbol: 交易对符号
@@ -810,25 +828,83 @@ class CoinglassDataFetcher:
         Returns:
             综合指标对象
         """
+        global _coinglass_cache, _cache_timestamps
+        
         if not self._enabled:
             return None
         
-        logger.info(f"Fetching Coinglass metrics for {symbol} (STARTUP plan)")
+        # 判断是否主流币种
+        is_major = symbol.upper() in self.MAJOR_SYMBOLS
         
-        # HOBBYIST可用数据
+        # 缓存策略：主流币种30秒，其他60秒
+        cache_key = f"metrics_{symbol}"
+        cache_ttl = 30 if is_major else 60
+        
+        if cache_key in _coinglass_cache:
+            cache_time = _cache_timestamps.get(cache_key)
+            if cache_time and (datetime.now() - cache_time).total_seconds() < cache_ttl:
+                logger.debug(f"Using cached Coinglass data for {symbol}")
+                return _coinglass_cache[cache_key]
+        
+        endpoints_count = 5 if is_major else 3
+        logger.info(f"Fetching Coinglass metrics for {symbol} ({'major' if is_major else 'other'}: {endpoints_count} endpoints)")
+        
+        # ========================================
+        # 核心端点：所有币种都获取
+        # ========================================
+        
+        # 1. 清算汇总（最有价值：多空清算比例）
         liquidation_summary = self.fetch_liquidation_summary(symbol)
-        fear_greed = self.fetch_fear_greed_index(limit=7)
         
-        # STARTUP套餐数据
+        # 2. 多空比（拥挤检测）
         long_short_ratio = self.fetch_long_short_ratio(symbol)
-        oi_history = self.fetch_oi_history(symbol)
-        funding_rate_history = self.fetch_funding_rate_history(symbol)
-        oi_weighted_funding = self.fetch_oi_weighted_funding_rate(symbol)
         
-        # 高级套餐数据（可能不可用，优雅降级）
-        liquidation_levels = self.fetch_liquidation_heatmap(symbol)
-        aggregated_oi = self.fetch_aggregated_oi(symbol)
-        recent_liquidations = self.fetch_recent_liquidations(symbol, limit=20)
+        # 3. 恐惧贪婪指数（市场情绪，全局数据，3分钟缓存）
+        fear_greed = None
+        fear_greed_cache_key = "fear_greed_global"
+        if fear_greed_cache_key in _coinglass_cache:
+            fg_time = _cache_timestamps.get(fear_greed_cache_key)
+            if fg_time and (datetime.now() - fg_time).total_seconds() < 180:  # 3分钟缓存
+                fear_greed = _coinglass_cache[fear_greed_cache_key]
+        
+        if fear_greed is None:
+            fear_greed = self.fetch_fear_greed_index(limit=7)
+            if fear_greed:
+                _coinglass_cache[fear_greed_cache_key] = fear_greed
+                _cache_timestamps[fear_greed_cache_key] = datetime.now()
+        
+        # ========================================
+        # 详细端点：仅主流币种获取
+        # ========================================
+        oi_history = None
+        funding_rate_history = None
+        
+        if is_major:
+            # OI历史（2分钟缓存）
+            oi_cache_key = f"oi_{symbol}"
+            if oi_cache_key in _coinglass_cache:
+                oi_time = _cache_timestamps.get(oi_cache_key)
+                if oi_time and (datetime.now() - oi_time).total_seconds() < 120:
+                    oi_history = _coinglass_cache[oi_cache_key]
+            
+            if oi_history is None:
+                oi_history = self.fetch_oi_history(symbol)
+                if oi_history:
+                    _coinglass_cache[oi_cache_key] = oi_history
+                    _cache_timestamps[oi_cache_key] = datetime.now()
+            
+            # 费率历史（2分钟缓存）
+            fr_cache_key = f"fr_{symbol}"
+            if fr_cache_key in _coinglass_cache:
+                fr_time = _cache_timestamps.get(fr_cache_key)
+                if fr_time and (datetime.now() - fr_time).total_seconds() < 120:
+                    funding_rate_history = _coinglass_cache[fr_cache_key]
+            
+            if funding_rate_history is None:
+                funding_rate_history = self.fetch_funding_rate_history(symbol)
+                if funding_rate_history:
+                    _coinglass_cache[fr_cache_key] = funding_rate_history
+                    _cache_timestamps[fr_cache_key] = datetime.now()
         
         # 从清算汇总计算多空不平衡
         liquidation_imbalance = None
@@ -837,45 +913,38 @@ class CoinglassDataFetcher:
         if liquidation_summary:
             long_ratio = liquidation_summary.get('long_ratio', 0)
             if long_ratio > 0.6:
-                liquidation_dominance = 'LONG'  # 多头爆仓主导（可能反弹）
+                liquidation_dominance = 'LONG'
                 liquidation_imbalance = long_ratio - 0.5
             elif long_ratio < 0.4:
-                liquidation_dominance = 'SHORT'  # 空头爆仓主导（可能回调）
+                liquidation_dominance = 'SHORT'
                 liquidation_imbalance = 0.5 - long_ratio
         
-        # 计算最近清算位（如果有详细数据）
-        nearest_long_liq = None
-        nearest_short_liq = None
+        logger.info(f"Coinglass[{symbol}]: liq={liquidation_summary is not None}, ls={long_short_ratio is not None}, oi={oi_history is not None}, fr={funding_rate_history is not None}")
         
-        if liquidation_levels and current_price:
-            for level in liquidation_levels:
-                if level.price < current_price and level.long_liquidation > 0:
-                    if nearest_long_liq is None or level.price > nearest_long_liq:
-                        nearest_long_liq = level.price
-                elif level.price > current_price and level.short_liquidation > 0:
-                    if nearest_short_liq is None or level.price < nearest_short_liq:
-                        nearest_short_liq = level.price
-        
-        logger.info(f"Coinglass data fetched: LS={long_short_ratio is not None}, OI={oi_history is not None}, FR={funding_rate_history is not None}")
-        
-        return CoinglassMetrics(
+        # 构建结果
+        result = CoinglassMetrics(
             symbol=symbol,
             timestamp=datetime.now(),
-            liquidation_levels=liquidation_levels,
-            nearest_long_liquidation=nearest_long_liq,
-            nearest_short_liquidation=nearest_short_liq,
+            liquidation_levels=None,  # 不再调用（需要更高套餐）
+            nearest_long_liquidation=None,
+            nearest_short_liquidation=None,
             liquidation_imbalance=liquidation_imbalance,
-            aggregated_oi=aggregated_oi,
-            recent_liquidations=recent_liquidations,
+            aggregated_oi=None,  # 不再调用（需要更高套餐）
+            recent_liquidations=[],  # 不再调用（需要更高套餐）
             liquidation_dominance=liquidation_dominance,
-            oi_weighted_funding_rate=oi_weighted_funding,
-            # STARTUP新增字段
+            oi_weighted_funding_rate=None,
             long_short_ratio=long_short_ratio,
             oi_history=oi_history,
             funding_rate_history=funding_rate_history,
             fear_greed=fear_greed,
             liquidation_summary=liquidation_summary
         )
+        
+        # 缓存结果
+        _coinglass_cache[cache_key] = result
+        _cache_timestamps[cache_key] = datetime.now()
+        
+        return result
     
     def is_enabled(self) -> bool:
         """检查是否启用"""
@@ -883,9 +952,189 @@ class CoinglassDataFetcher:
     
     def get_status(self) -> Dict:
         """获取状态信息"""
+        global _coinglass_cache, _cache_timestamps
+        
+        # 统计缓存状态
+        cache_stats = {}
+        now = datetime.now()
+        for key, ts in _cache_timestamps.items():
+            age = (now - ts).total_seconds()
+            cache_stats[key] = f"{age:.0f}s ago"
+        
         return {
             'enabled': self._enabled,
             'base_url': self.base_url,
             'api_key_configured': bool(self._api_key),
-            'endpoints': list(self.ENDPOINTS.keys())
+            'endpoints': list(self.ENDPOINTS.keys()),
+            'cache_entries': len(_coinglass_cache),
+            'cache_details': cache_stats,
+            'rate_limit': '80 req/min (STARTUP)',
+            'optimized_calls': '3 endpoints/request'
         }
+    
+    @staticmethod
+    def clear_cache():
+        """清理所有缓存"""
+        global _coinglass_cache, _cache_timestamps
+        _coinglass_cache.clear()
+        _cache_timestamps.clear()
+        logger.info("Coinglass cache cleared")
+
+
+# ========================================
+# 单例模式
+# ========================================
+_coinglass_fetcher_instance: Optional[CoinglassDataFetcher] = None
+
+
+def get_coinglass_fetcher() -> CoinglassDataFetcher:
+    """
+    获取Coinglass数据获取器单例
+    
+    使用单例模式确保：
+    1. 缓存在所有调用之间共享
+    2. 避免重复初始化
+    3. 节省API配额
+    """
+    global _coinglass_fetcher_instance
+    if _coinglass_fetcher_instance is None:
+        _coinglass_fetcher_instance = CoinglassDataFetcher()
+        logger.info("CoinglassDataFetcher singleton created")
+    return _coinglass_fetcher_instance
+
+
+def preload_major_symbols_data(fetcher: Optional[CoinglassDataFetcher] = None) -> Dict[str, Any]:
+    """
+    预加载主流币种数据（充分利用API配额）
+    
+    目的：即使主要交易BTC，也获取ETH/SOL等数据作为市场情绪参考
+    
+    API配额计算：
+    - 主流币种(10个) × 5端点 = 50次
+    - 每30秒刷新一次 = 100次/分钟 → 通过缓存控制到 ~40次/分钟
+    - 利用率：50%（安全边际）
+    """
+    if fetcher is None:
+        fetcher = get_coinglass_fetcher()
+    
+    if not fetcher.is_enabled():
+        return {}
+    
+    results = {}
+    major_symbols = CoinglassDataFetcher.MAJOR_SYMBOLS[:5]  # 只预加载前5个主流币种
+    
+    logger.info(f"Preloading Coinglass data for major symbols: {major_symbols}")
+    
+    for symbol in major_symbols:
+        try:
+            metrics = fetcher.fetch_all_metrics(symbol)
+            if metrics:
+                results[symbol] = {
+                    'liquidation_summary': metrics.liquidation_summary,
+                    'long_short_ratio': metrics.long_short_ratio,
+                    'oi_history': metrics.oi_history,
+                    'funding_rate_history': metrics.funding_rate_history
+                }
+        except Exception as e:
+            logger.warning(f"Failed to preload {symbol}: {e}")
+    
+    logger.info(f"Preloaded {len(results)} symbols: {list(results.keys())}")
+    return results
+
+
+def get_market_sentiment_summary(fetcher: Optional[CoinglassDataFetcher] = None) -> Dict[str, Any]:
+    """
+    获取市场整体情绪汇总（基于主流币种数据）
+    
+    返回：
+    - overall_fear_greed: 恐惧贪婪指数
+    - btc_dominance: BTC清算主导方向
+    - eth_dominance: ETH清算主导方向  
+    - major_ls_bias: 主流币种多空比平均偏向
+    - funding_sentiment: 资金费率整体情绪
+    """
+    if fetcher is None:
+        fetcher = get_coinglass_fetcher()
+    
+    if not fetcher.is_enabled():
+        return {}
+    
+    # 预加载数据（会使用缓存）
+    preloaded = preload_major_symbols_data(fetcher)
+    
+    summary = {
+        'fear_greed': None,
+        'btc_liquidation_dominance': None,
+        'eth_liquidation_dominance': None,
+        'major_ls_bias': None,
+        'major_funding_avg': None,
+        'symbols_analyzed': list(preloaded.keys())
+    }
+    
+    # 恐惧贪婪指数
+    fg_cache_key = "fear_greed_global"
+    if fg_cache_key in _coinglass_cache:
+        fg_data = _coinglass_cache[fg_cache_key]
+        if fg_data:
+            # fg_data可能是列表或字典
+            if isinstance(fg_data, list) and len(fg_data) > 0:
+                summary['fear_greed'] = fg_data[0].get('value')
+            elif isinstance(fg_data, dict):
+                summary['fear_greed'] = fg_data.get('value') or fg_data.get('fear_greed_value')
+    
+    # BTC/ETH清算主导
+    for sym in ['BTC', 'ETH']:
+        if sym in preloaded:
+            liq = preloaded[sym].get('liquidation_summary', {})
+            if liq:
+                long_ratio = liq.get('long_ratio', 0.5)
+                if long_ratio > 0.6:
+                    summary[f'{sym.lower()}_liquidation_dominance'] = 'LONG'
+                elif long_ratio < 0.4:
+                    summary[f'{sym.lower()}_liquidation_dominance'] = 'SHORT'
+                else:
+                    summary[f'{sym.lower()}_liquidation_dominance'] = 'NEUTRAL'
+    
+    # 主流币种多空比平均
+    ls_values = []
+    for sym, data in preloaded.items():
+        ls = data.get('long_short_ratio', {})
+        if ls:
+            # long_percent是百分比（0-100），转换为比率（0-1）
+            long_pct = ls.get('long_percent')
+            if long_pct is not None:
+                ls_values.append(long_pct / 100)
+    
+    if ls_values:
+        avg_ls = sum(ls_values) / len(ls_values)
+        if avg_ls > 0.55:
+            summary['major_ls_bias'] = 'LONG_CROWDED'
+        elif avg_ls < 0.45:
+            summary['major_ls_bias'] = 'SHORT_CROWDED'
+        else:
+            summary['major_ls_bias'] = 'BALANCED'
+        summary['major_ls_avg'] = round(avg_ls, 3)
+    
+    # 资金费率平均
+    fr_values = []
+    for sym, data in preloaded.items():
+        fr = data.get('funding_rate_history', {})
+        if fr and 'current_rate' in fr:
+            fr_values.append(fr['current_rate'])
+    
+    if fr_values:
+        avg_fr = sum(fr_values) / len(fr_values)
+        summary['major_funding_avg'] = round(avg_fr * 100, 4)  # 转为百分比
+        if avg_fr > 0.0005:  # 0.05%
+            summary['funding_sentiment'] = 'VERY_BULLISH'
+        elif avg_fr > 0.0001:  # 0.01%
+            summary['funding_sentiment'] = 'BULLISH'
+        elif avg_fr < -0.0005:
+            summary['funding_sentiment'] = 'VERY_BEARISH'
+        elif avg_fr < -0.0001:
+            summary['funding_sentiment'] = 'BEARISH'
+        else:
+            summary['funding_sentiment'] = 'NEUTRAL'
+    
+    logger.info(f"Market sentiment: FG={summary.get('fear_greed')}, LS={summary.get('major_ls_bias')}, FR={summary.get('funding_sentiment')}")
+    return summary

@@ -982,6 +982,109 @@ class SignalEnhancer:
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
     
     # ========================================
+    # 市场整体情绪评估（主流币种汇总）
+    # ========================================
+    
+    def eval_market_sentiment(
+        self,
+        market_sentiment: Dict,
+        decision: Decision
+    ) -> EnhancementResult:
+        """
+        评估市场整体情绪（基于主流币种数据汇总）
+        
+        逻辑：
+        - 主流币种多空比一致性 → 强化/惩罚信号
+        - 资金费率整体方向 → 趋势确认
+        - BTC/ETH清算主导 → 市场情绪指引
+        
+        Args:
+            market_sentiment: 市场情绪汇总数据
+            decision: 当前决策
+        
+        Returns:
+            EnhancementResult
+        """
+        tags = []
+        confidence_boost = 0
+        signal_quality = 'neutral'
+        details = {'source': 'market_sentiment'}
+        
+        if not market_sentiment:
+            return EnhancementResult(tags, confidence_boost, signal_quality, details)
+        
+        # 1. 主流币种多空比一致性
+        major_ls_bias = market_sentiment.get('major_ls_bias')
+        major_ls_avg = market_sentiment.get('major_ls_avg')
+        
+        if major_ls_bias:
+            details['major_ls_bias'] = major_ls_bias
+            details['major_ls_avg'] = major_ls_avg
+            
+            if major_ls_bias == 'LONG_CROWDED':
+                if decision == Decision.SHORT:
+                    # 做空时市场拥挤多头 → 逆向加分
+                    confidence_boost += 5
+                    tags.append(ReasonTag.CROWDED_LONG_CONTRARIAN)
+                    details['ls_signal'] = 'market_long_crowded_short_favorable'
+                    signal_quality = 'moderate'
+                elif decision == Decision.LONG:
+                    # 做多时市场已拥挤多头 → 惩罚
+                    confidence_boost -= 3
+                    details['ls_signal'] = 'market_long_crowded_long_risky'
+                    signal_quality = 'weak'
+            
+            elif major_ls_bias == 'SHORT_CROWDED':
+                if decision == Decision.LONG:
+                    # 做多时市场拥挤空头 → 逆向加分
+                    confidence_boost += 5
+                    tags.append(ReasonTag.CROWDED_SHORT_CONTRARIAN)
+                    details['ls_signal'] = 'market_short_crowded_long_favorable'
+                    signal_quality = 'moderate'
+                elif decision == Decision.SHORT:
+                    # 做空时市场已拥挤空头 → 惩罚
+                    confidence_boost -= 3
+                    details['ls_signal'] = 'market_short_crowded_short_risky'
+                    signal_quality = 'weak'
+        
+        # 2. 资金费率整体趋势
+        funding_sentiment = market_sentiment.get('funding_sentiment')
+        if funding_sentiment:
+            details['funding_sentiment'] = funding_sentiment
+            
+            if funding_sentiment in ['VERY_BULLISH', 'BULLISH'] and decision == Decision.LONG:
+                # 顺势但可能拥挤
+                if funding_sentiment == 'VERY_BULLISH':
+                    confidence_boost -= 2  # 极端时轻微惩罚
+                    details['fr_signal'] = 'market_very_bullish_crowded_risk'
+            
+            elif funding_sentiment in ['VERY_BEARISH', 'BEARISH'] and decision == Decision.SHORT:
+                if funding_sentiment == 'VERY_BEARISH':
+                    confidence_boost -= 2
+                    details['fr_signal'] = 'market_very_bearish_crowded_risk'
+        
+        # 3. BTC清算主导方向参考
+        btc_liq = market_sentiment.get('btc_liquidation_dominance')
+        if btc_liq:
+            details['btc_liquidation'] = btc_liq
+            
+            if btc_liq == 'LONG' and decision == Decision.LONG:
+                # BTC多头被清算，市场可能反弹 → 加分
+                confidence_boost += 3
+                details['btc_signal'] = 'btc_long_liquidated_bounce_likely'
+            elif btc_liq == 'SHORT' and decision == Decision.SHORT:
+                # BTC空头被清算，市场可能回调 → 加分
+                confidence_boost += 3
+                details['btc_signal'] = 'btc_short_liquidated_pullback_likely'
+        
+        # 统计分析的币种数量
+        symbols_analyzed = market_sentiment.get('symbols_analyzed', [])
+        details['symbols_analyzed'] = symbols_analyzed
+        details['confidence_boost'] = confidence_boost
+        
+        return EnhancementResult(tags, confidence_boost, signal_quality, details)
+    
+    # ========================================
     # 综合评估入口
     # ========================================
     
@@ -1003,10 +1106,12 @@ class SignalEnhancer:
         cg_fear_greed: Optional[Dict] = None,
         cg_long_short_ratio: Optional[Dict] = None,
         cg_oi_history: Optional[Dict] = None,
-        cg_funding_history: Optional[Dict] = None
+        cg_funding_history: Optional[Dict] = None,
+        # 市场整体情绪（新增：充分利用API配额）
+        market_sentiment: Optional[Dict] = None
     ) -> EnhancementResult:
         """
-        综合评估所有增强信号（含Coinglass数据融合）
+        综合评估所有增强信号（含Coinglass数据融合 + 市场整体情绪）
         
         Args:
             funding_rate: 资金费率
@@ -1023,6 +1128,7 @@ class SignalEnhancer:
             cg_long_short_ratio: Coinglass多空比（新增）
             cg_oi_history: Coinglass OI历史（新增）
             cg_funding_history: Coinglass费率历史（新增）
+            market_sentiment: 市场整体情绪（主流币种汇总，新增）
         
         Returns:
             EnhancementResult: 综合结果
@@ -1117,14 +1223,34 @@ class SignalEnhancer:
         else:
             signal_quality = 'neutral'
         
+        # ========================================
+        # 市场整体情绪分析（主流币种汇总）
+        # ========================================
+        if market_sentiment:
+            market_result = self.eval_market_sentiment(market_sentiment, decision)
+            all_tags.extend(market_result.tags)
+            total_boost += market_result.confidence_boost
+            all_details['market_sentiment'] = market_result.details
+        
+        # 重新计算信号质量
+        if total_boost >= 15:
+            signal_quality = 'strong'
+        elif total_boost >= 5:
+            signal_quality = 'moderate'
+        elif total_boost <= -10:
+            signal_quality = 'weak'
+        else:
+            signal_quality = 'neutral'
+        
         all_details['total_boost'] = total_boost
         all_details['signal_quality'] = signal_quality
         
-        # 记录Coinglass贡献
+        # 记录Coinglass贡献（含市场情绪）
         cg_boost = sum([
             all_details.get('cg_liquidation', {}).get('confidence_boost', 0) if isinstance(all_details.get('cg_liquidation'), dict) else 0,
             all_details.get('cg_sentiment', {}).get('confidence_boost', 0) if isinstance(all_details.get('cg_sentiment'), dict) else 0,
             all_details.get('cg_oi', {}).get('confidence_boost', 0) if isinstance(all_details.get('cg_oi'), dict) else 0,
+            all_details.get('market_sentiment', {}).get('confidence_boost', 0) if isinstance(all_details.get('market_sentiment'), dict) else 0,
         ])
         all_details['coinglass_contribution'] = cg_boost
         
