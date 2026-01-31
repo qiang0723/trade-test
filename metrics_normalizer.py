@@ -93,17 +93,18 @@ class MetricsNormalizer:
     SUSPICIOUS_HIGH_THRESHOLD = 1000.0  # 百分比点格式：>1000% 视为异常
     SUSPICIOUS_LOW_THRESHOLD = 0.0001  # 小于0.0001视为可疑
     
-    # 范围校验配置（小数格式）
+    # P0-BugFix-1: 放宽RANGE_LIMITS为硬限制（仅防止明显错误）
+    # 业务合理范围校验下放到DataValidator
     RANGE_LIMITS = {
-        'price_change_5m': 0.05,    # 5分钟 ±5%
-        'price_change_15m': 0.10,   # 15分钟 ±10%
-        'price_change_1h': 0.20,    # 1小时 ±20%
-        'price_change_6h': 0.50,    # 6小时 ±50%
-        'oi_change_15m': 0.50,      # 15分钟 ±50%
-        'oi_change_1h': 1.0,        # 1小时 ±100%
-        'oi_change_6h': 2.0,        # 6小时 ±200%
-        'funding_rate': 0.01,       # 单次费率 ±1%
-        'volume_ratio': (0, 50),    # 0到50倍
+        'price_change_5m': 1.0,     # 5分钟 ±100%（硬限制）
+        'price_change_15m': 2.0,    # 15分钟 ±200%（硬限制）
+        'price_change_1h': 5.0,     # 1小时 ±500%（硬限制）
+        'price_change_6h': 10.0,    # 6小时 ±1000%（硬限制）
+        'oi_change_15m': 5.0,       # 15分钟 ±500%（硬限制）
+        'oi_change_1h': 10.0,       # 1小时 ±1000%（硬限制）
+        'oi_change_6h': 20.0,       # 6小时 ±2000%（硬限制）
+        'funding_rate': 0.10,       # 单次费率 ±10%（硬限制）
+        'volume_ratio': (0, 100),   # 0到100倍（硬限制）
         'price': (0, float('inf')), # 必须为正
     }
     
@@ -131,6 +132,49 @@ class MetricsNormalizer:
             if re.match(pattern, field_name):
                 return True
         return False
+    
+    def _infer_percentage_format(self, data: Dict) -> Optional[str]:
+        """
+        P0-BugFix-4: 使用heuristic推断百分比格式
+        
+        规则：
+        - 如果任何百分比字段的 abs(value) >= 1.0 → percent_point
+          （因为decimal格式下 >=1.0 意味着 >=100%，极其罕见）
+        - 如果所有百分比字段的 abs(value) < 1.0 → decimal
+        - 如果没有百分比字段 → 返回None
+        
+        Args:
+            data: 原始数据字典
+        
+        Returns:
+            推断的格式（'percent_point', 'decimal', 或 None）
+        """
+        percent_fields_found = []
+        
+        for field_name, value in data.items():
+            if field_name.startswith('_'):
+                continue
+            if self._is_percentage_field(field_name) and value is not None:
+                try:
+                    numeric_value = float(value)
+                    percent_fields_found.append((field_name, numeric_value))
+                except (TypeError, ValueError):
+                    continue
+        
+        if not percent_fields_found:
+            return None
+        
+        # 检查是否有 abs(value) >= 1.0
+        has_large_value = any(abs(v) >= 1.0 for _, v in percent_fields_found)
+        
+        if has_large_value:
+            # 有>=1.0的值，更可能是percent_point
+            logger.debug(f"Heuristic: 检测到>=1.0的值，推断为percent_point")
+            return 'percent_point'
+        else:
+            # 所有值<1.0，更可能是decimal
+            logger.debug(f"Heuristic: 所有值<1.0，推断为decimal")
+            return 'decimal'
     
     @classmethod
     def _is_positive_field(cls, field_name: str) -> bool:
@@ -172,12 +216,20 @@ class MetricsNormalizer:
                 return normalized, False, error_msg, trace
             
             elif self.metadata_policy == MetadataPolicy.WARN:
-                logger.warning(
-                    "数据缺失 _metadata.percentage_format，假设为 'percent_point'（向后兼容）。"
-                    "建议：确保数据源层（MarketDataCache/BinanceDataFetcher）正确注入元数据。"
-                )
-                input_format = 'percent_point'
-                trace.metadata_policy_applied = 'WARN_ASSUME_PERCENT_POINT'
+                # P0-BugFix-4: 使用heuristic推断格式
+                inferred_format = self._infer_percentage_format(data)
+                if inferred_format:
+                    input_format = inferred_format
+                    trace.metadata_policy_applied = f'HEURISTIC_INFERRED_{inferred_format.upper()}'
+                    logger.info(f"元数据缺失，heuristic推断格式为: {inferred_format}")
+                else:
+                    # heuristic无法确定，回退到percent_point
+                    logger.warning(
+                        "数据缺失 _metadata.percentage_format，heuristic无法确定，假设为 'percent_point'（向后兼容）。"
+                        "建议：确保数据源层（MarketDataCache/BinanceDataFetcher）正确注入元数据。"
+                    )
+                    input_format = 'percent_point'
+                    trace.metadata_policy_applied = 'WARN_ASSUME_PERCENT_POINT'
             
             else:  # ASSUME_PERCENT_POINT
                 input_format = 'percent_point'
