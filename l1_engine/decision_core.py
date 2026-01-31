@@ -323,22 +323,25 @@ class DecisionCore:
                 metrics['price_change_1h'] = round(mf.price.price_change_1h * 100, 2) if mf.price.price_change_1h else None
                 metrics['price_change_24h'] = round(mf.price.price_change_24h * 100, 2) if mf.price.price_change_24h else None
             
-            # 资金费率
-            if mf.derivatives:
-                metrics['funding_rate'] = round(mf.derivatives.funding_rate * 100, 4) if mf.derivatives.funding_rate else None
-                metrics['oi_change_1h'] = round(mf.derivatives.oi_change_1h * 100, 2) if mf.derivatives.oi_change_1h else None
+            # 资金费率（从funding获取）
+            if mf.funding:
+                metrics['funding_rate'] = round(mf.funding.funding_rate * 100, 4) if mf.funding.funding_rate else None
             
-            # 多空比
-            if mf.sentiment:
-                metrics['top_long_ratio'] = round(mf.sentiment.top_long_ratio * 100, 1) if mf.sentiment.top_long_ratio else None
-                metrics['retail_long_ratio'] = round(mf.sentiment.retail_long_ratio * 100, 1) if mf.sentiment.retail_long_ratio else None
+            # OI变化（从open_interest获取）
+            if mf.open_interest:
+                metrics['oi_change_1h'] = round(mf.open_interest.oi_change_1h * 100, 2) if mf.open_interest.oi_change_1h else None
             
-            # Taker失衡
-            if mf.order_flow:
+            # 多空比（从top_trader获取）
+            if mf.top_trader:
+                metrics['top_long_ratio'] = round(mf.top_trader.top_long_ratio * 100, 1) if mf.top_trader.top_long_ratio else None
+                metrics['retail_long_ratio'] = round(mf.top_trader.retail_long_ratio * 100, 1) if mf.top_trader.retail_long_ratio else None
+            
+            # Taker失衡（从taker_imbalance获取）
+            if mf.taker_imbalance:
                 if timeframe == Timeframe.SHORT_TERM:
-                    metrics['taker_imbalance'] = round(mf.order_flow.taker_imbalance_5m * 100, 1) if mf.order_flow.taker_imbalance_5m else None
+                    metrics['taker_imbalance'] = round(mf.taker_imbalance.taker_imbalance_5m * 100, 1) if mf.taker_imbalance.taker_imbalance_5m else None
                 else:
-                    metrics['taker_imbalance'] = round(mf.order_flow.taker_imbalance_1h * 100, 1) if mf.order_flow.taker_imbalance_1h else None
+                    metrics['taker_imbalance'] = round(mf.taker_imbalance.taker_imbalance_1h * 100, 1) if mf.taker_imbalance.taker_imbalance_1h else None
             
             # 成交量
             if mf.volume:
