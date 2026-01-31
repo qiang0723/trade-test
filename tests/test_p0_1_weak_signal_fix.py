@@ -37,6 +37,7 @@ def test_weak_signal_not_blocked_by_poor():
     engine = L1AdvisoryEngine()
     
     # 构造 RANGE + weak_signal_in_range 场景
+    # 注意：使用decimal格式（0.005 = 0.5%）
     data = {
         'price': 50000,
         'price_change_1h': 0.005,   # 0.5% (弱信号)
@@ -46,8 +47,8 @@ def test_weak_signal_not_blocked_by_poor():
         'buy_sell_imbalance': 0.5,  # 弱失衡 (< 0.6)
         'funding_rate': 0.0001,
         'oi_change_1h': 0.08,       # 8% (< 10%弱信号)
-        'oi_change_6h': 0.15
-        # 不提供timestamp，跳过新鲜度检查
+        'oi_change_6h': 0.15,
+        '_metadata': {'percentage_format': 'decimal'}  # 避免格式转换
     }
     
     result = engine.on_new_tick('TEST', data)
@@ -99,17 +100,21 @@ def test_weak_signal_enters_execution_permission():
     engine = L1AdvisoryEngine()
     
     # 构造强信号 + RANGE + weak_signal 场景
+    # 关键：imbalance和oi需要满足方向条件但触发weak_signal
+    # LONG条件：imbalance > 0.06 AND oi_change > 0.002
+    # weak_signal条件：|imbalance| < 0.6 AND |oi_change| < 0.10
+    # 所以需要：0.06 < imbalance < 0.6 AND 0.002 < oi_change < 0.10
     data = {
         'price': 50000,
         'price_change_1h': 0.012,   # 1.2% (中等信号)
         'price_change_6h': 0.02,    # 2% (RANGE)
         'volume_1h': 2000000,
         'volume_24h': 24000000,
-        'buy_sell_imbalance': 0.55, # 弱失衡 (< 0.6，触发weak_signal)
+        'buy_sell_imbalance': 0.55, # 满足: 0.06 < 0.55 < 0.6
         'funding_rate': 0.0001,
-        'oi_change_1h': 0.09,       # 9% (< 10%，触发weak_signal)
-        'oi_change_6h': 0.20        # 20%
-        # 不提供timestamp，跳过新鲜度检查
+        'oi_change_1h': 0.09,       # 满足: 0.002 < 0.09 < 0.10
+        'oi_change_6h': 0.20,       # 20%
+        '_metadata': {'percentage_format': 'decimal'}  # 避免格式转换
     }
     
     result = engine.on_new_tick('TEST', data)
@@ -171,11 +176,11 @@ def test_weak_signal_consistent_with_noisy_market():
         'buy_sell_imbalance': 0.55, # < 0.6
         'funding_rate': 0.0001,
         'oi_change_1h': 0.08,       # < 0.10
-        'oi_change_6h': 0.15
-        # 不提供timestamp，跳过新鲜度检查
+        'oi_change_6h': 0.15,
+        '_metadata': {'percentage_format': 'decimal'}
     }
     
-    result_weak = engine.generate_advisory('TEST', data_weak)
+    result_weak = engine.on_new_tick('TEST', data_weak)
     
     print(f"\nWEAK_SIGNAL_IN_RANGE:")
     print(f"  质量: {result_weak.trade_quality.value}")
@@ -216,11 +221,11 @@ def test_poor_quality_still_blocks():
         'buy_sell_imbalance': 0.75, # 高失衡 (> 0.7)
         'funding_rate': 0.0001,
         'oi_change_1h': 0.05,
-        'oi_change_6h': 0.10
-        # 不提供timestamp，跳过新鲜度检查
+        'oi_change_6h': 0.10,
+        '_metadata': {'percentage_format': 'decimal'}
     }
     
-    result_absorption = engine.generate_advisory('TEST', data_absorption)
+    result_absorption = engine.on_new_tick('TEST', data_absorption)
     
     print(f"\nABSORPTION_RISK:")
     print(f"  决策: {result_absorption.decision.value}")

@@ -65,6 +65,10 @@ class ThresholdCompiler:
         """
         编译配置文件
         
+        P1-01修复：支持部分配置
+        - 先加载默认配置（config/l1_thresholds.yaml）作为base
+        - 再用用户配置进行deep-merge覆盖
+        
         Args:
             config_path: YAML配置文件路径
         
@@ -76,8 +80,21 @@ class ThresholdCompiler:
         """
         logger.info(f"Compiling config from: {config_path}")
         
-        # 1. 读取YAML
-        raw = self._load_yaml(config_path)
+        # P1-01: 先加载默认配置作为base
+        default_config_path = Path(__file__).parent.parent / 'config' / 'l1_thresholds.yaml'
+        raw = {}
+        
+        if default_config_path.exists() and str(default_config_path) != config_path:
+            try:
+                base_raw = self._load_yaml(str(default_config_path))
+                raw = base_raw.copy()
+                logger.debug(f"Loaded base config from: {default_config_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load base config: {e}")
+        
+        # 1. 读取用户YAML并deep-merge
+        user_raw = self._load_yaml(config_path)
+        raw = self._deep_merge(raw, user_raw)
         
         # 2. 键名迁移
         self._migrate_keys(raw)
@@ -120,6 +137,31 @@ class ThresholdCompiler:
             raise ConfigValidationError(f"Invalid YAML syntax: {e}")
         except Exception as e:
             raise ConfigValidationError(f"Failed to load config: {e}")
+    
+    def _deep_merge(self, base: Dict, override: Dict) -> Dict:
+        """
+        P1-01: 递归深度合并两个字典
+        
+        override中的值会覆盖base中的对应值
+        
+        Args:
+            base: 基础字典
+            override: 覆盖字典
+            
+        Returns:
+            合并后的字典
+        """
+        result = base.copy()
+        
+        for key, value in override.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                # 递归合并嵌套字典
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                # 覆盖值
+                result[key] = value
+        
+        return result
     
     def _migrate_keys(self, raw: Dict[str, Any]) -> None:
         """

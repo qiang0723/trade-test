@@ -123,8 +123,11 @@ class DecisionCore:
             features, decision, thresholds
         )
         
+        # P0-06: OI辅助标签补齐
+        auxiliary_tags = DecisionCore._eval_auxiliary_tags(features, thresholds)
+        
         # 收集所有标签（Step 8和9需要）
-        all_tags = regime_tags + risk_tags + quality_tags + long_tags + short_tags + direction_tags + funding_tags + enhancement_tags
+        all_tags = regime_tags + risk_tags + quality_tags + long_tags + short_tags + direction_tags + funding_tags + enhancement_tags + auxiliary_tags
         
         # Step 8: 执行权限判断（P0-04: 完全由ReasonTagRules驱动）
         execution_permission = DecisionCore._determine_execution_permission(
@@ -1319,6 +1322,47 @@ class DecisionCore:
             logger.warning(f"Failed to fetch Coinglass data: {e}\n{traceback.format_exc()}")
         
         return cg_data, market_sentiment
+    
+    # ========================================
+    # P0-06: OI辅助标签评估
+    # ========================================
+    
+    @staticmethod
+    def _eval_auxiliary_tags(
+        features: FeatureSnapshot,
+        thresholds: Thresholds
+    ) -> List[ReasonTag]:
+        """
+        P0-06: 评估OI辅助标签
+        
+        根据oi_change_1h添加OI_GROWING或OI_DECLINING标签
+        
+        Args:
+            features: 特征快照
+            thresholds: 阈值配置
+            
+        Returns:
+            辅助标签列表
+        """
+        auxiliary_tags = []
+        
+        # 获取oi_change_1h
+        oi_change_1h = features.features.open_interest.oi_change_1h if features.features.open_interest else None
+        
+        if oi_change_1h is None:
+            return auxiliary_tags
+        
+        # 获取阈值
+        oi_growing_threshold = thresholds.auxiliary_tags.oi_growing_threshold
+        oi_declining_threshold = thresholds.auxiliary_tags.oi_declining_threshold
+        
+        # 判断并添加标签
+        if oi_change_1h > oi_growing_threshold:
+            auxiliary_tags.append(ReasonTag.OI_GROWING)
+        elif oi_change_1h < oi_declining_threshold:
+            auxiliary_tags.append(ReasonTag.OI_DECLINING)
+        
+        return auxiliary_tags
     
     # ========================================
     # Step 8: 执行权限判断

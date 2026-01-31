@@ -23,7 +23,7 @@ print("="*70)
 
 engine = L1AdvisoryEngine()
 
-# 基础数据模板
+# 基础数据模板（使用decimal格式避免转换）
 base_data = {
     'price': 50000,
     'volume_1h': 1000000,
@@ -32,7 +32,8 @@ base_data = {
     'price_change_6h': 0.01,
     'oi_change_6h': 0.10,
     'funding_rate': 0.0001,
-    'buy_sell_imbalance': 0.5
+    'buy_sell_imbalance': 0.5,
+    '_metadata': {'percentage_format': 'decimal'}  # P0修复：避免格式转换
 }
 
 # ==================== 验收1: OI_GROWING 正确触发 ====================
