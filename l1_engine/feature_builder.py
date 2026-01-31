@@ -125,14 +125,47 @@ class FeatureBuilder:
         
         return snapshot
     
+    # ========================================
+    # P2-2: 异常值处理配置
+    # ========================================
+    
+    # 异常值阈值配置（分级处理）
+    OUTLIER_CONFIG = {
+        'price_change': {
+            'soft_limit': 0.15,   # 15%: 软限制（警告+cap）
+            'hard_limit': 0.50,   # 50%: 硬限制（严重异常）
+            'extreme_limit': 1.0, # 100%: 极端异常（可能数据错误）
+        },
+        'oi_change': {
+            'soft_limit': 0.20,   # 20%: 软限制
+            'hard_limit': 0.50,   # 50%: 硬限制
+            'extreme_limit': 1.0, # 100%: 极端异常
+        },
+        'funding_rate': {
+            'soft_limit': 0.01,   # 1%: 软限制（费率通常<0.1%）
+            'hard_limit': 0.03,   # 3%: 硬限制（极端市场）
+            'extreme_limit': 0.05,# 5%: 极端异常
+        },
+        'taker_imbalance': {
+            'soft_limit': 0.70,   # 70%: 软限制
+            'hard_limit': 0.90,   # 90%: 硬限制
+            'extreme_limit': 1.0, # 100%: 极端异常
+        },
+    }
+    
     def _validate_core_fields(self, features: MarketFeatures, symbol: str) -> Tuple[bool, List]:
         """
-        验证核心必需字段（P1-01 DataValidity增强）
+        验证核心必需字段（P2-2增强版：分级异常处理）
         
         三层校验：
         1. 缺失校验（None）：DATA_MISSING_*
         2. 无效值校验（<=0）：DATA_INVALID_*（阻断）
-        3. 异常值校验（outlier）：DATA_OUTLIER_*（降级+cap）
+        3. 异常值校验（outlier）：DATA_OUTLIER_*（分级处理+cap）
+        
+        异常值分级处理：
+        - soft_limit: 警告 + cap到软限制
+        - hard_limit: 严重警告 + cap到硬限制 + 降级标签
+        - extreme_limit: 错误 + 置信度强制降低
         
         Args:
             features: 提取的特征
@@ -145,6 +178,7 @@ class FeatureBuilder:
         
         validation_tags = []
         is_valid = True
+        outlier_corrections = []  # 记录异常值修正
         
         # ========== 1. Price校验 ==========
         if features.price is None or features.price.current_price is None:
@@ -163,7 +197,7 @@ class FeatureBuilder:
         elif features.volume.volume_24h <= 0:
             logger.error(f"[{symbol}] INVALID volume_24h: {features.volume.volume_24h} <= 0")
             validation_tags.append(ReasonTag.DATA_INVALID_VOLUME)
-            is_valid = False  # 成交量无效也阻断
+            is_valid = False
         
         # ========== 3. Open Interest校验 ==========
         if features.open_interest is None or features.open_interest.current_oi is None:
@@ -172,62 +206,128 @@ class FeatureBuilder:
         elif features.open_interest.current_oi <= 0:
             logger.error(f"[{symbol}] INVALID open_interest: {features.open_interest.current_oi} <= 0")
             validation_tags.append(ReasonTag.DATA_INVALID_OI)
-            is_valid = False  # 持仓量无效也阻断
+            is_valid = False
         
-        # ========== 4. Funding Rate校验 ==========
+        # ========== 4. Funding Rate异常值分级处理 ==========
         if features.funding is None or features.funding.funding_rate is None:
             logger.warning(f"[{symbol}] Missing important field: funding_rate")
             validation_tags.append(ReasonTag.DATA_MISSING_FUNDING_RATE)
         else:
-            # 资金费率异常值检测：通常在[-0.01, 0.01]范围内，超过0.05视为异常
             funding = features.funding.funding_rate
-            if abs(funding) > 0.05:  # 5%是极端异常值
-                logger.warning(f"[{symbol}] OUTLIER funding_rate: {funding} (>5%)")
+            config = self.OUTLIER_CONFIG['funding_rate']
+            
+            if abs(funding) > config['extreme_limit']:
+                # 极端异常：cap到极端限制
+                capped = config['extreme_limit'] if funding > 0 else -config['extreme_limit']
+                outlier_corrections.append(f"funding_rate: {funding:.4f} → {capped:.4f} (extreme)")
+                features.funding.funding_rate = capped
                 validation_tags.append(ReasonTag.DATA_OUTLIER_FUNDING_RATE)
+                logger.error(f"[{symbol}] EXTREME funding_rate: {funding:.4f}, capped to {capped:.4f}")
+            elif abs(funding) > config['hard_limit']:
+                # 硬限制：cap + 降级标签
+                capped = config['hard_limit'] if funding > 0 else -config['hard_limit']
+                outlier_corrections.append(f"funding_rate: {funding:.4f} → {capped:.4f} (hard)")
+                features.funding.funding_rate = capped
+                validation_tags.append(ReasonTag.DATA_OUTLIER_FUNDING_RATE)
+                logger.warning(f"[{symbol}] HARD funding_rate: {funding:.4f}, capped to {capped:.4f}")
+            elif abs(funding) > config['soft_limit']:
+                # 软限制：警告但不修正
+                logger.info(f"[{symbol}] SOFT funding_rate: {funding:.4f} (>{config['soft_limit']})")
         
-        # ========== 5. Taker Imbalance校验 ==========
+        # ========== 5. Taker Imbalance异常值分级处理 ==========
         if features.taker_imbalance is None or features.taker_imbalance.taker_imbalance_1h is None:
             logger.debug(f"[{symbol}] Missing auxiliary field: taker_imbalance_1h")
             validation_tags.append(ReasonTag.DATA_MISSING_TAKER_IMBALANCE)
         else:
-            # taker失衡异常值检测：通常在[-1, 1]范围内
-            imbalance = features.taker_imbalance.taker_imbalance_1h
-            if abs(imbalance) > 1.0:  # 超过100%视为异常
-                logger.warning(f"[{symbol}] OUTLIER taker_imbalance_1h: {imbalance} (>100%)")
-                validation_tags.append(ReasonTag.DATA_OUTLIER_TAKER_IMBALANCE)
+            for field_name in ['taker_imbalance_5m', 'taker_imbalance_15m', 'taker_imbalance_1h']:
+                imbalance = getattr(features.taker_imbalance, field_name, None)
+                if imbalance is None:
+                    continue
+                    
+                config = self.OUTLIER_CONFIG['taker_imbalance']
+                
+                if abs(imbalance) > config['extreme_limit']:
+                    capped = config['extreme_limit'] if imbalance > 0 else -config['extreme_limit']
+                    outlier_corrections.append(f"{field_name}: {imbalance:.3f} → {capped:.3f} (extreme)")
+                    setattr(features.taker_imbalance, field_name, capped)
+                    if ReasonTag.DATA_OUTLIER_TAKER_IMBALANCE not in validation_tags:
+                        validation_tags.append(ReasonTag.DATA_OUTLIER_TAKER_IMBALANCE)
+                    logger.error(f"[{symbol}] EXTREME {field_name}: {imbalance:.3f}, capped to {capped:.3f}")
+                elif abs(imbalance) > config['hard_limit']:
+                    capped = config['hard_limit'] if imbalance > 0 else -config['hard_limit']
+                    outlier_corrections.append(f"{field_name}: {imbalance:.3f} → {capped:.3f} (hard)")
+                    setattr(features.taker_imbalance, field_name, capped)
+                    if ReasonTag.DATA_OUTLIER_TAKER_IMBALANCE not in validation_tags:
+                        validation_tags.append(ReasonTag.DATA_OUTLIER_TAKER_IMBALANCE)
+                    logger.warning(f"[{symbol}] HARD {field_name}: {imbalance:.3f}, capped to {capped:.3f}")
         
-        # ========== 6. Price Change异常值校验 ==========
-        price_changes = [
-            ('5m', features.price.price_change_5m if features.price else None),
-            ('15m', features.price.price_change_15m if features.price else None),
-            ('1h', features.price.price_change_1h if features.price else None),
-            ('6h', features.price.price_change_6h if features.price else None),
-        ]
-        for window, change in price_changes:
-            if change is not None and abs(change) > 1.0:  # 超过100%视为异常
-                logger.warning(f"[{symbol}] OUTLIER price_change_{window}: {change} (>100%)")
-                if ReasonTag.DATA_OUTLIER_PRICE_CHANGE not in validation_tags:
-                    validation_tags.append(ReasonTag.DATA_OUTLIER_PRICE_CHANGE)
-                break  # 只记录一次
+        # ========== 6. Price Change异常值分级处理 ==========
+        if features.price:
+            config = self.OUTLIER_CONFIG['price_change']
+            price_fields = [
+                ('price_change_5m', features.price.price_change_5m),
+                ('price_change_15m', features.price.price_change_15m),
+                ('price_change_1h', features.price.price_change_1h),
+                ('price_change_6h', features.price.price_change_6h),
+                ('price_change_24h', features.price.price_change_24h),
+            ]
+            
+            for field_name, change in price_fields:
+                if change is None:
+                    continue
+                    
+                if abs(change) > config['extreme_limit']:
+                    capped = config['extreme_limit'] if change > 0 else -config['extreme_limit']
+                    outlier_corrections.append(f"{field_name}: {change:.4f} → {capped:.4f} (extreme)")
+                    setattr(features.price, field_name, capped)
+                    if ReasonTag.DATA_OUTLIER_PRICE_CHANGE not in validation_tags:
+                        validation_tags.append(ReasonTag.DATA_OUTLIER_PRICE_CHANGE)
+                    logger.error(f"[{symbol}] EXTREME {field_name}: {change:.4f}, capped to {capped:.4f}")
+                elif abs(change) > config['hard_limit']:
+                    capped = config['hard_limit'] if change > 0 else -config['hard_limit']
+                    outlier_corrections.append(f"{field_name}: {change:.4f} → {capped:.4f} (hard)")
+                    setattr(features.price, field_name, capped)
+                    if ReasonTag.DATA_OUTLIER_PRICE_CHANGE not in validation_tags:
+                        validation_tags.append(ReasonTag.DATA_OUTLIER_PRICE_CHANGE)
+                    logger.warning(f"[{symbol}] HARD {field_name}: {change:.4f}, capped to {capped:.4f}")
         
-        # ========== 7. OI Change异常值校验 ==========
-        oi_changes = [
-            ('15m', features.open_interest.oi_change_15m if features.open_interest else None),
-            ('1h', features.open_interest.oi_change_1h if features.open_interest else None),
-            ('6h', features.open_interest.oi_change_6h if features.open_interest else None),
-        ]
-        for window, change in oi_changes:
-            if change is not None and abs(change) > 1.0:  # 超过100%视为异常
-                logger.warning(f"[{symbol}] OUTLIER oi_change_{window}: {change} (>100%)")
-                if ReasonTag.DATA_OUTLIER_OI_CHANGE not in validation_tags:
-                    validation_tags.append(ReasonTag.DATA_OUTLIER_OI_CHANGE)
-                break  # 只记录一次
+        # ========== 7. OI Change异常值分级处理 ==========
+        if features.open_interest:
+            config = self.OUTLIER_CONFIG['oi_change']
+            oi_fields = [
+                ('oi_change_15m', features.open_interest.oi_change_15m),
+                ('oi_change_1h', features.open_interest.oi_change_1h),
+                ('oi_change_6h', features.open_interest.oi_change_6h),
+            ]
+            
+            for field_name, change in oi_fields:
+                if change is None:
+                    continue
+                    
+                if abs(change) > config['extreme_limit']:
+                    capped = config['extreme_limit'] if change > 0 else -config['extreme_limit']
+                    outlier_corrections.append(f"{field_name}: {change:.4f} → {capped:.4f} (extreme)")
+                    setattr(features.open_interest, field_name, capped)
+                    if ReasonTag.DATA_OUTLIER_OI_CHANGE not in validation_tags:
+                        validation_tags.append(ReasonTag.DATA_OUTLIER_OI_CHANGE)
+                    logger.error(f"[{symbol}] EXTREME {field_name}: {change:.4f}, capped to {capped:.4f}")
+                elif abs(change) > config['hard_limit']:
+                    capped = config['hard_limit'] if change > 0 else -config['hard_limit']
+                    outlier_corrections.append(f"{field_name}: {change:.4f} → {capped:.4f} (hard)")
+                    setattr(features.open_interest, field_name, capped)
+                    if ReasonTag.DATA_OUTLIER_OI_CHANGE not in validation_tags:
+                        validation_tags.append(ReasonTag.DATA_OUTLIER_OI_CHANGE)
+                    logger.warning(f"[{symbol}] HARD {field_name}: {change:.4f}, capped to {capped:.4f}")
         
         # ========== 日志输出 ==========
+        outlier_count = sum(1 for t in validation_tags if 'outlier' in t.value)
+        missing_count = sum(1 for t in validation_tags if 'missing' in t.value)
+        
         if is_valid:
-            outlier_count = sum(1 for t in validation_tags if 'outlier' in t.value)
-            missing_count = sum(1 for t in validation_tags if 'missing' in t.value)
-            logger.debug(f"[{symbol}] Core fields validation passed (missing={missing_count}, outlier={outlier_count})")
+            if outlier_corrections:
+                logger.info(f"[{symbol}] Core fields validated with {len(outlier_corrections)} corrections: {outlier_corrections}")
+            else:
+                logger.debug(f"[{symbol}] Core fields validation passed (missing={missing_count}, outlier={outlier_count})")
         else:
             invalid_tags = [t.value for t in validation_tags if 'invalid' in t.value]
             logger.error(f"[{symbol}] Core fields validation FAILED (invalid={invalid_tags})")

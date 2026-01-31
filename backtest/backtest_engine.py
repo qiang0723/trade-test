@@ -31,6 +31,12 @@ class Position:
     entry_time: int
     size: float = 1.0  # 仓位大小（默认1个单位）
     
+    # P3-2: 环境/置信度信息
+    confidence: str = ""
+    market_regime: str = ""
+    alignment: str = ""
+    reason_tags: List[str] = field(default_factory=list)
+    
     def calculate_pnl(self, exit_price: float) -> float:
         """
         计算P&L（百分比）
@@ -65,6 +71,10 @@ class Trade:
     entry_confidence: str = ""
     entry_executable: bool = False
     entry_reason_tags: List[str] = field(default_factory=list)
+    
+    # P3-2增强：环境/置信度分类
+    market_regime: str = ""           # 市场环境：trend/range/extreme
+    timeframe_alignment: str = ""      # 周期对齐：aligned/conflict
 
 
 class BacktestEngine:
@@ -181,12 +191,17 @@ class BacktestEngine:
                 executable = result.executable
                 confidence = result.confidence.value
                 reason_tags = [tag.value for tag in result.reason_tags]
+                market_regime = result.market_regime.value if hasattr(result, 'market_regime') else ""
+                alignment = ""
             elif mode == "dual":
                 result = self.engine.on_new_tick_dual(symbol, market_data)
                 decision = result.alignment.recommended_action
                 executable = result._compute_combined_executable()
                 confidence = result.alignment.recommended_confidence.value
                 reason_tags = result._get_combined_reason_tags()
+                # P3-2: 记录市场环境和周期对齐
+                market_regime = result.medium_term.market_regime.value
+                alignment = "aligned" if result.alignment.is_aligned else "conflict"
             else:
                 raise ValueError(f"Unknown mode: {mode}")
             
@@ -211,7 +226,8 @@ class BacktestEngine:
                 if decision in [Decision.LONG, Decision.SHORT]:
                     self._open_position(
                         symbol, decision, current_price, current_time,
-                        confidence, executable, reason_tags
+                        confidence, executable, reason_tags,
+                        market_regime, alignment
                     )
             
             # 进度日志
@@ -250,7 +266,9 @@ class BacktestEngine:
         timestamp: int,
         confidence: str,
         executable: bool,
-        reason_tags: List[str]
+        reason_tags: List[str],
+        market_regime: str = "",
+        alignment: str = ""
     ):
         """开仓"""
         # 考虑滑点
@@ -268,11 +286,15 @@ class BacktestEngine:
             direction=direction,
             entry_price=entry_price,
             entry_time=timestamp,
-            size=size
+            size=size,
+            confidence=confidence,
+            market_regime=market_regime,
+            alignment=alignment,
+            reason_tags=reason_tags
         )
         
         logger.debug(f"Open {direction.value} at {entry_price:.2f}, size={size:.4f}, "
-                    f"confidence={confidence}")
+                    f"confidence={confidence}, regime={market_regime}")
     
     def _close_position(
         self,
@@ -299,7 +321,7 @@ class BacktestEngine:
         commission = position_value * self.commission_rate
         self.capital += pnl_amount - commission
         
-        # 记录交易
+        # 记录交易（P3-2: 包含环境/置信度信息）
         trade = Trade(
             symbol=symbol,
             direction=self.position.direction,
@@ -309,7 +331,12 @@ class BacktestEngine:
             exit_price=exit_price,
             pnl=pnl_pct,
             pnl_amount=pnl_amount - commission,
-            reason=reason
+            reason=reason,
+            entry_confidence=self.position.confidence,
+            entry_executable=True,
+            entry_reason_tags=self.position.reason_tags,
+            market_regime=self.position.market_regime,
+            timeframe_alignment=self.position.alignment
         )
         self.trades.append(trade)
         
@@ -443,6 +470,9 @@ class BacktestEngine:
         else:
             buy_hold_return = 0.0
         
+        # P3-2: 分类绩效分析
+        categorized = self._calculate_categorized_performance()
+        
         return {
             'total_trades': total_trades,
             'winning_trades': len(winning_trades),
@@ -456,5 +486,63 @@ class BacktestEngine:
             'excess_return': total_return - buy_hold_return,
             'sharpe_ratio': sharpe_ratio,
             'max_drawdown': max_drawdown,
-            'final_capital': self.capital
+            'final_capital': self.capital,
+            # P3-2: 分类绩效
+            'by_confidence': categorized['by_confidence'],
+            'by_regime': categorized['by_regime'],
+            'by_alignment': categorized['by_alignment'],
+            'by_direction': categorized['by_direction']
+        }
+    
+    def _calculate_categorized_performance(self) -> Dict:
+        """
+        P3-2: 按环境/置信度/对齐分类计算绩效
+        
+        Returns:
+            分类绩效字典
+        """
+        from collections import defaultdict
+        
+        def calc_stats(trades_list: List[Trade]) -> Dict:
+            """计算一组交易的统计"""
+            if not trades_list:
+                return {'count': 0, 'win_rate': 0.0, 'avg_pnl': 0.0, 'total_pnl': 0.0}
+            
+            wins = [t for t in trades_list if t.pnl > 0]
+            return {
+                'count': len(trades_list),
+                'win_rate': len(wins) / len(trades_list),
+                'avg_pnl': sum(t.pnl for t in trades_list) / len(trades_list),
+                'total_pnl': sum(t.pnl for t in trades_list)
+            }
+        
+        # 按置信度分组
+        by_confidence = defaultdict(list)
+        for t in self.trades:
+            conf = t.entry_confidence.lower() if t.entry_confidence else 'unknown'
+            by_confidence[conf].append(t)
+        
+        # 按市场环境分组
+        by_regime = defaultdict(list)
+        for t in self.trades:
+            regime = t.market_regime.lower() if t.market_regime else 'unknown'
+            by_regime[regime].append(t)
+        
+        # 按周期对齐分组
+        by_alignment = defaultdict(list)
+        for t in self.trades:
+            align = t.timeframe_alignment.lower() if t.timeframe_alignment else 'unknown'
+            by_alignment[align].append(t)
+        
+        # 按方向分组
+        by_direction = defaultdict(list)
+        for t in self.trades:
+            direction = t.direction.value if t.direction else 'unknown'
+            by_direction[direction].append(t)
+        
+        return {
+            'by_confidence': {k: calc_stats(v) for k, v in by_confidence.items()},
+            'by_regime': {k: calc_stats(v) for k, v in by_regime.items()},
+            'by_alignment': {k: calc_stats(v) for k, v in by_alignment.items()},
+            'by_direction': {k: calc_stats(v) for k, v in by_direction.items()}
         }

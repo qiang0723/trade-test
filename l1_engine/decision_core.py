@@ -1209,47 +1209,8 @@ class DecisionCore:
         price_change_24h = features.features.price.price_change_24h if features.features.price else None
         volume_ratio_1h = features.features.volume.volume_ratio_1h if features.features.volume else None
         
-        # ========================================
-        # Coinglass数据获取（STARTUP套餐）
-        # ========================================
-        cg_liquidation_summary = None
-        cg_fear_greed = None
-        cg_long_short_ratio = None
-        cg_oi_history = None
-        cg_funding_history = None
-        
-        # 检查是否启用Coinglass
-        cg_enabled = cg_cfg.get('enabled', False)
-        market_sentiment = None  # 市场整体情绪
-        
-        if cg_enabled:
-            try:
-                from coinglass_data_fetcher import get_coinglass_fetcher, get_market_sentiment_summary
-                cg_fetcher = get_coinglass_fetcher()  # 使用单例
-                
-                if cg_fetcher.is_enabled():
-                    # 获取当前价格用于Coinglass查询
-                    current_price = features.features.price.current_price if features.features.price else None
-                    symbol = features.symbol if hasattr(features, 'symbol') else 'BTC'
-                    
-                    # 获取完整指标
-                    cg_metrics = cg_fetcher.fetch_all_metrics(symbol, current_price)
-                    
-                    if cg_metrics:
-                        cg_liquidation_summary = cg_metrics.liquidation_summary
-                        cg_fear_greed = cg_metrics.fear_greed
-                        cg_long_short_ratio = cg_metrics.long_short_ratio
-                        cg_oi_history = cg_metrics.oi_history
-                        cg_funding_history = cg_metrics.funding_rate_history
-                    
-                    # 获取市场整体情绪（会预加载主流币种数据，充分利用API配额）
-                    market_sentiment = get_market_sentiment_summary(cg_fetcher)
-                    
-                    logger.info(f"Coinglass[{symbol}]: liq={cg_liquidation_summary is not None}, "
-                               f"fg={cg_fear_greed is not None}, market={market_sentiment.get('major_ls_bias', 'N/A')}")
-            except Exception as e:
-                import traceback
-                logger.warning(f"Failed to fetch Coinglass data: {e}\n{traceback.format_exc()}")
+        # Coinglass数据获取（通过桥接模块）
+        cg_data, market_sentiment = DecisionCore._fetch_coinglass_data(features, cg_cfg)
         
         # 综合评估（含Coinglass数据融合）
         result = enhancer.evaluate_all(
@@ -1264,13 +1225,12 @@ class DecisionCore:
             retail_long_ratio=retail_long_ratio,
             price_change_24h=price_change_24h,
             volume_ratio_1h=volume_ratio_1h,
-            # Coinglass数据
-            cg_liquidation_summary=cg_liquidation_summary,
-            cg_fear_greed=cg_fear_greed,
-            cg_long_short_ratio=cg_long_short_ratio,
-            cg_oi_history=cg_oi_history,
-            cg_funding_history=cg_funding_history,
-            # 市场整体情绪（新增：充分利用API配额）
+            # Coinglass数据（通过桥接模块获取）
+            cg_liquidation_summary=cg_data.get('liquidation_summary'),
+            cg_fear_greed=cg_data.get('fear_greed'),
+            cg_long_short_ratio=cg_data.get('long_short_ratio'),
+            cg_oi_history=cg_data.get('oi_history'),
+            cg_funding_history=cg_data.get('funding_history'),
             market_sentiment=market_sentiment
         )
         
@@ -1280,6 +1240,55 @@ class DecisionCore:
                        f"boost={result.confidence_boost}, cg_boost={cg_boost}")
         
         return result.tags, result.confidence_boost
+    
+    @staticmethod
+    def _fetch_coinglass_data(
+        features: FeatureSnapshot,
+        cg_cfg: Dict
+    ) -> Tuple[Dict, Optional[Dict]]:
+        """
+        获取Coinglass数据（通过桥接模块）
+        
+        Args:
+            features: 特征快照
+            cg_cfg: Coinglass配置
+            
+        Returns:
+            (cg_data字典, market_sentiment字典)
+        """
+        cg_data = {
+            'liquidation_summary': None,
+            'fear_greed': None,
+            'long_short_ratio': None,
+            'oi_history': None,
+            'funding_history': None,
+        }
+        market_sentiment = None
+        
+        if not cg_cfg.get('enabled', False):
+            return cg_data, market_sentiment
+        
+        try:
+            from l1_engine.coinglass_bridge import get_coinglass_bridge
+            
+            bridge = get_coinglass_bridge(cg_cfg)
+            
+            # 获取当前币种数据
+            current_price = features.features.price.current_price if features.features.price else None
+            symbol = features.metadata.symbol if hasattr(features, 'metadata') else 'BTC'
+            
+            cg_data = bridge.fetch_symbol_data(symbol, current_price)
+            market_sentiment = bridge.get_market_sentiment()
+            
+            logger.info(f"Coinglass[{symbol}]: liq={cg_data.get('liquidation_summary') is not None}, "
+                       f"fg={cg_data.get('fear_greed') is not None}, "
+                       f"market={market_sentiment.get('major_ls_bias', 'N/A') if market_sentiment else 'N/A'}")
+                       
+        except Exception as e:
+            import traceback
+            logger.warning(f"Failed to fetch Coinglass data: {e}\n{traceback.format_exc()}")
+        
+        return cg_data, market_sentiment
     
     # ========================================
     # Step 8: 执行权限判断
