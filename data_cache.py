@@ -55,7 +55,7 @@ class TickData:
     - 缺失字段使用 None 而非 0（消除"伪中性"）
     - 0 仅代表真实的零值
     - _incomplete 标记和 _missing_fields 列表追踪缺失
-    - volume优先读取volume_24h（权威来源），兼容旧volume键
+    - volume优先读取volume（base volume），回退到volume_24h
     - buy_volume/sell_volume标记为已废弃（fetcher不再提供）
     """
     def __init__(self, timestamp: datetime, data: dict):
@@ -67,10 +67,19 @@ class TickData:
         if self.price is None:
             self._missing_fields.append('price')
         
-        # P0-01: volume 优先读取volume_24h，缺失时为 None
-        self.volume = data.get('volume_24h')
+        # P0-BugFix-2: volume 口径修复
+        # ---------------------------------
+        # 约定：TickData.volume 表示 Binance ticker['volume']（24h基准成交量，base volume）
+        # 原因：calculate_volume_1h 采用"24h累计量差分"来估算1小时成交量，必须使用 base volume。
+        #
+        # 旧实现错误地优先读取 volume_24h（部分数据源用于表示 quoteVolume 或其他口径），
+        # 会导致 volume_1h 被放大几十倍（固化测试覆盖）。
+        #
+        # 兼容：如果未提供 volume，则回退到 volume_24h（但此时口径可能不一致，仅用于不中断）。
+        self.volume = data.get('volume')
+        self.volume_24h = data.get('volume_24h')  # 保留原字段，供需要时使用
         if self.volume is None:
-            self.volume = data.get('volume')
+            self.volume = self.volume_24h
         if self.volume is None:
             self._missing_fields.append('volume')
             logger.debug(f"Volume data missing at {timestamp}")
