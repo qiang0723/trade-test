@@ -41,6 +41,9 @@ from l1_engine.config_validator import ConfigValidator
 from l1_engine.data_validator import DataValidator
 from l1_engine.helper_utils import HelperUtils
 
+# P0-03修复：导出兼容别名供旧测试代码使用
+from l1_engine.memory import DecisionMemory, DualDecisionMemory
+
 # PR-DUAL: 类型检查导入（避免循环导入）
 if TYPE_CHECKING:
     from models.dual_timeframe_result import (
@@ -1389,62 +1392,102 @@ class L1AdvisoryEngine:
         logger.info(f"Thresholds updated: {len(new_thresholds)} items")
 
     # ========================================
-    # P1修复：兼容入口（供旧测试代码使用）
+    # P0-01修复：兼容入口（返回AdvisoryResult）
     # ========================================
     
-    def on_new_tick(self, symbol: str, data: Dict) -> Dict:
+    def on_new_tick(self, symbol: str, data: Dict) -> 'AdvisoryResult':
         """
         兼容入口 - 供旧测试代码使用
         
-        内部调用 on_new_tick_dual，返回扁平化的结果结构。
+        内部调用 on_new_tick_dual，返回 AdvisoryResult 对象。
         
         Args:
             symbol: 交易对符号
             data: 市场数据字典
         
         Returns:
-            兼容旧结构的结果字典：
-            {
-                'decision': str,
-                'confidence': str,
-                'reason_tags': List[str],
-                'executable': bool,
-                'execution_permission': str,
-                'short_term': {...},
-                'medium_term': {...}
-            }
+            AdvisoryResult: 标准化决策结果对象
         """
+        from models.advisory_result import AdvisoryResult
+        from models.enums import (
+            Decision, Confidence, TradeQuality, MarketRegime, 
+            SystemState, ExecutionPermission, ConflictResolution
+        )
+        from datetime import datetime
+        
+        # P0-02修复：更新funding_rate_prev（在任何返回路径之前）
+        funding_rate = data.get('funding_rate')
+        if funding_rate is not None:
+            try:
+                funding_rate_float = float(funding_rate)
+                # 先读取当前值作为prev
+                prev_key = f"{symbol}_funding_rate_prev"
+                current_rate = self.history_data.get(prev_key)
+                # 更新为新值
+                self.history_data[prev_key] = funding_rate_float
+                logger.debug(f"[{symbol}] funding_rate_prev updated: {current_rate} → {funding_rate_float}")
+            except (TypeError, ValueError):
+                pass
+        
         # 调用新架构
         dual_result = self.on_new_tick_dual(symbol, data)
         
-        # 转换为兼容格式（默认使用推荐决策）
-        recommended = dual_result.alignment.recommended_action
+        # 根据conflict_resolution选择使用哪个周期的结论
+        resolution = dual_result.alignment.conflict_resolution
+        if resolution == ConflictResolution.FOLLOW_SHORT_TERM:
+            chosen = dual_result.short_term
+        elif resolution == ConflictResolution.FOLLOW_MEDIUM_TERM:
+            chosen = dual_result.medium_term
+        elif resolution == ConflictResolution.FOLLOW_HIGHER_CONFIDENCE:
+            # 选择置信度更高的
+            if dual_result.short_term.confidence.value >= dual_result.medium_term.confidence.value:
+                chosen = dual_result.short_term
+            else:
+                chosen = dual_result.medium_term
+        else:
+            # NO_TRADE或其他情况，使用short_term作为默认
+            chosen = dual_result.short_term
         
-        # 合并reason_tags
+        # 合并reason_tags（global + short + medium，去重保序）
         all_tags = []
-        if dual_result.short_term.reason_tags:
-            all_tags.extend([t.value for t in dual_result.short_term.reason_tags])
-        if dual_result.medium_term.reason_tags:
-            all_tags.extend([t.value for t in dual_result.medium_term.reason_tags])
+        seen = set()
         
-        return {
-            'decision': recommended.value,
-            'confidence': dual_result.short_term.confidence.value,
-            'reason_tags': all_tags,
-            'executable': dual_result.short_term.executable,
-            'execution_permission': dual_result.short_term.execution_permission.value,
-            # 保留双周期详情
-            'short_term': {
-                'decision': dual_result.short_term.decision.value,
-                'confidence': dual_result.short_term.confidence.value,
-                'executable': dual_result.short_term.executable
-            },
-            'medium_term': {
-                'decision': dual_result.medium_term.decision.value,
-                'confidence': dual_result.medium_term.confidence.value,
-                'executable': dual_result.medium_term.executable
-            }
-        }
+        # 添加global risk tags（在DualTimeframeResult上，不是alignment）
+        if dual_result.global_risk_tags:
+            for tag in dual_result.global_risk_tags:
+                if tag not in seen:
+                    all_tags.append(tag)
+                    seen.add(tag)
+        
+        # 添加short_term tags
+        if dual_result.short_term.reason_tags:
+            for tag in dual_result.short_term.reason_tags:
+                if tag not in seen:
+                    all_tags.append(tag)
+                    seen.add(tag)
+        
+        # 添加medium_term tags
+        if dual_result.medium_term.reason_tags:
+            for tag in dual_result.medium_term.reason_tags:
+                if tag not in seen:
+                    all_tags.append(tag)
+                    seen.add(tag)
+        
+        # 构造AdvisoryResult
+        return AdvisoryResult(
+            decision=dual_result.alignment.recommended_action,
+            confidence=chosen.confidence,
+            market_regime=dual_result.medium_term.market_regime,
+            system_state=SystemState.WAIT,  # L1咨询层默认WAIT状态
+            risk_exposure_allowed=dual_result.risk_exposure_allowed,  # 使用DualTimeframeResult的属性
+            trade_quality=chosen.trade_quality,
+            reason_tags=all_tags,
+            timestamp=datetime.now(),
+            execution_permission=chosen.execution_permission,
+            executable=chosen.executable,
+            signal_decision=chosen.decision,
+            price=dual_result.short_term.key_metrics.get('current_price') if dual_result.short_term.key_metrics else None
+        )
     
     # ========================================
     # PR-005: 三层触发机制（1h/15m/5m）

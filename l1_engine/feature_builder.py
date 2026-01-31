@@ -456,6 +456,13 @@ class FeatureBuilder:
         """
         提取覆盖度信息
         
+        P0-05修复：支持从raw_data字段推断coverage，不强依赖data_cache
+        
+        优先级：
+        1. 从 _metadata.lookback_coverage 获取
+        2. 从 raw_data 字段存在性推断
+        3. 从 data_cache 查询（fallback）
+        
         Args:
             raw_data: 原始数据（可能包含_metadata.lookback_coverage）
             data_cache: MarketDataCache实例
@@ -475,7 +482,11 @@ class FeatureBuilder:
         else:
             lookback_coverage = raw_coverage  # 兼容旧格式
         
-        # 方式2: 如果raw_data中没有，尝试从data_cache直接查询
+        # P0-05修复：方式2 - 从raw_data字段推断coverage（单tick离线模式）
+        if not lookback_coverage:
+            lookback_coverage = self._infer_coverage_from_data(raw_data, symbol)
+        
+        # 方式3: 如果仍然没有，尝试从data_cache直接查询（fallback）
         if not lookback_coverage and data_cache and hasattr(data_cache, 'get_lookback_coverage'):
             try:
                 result = data_cache.get_lookback_coverage(symbol)
@@ -536,6 +547,65 @@ class FeatureBuilder:
             short_evaluable=short_evaluable,
             medium_evaluable=medium_evaluable
         )
+    
+    def _infer_coverage_from_data(self, raw_data: Dict, symbol: str) -> Dict:
+        """
+        P0-05修复：从raw_data字段推断coverage（单tick离线模式）
+        
+        根据数据字段的存在性推断各时间窗口是否有效：
+        - 1h: price_change_1h / oi_change_1h / volume_1h / taker_imbalance_1h / buy_sell_imbalance
+        - 6h: price_change_6h / oi_change_6h
+        - 15m: price_change_15m / taker_imbalance_15m
+        - 5m: price_change_5m / taker_imbalance_5m
+        
+        Args:
+            raw_data: 原始数据字典
+            symbol: 交易对符号
+        
+        Returns:
+            推断的coverage字典
+        """
+        coverage = {}
+        
+        # 检查1h窗口
+        has_1h = any([
+            raw_data.get('price_change_1h') is not None,
+            raw_data.get('oi_change_1h') is not None,
+            raw_data.get('volume_1h') is not None,
+            raw_data.get('taker_imbalance_1h') is not None,
+            raw_data.get('buy_sell_imbalance') is not None,
+        ])
+        if has_1h:
+            coverage['1h'] = {'is_valid': True, 'inferred': True}
+        
+        # 检查6h窗口
+        has_6h = any([
+            raw_data.get('price_change_6h') is not None,
+            raw_data.get('oi_change_6h') is not None,
+        ])
+        if has_6h:
+            coverage['6h'] = {'is_valid': True, 'inferred': True}
+        
+        # 检查15m窗口
+        has_15m = any([
+            raw_data.get('price_change_15m') is not None,
+            raw_data.get('taker_imbalance_15m') is not None,
+        ])
+        if has_15m:
+            coverage['15m'] = {'is_valid': True, 'inferred': True}
+        
+        # 检查5m窗口
+        has_5m = any([
+            raw_data.get('price_change_5m') is not None,
+            raw_data.get('taker_imbalance_5m') is not None,
+        ])
+        if has_5m:
+            coverage['5m'] = {'is_valid': True, 'inferred': True}
+        
+        if coverage:
+            logger.info(f"[{symbol}] Coverage inferred from data fields: {list(coverage.keys())}")
+        
+        return coverage
     
     def _build_metadata(self, symbol: str, raw_data: Dict) -> FeatureMetadata:
         """

@@ -14,44 +14,55 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # 可选依赖：Watchdog
+# P0-04修复：用条件保护ConfigReloader定义，避免NameError
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False
+    Observer = None
+    FileSystemEventHandler = object  # 占位基类
     logger.warning("watchdog not installed, config hot reload disabled")
 
 
-class ConfigReloader(FileSystemEventHandler):
-    """配置文件监控和热更新"""
-    
-    def __init__(self, engine, config_path: str):
-        self.engine = engine
-        self.config_path = config_path
-    
-    def on_modified(self, event):
-        """文件修改时触发"""
-        if not event.is_directory and event.src_path.endswith('l1_thresholds.yaml'):
-            logger.info(f"Config file modified: {event.src_path}")
-            self._reload_config()
-    
-    def _reload_config(self):
-        """重载配置"""
-        try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                new_config = yaml.safe_load(f)
-            
-            # 扁平化阈值
-            new_thresholds = self.engine._flatten_thresholds(new_config)
-            
-            # 更新引擎阈值
-            self.engine.update_thresholds(new_thresholds)
-            
-            logger.info(f"✅ Config reloaded successfully: {len(new_thresholds)} thresholds updated")
-            
-        except Exception as e:
-            logger.error(f"❌ Error reloading config: {e}", exc_info=True)
+# P0-04修复：仅在watchdog可用时定义真实的ConfigReloader
+if WATCHDOG_AVAILABLE:
+    class ConfigReloader(FileSystemEventHandler):
+        """配置文件监控和热更新"""
+        
+        def __init__(self, engine, config_path: str):
+            self.engine = engine
+            self.config_path = config_path
+        
+        def on_modified(self, event):
+            """文件修改时触发"""
+            if not event.is_directory and event.src_path.endswith('l1_thresholds.yaml'):
+                logger.info(f"Config file modified: {event.src_path}")
+                self._reload_config()
+        
+        def _reload_config(self):
+            """重载配置"""
+            try:
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    new_config = yaml.safe_load(f)
+                
+                # 扁平化阈值
+                new_thresholds = self.engine._flatten_thresholds(new_config)
+                
+                # 更新引擎阈值
+                self.engine.update_thresholds(new_thresholds)
+                
+                logger.info(f"✅ Config reloaded successfully: {len(new_thresholds)} thresholds updated")
+                
+            except Exception as e:
+                logger.error(f"❌ Error reloading config: {e}", exc_info=True)
+else:
+    # P0-04修复：占位类，保证import安全
+    class ConfigReloader:
+        """配置文件监控占位类（watchdog不可用）"""
+        def __init__(self, engine, config_path: str):
+            pass
 
 
 class ConfigWatcherService:
