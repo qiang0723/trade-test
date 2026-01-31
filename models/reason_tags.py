@@ -150,6 +150,14 @@ class ReasonTag(Enum):
     # P1-3: 资金费率趋势分析
     FUNDING_TREND_ACCELERATING = "funding_trend_accelerating"  # 费率加速（远离中性）
     FUNDING_TREND_REVERSAL = "funding_trend_reversal"          # 费率反转信号
+    
+    # Coinglass数据增强
+    LIQUIDATION_CLUSTER_NEAR = "liquidation_cluster_near"              # 接近清算聚集区
+    LIQUIDATION_IMBALANCE_LONG = "liquidation_imbalance_long"          # 多头清算聚集
+    LIQUIDATION_IMBALANCE_SHORT = "liquidation_imbalance_short"        # 空头清算聚集
+    AGGREGATED_OI_SURGE = "aggregated_oi_surge"                        # 全市场OI激增
+    AGGREGATED_OI_DROP = "aggregated_oi_drop"                          # 全市场OI下降
+    LIQUIDATION_CASCADE_RISK = "liquidation_cascade_risk"              # 清算级联风险
 
 
 # 中文解释映射
@@ -279,6 +287,14 @@ REASON_TAG_EXPLANATIONS = {
     # P1-3: 资金费率趋势分析
     "funding_trend_accelerating": "📈 费率加速：资金费率远离中性区间，市场情绪加剧",
     "funding_trend_reversal": "🔄 费率反转信号：费率极端后有反转迹象，关注方向变化",
+    
+    # Coinglass数据增强
+    "liquidation_cluster_near": "⚠️ 清算聚集区接近：当前价格接近大量清算位，波动风险增加",
+    "liquidation_imbalance_long": "📉 多头清算聚集：上方多头清算量大，下跌可能触发级联",
+    "liquidation_imbalance_short": "📈 空头清算聚集：下方空头清算量大，上涨可能触发级联",
+    "aggregated_oi_surge": "🔥 全市场OI激增：跨交易所持仓量大幅增加，趋势可能延续",
+    "aggregated_oi_drop": "📉 全市场OI下降：跨交易所持仓量减少，趋势可能终结",
+    "liquidation_cascade_risk": "⚡ 清算级联风险：近期大量爆仓，市场可能出现反转",
 }
 
 
@@ -430,6 +446,14 @@ REASON_TAG_EXECUTABILITY: Dict[ReasonTag, ExecutabilityLevel] = {
     # P1-3: 资金费率趋势分析
     ReasonTag.FUNDING_TREND_ACCELERATING: ExecutabilityLevel.ALLOW,  # 费率加速→需关注
     ReasonTag.FUNDING_TREND_REVERSAL: ExecutabilityLevel.ALLOW,      # 费率反转→正面信号
+    
+    # Coinglass数据增强
+    ReasonTag.LIQUIDATION_CLUSTER_NEAR: ExecutabilityLevel.DEGRADE,    # 接近清算区→降级警告
+    ReasonTag.LIQUIDATION_IMBALANCE_LONG: ExecutabilityLevel.ALLOW,    # 多头聚集→做空信号
+    ReasonTag.LIQUIDATION_IMBALANCE_SHORT: ExecutabilityLevel.ALLOW,   # 空头聚集→做多信号
+    ReasonTag.AGGREGATED_OI_SURGE: ExecutabilityLevel.ALLOW,           # OI激增→趋势确认
+    ReasonTag.AGGREGATED_OI_DROP: ExecutabilityLevel.DEGRADE,          # OI下降→趋势警告
+    ReasonTag.LIQUIDATION_CASCADE_RISK: ExecutabilityLevel.ALLOW,      # 级联风险→反转信号
 }
 
 

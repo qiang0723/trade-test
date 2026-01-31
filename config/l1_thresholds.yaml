@@ -74,6 +74,18 @@ data_quality:
   max_staleness_seconds: 120      # 数据最大过期时间（秒），超过视为过期
 
 # ==================
+# Coinglass数据融合配置
+# ==================
+coinglass:
+  enabled: true                       # 是否启用Coinglass数据
+  cache_ttl_seconds: 60               # 缓存有效期（秒）
+  fusion:
+    liquidation_proximity_pct: 0.02   # 清算位接近阈值 2%
+    oi_surge_threshold: 0.05          # OI激增阈值 5%
+    oi_drop_threshold: -0.03          # OI下降阈值 -3%
+    imbalance_threshold: 0.30         # 多空不平衡阈值 30%
+
+# ==================
 # P1-1: 动态阈值配置
 # ==================
 dynamic_threshold:

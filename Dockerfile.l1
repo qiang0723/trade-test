@@ -29,6 +29,7 @@ COPY btc_web_app_l1_modular.py .
 COPY market_state_machine_l1.py .
 COPY data_cache.py .
 COPY binance_data_fetcher.py .
+COPY coinglass_data_fetcher.py .
 COPY logger_config.py .
 COPY metrics_normalizer.py .
 

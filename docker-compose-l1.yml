@@ -22,6 +22,12 @@ services:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=INFO
       - FLASK_DEBUG=false  # 关闭debug模式，防止热重载清空缓存
+      # Coinglass API配置（从.env文件或环境变量读取）
+      - COINGLASS_API_KEY=${COINGLASS_API_KEY:-}
+      - COINGLASS_ENABLED=${COINGLASS_ENABLED:-true}
+      - COINGLASS_BASE_URL=${COINGLASS_BASE_URL:-https://open-api-v4.coinglass.com}
+    # 注意：.env文件需要在项目根目录创建（参考.env.example）
+    # 如果.env不存在，环境变量将使用默认值或从系统环境读取
     logging:
       driver: "json-file"
       options:
