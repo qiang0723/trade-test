@@ -668,8 +668,9 @@ class MarketDataCache:
                 source_timestamp = self.cache[symbol][-1].timestamp
         
         # 构造增强数据（PR-005 + PATCH-P0-3: 缺失不填0）
+        # P0修复：所有关键字段缺失保留None，禁止0伪装
         enhanced_data = {
-            'price': current_data.get('price', 0),
+            'price': current_data.get('price'),  # P0修复：price缺失必须是None，不能是0
             
             # PATCH-P0-3: 关键字段缺失保留None，不填0（消除"伪中性"）
             # 中长期字段（1h/6h）- 缺失时返回None
@@ -688,9 +689,9 @@ class MarketDataCache:
             # PATCH-P0-2: buy_sell_imbalance改为taker_imbalance_1h的alias
             'buy_sell_imbalance': imbalance_value,  # alias of taker_imbalance_1h
             
-            # 非关键字段（可填默认值）
-            'volume_24h': current_data.get('volume_24h', 0),
-            'funding_rate': current_data.get('funding_rate', 0),
+            # P0修复：关键字段缺失保留None（volume_24h/funding_rate用于决策）
+            'volume_24h': current_data.get('volume_24h'),  # None-aware
+            'funding_rate': current_data.get('funding_rate'),  # None-aware
             # PR-002: 添加时间戳信息（用于新鲜度检查）
             'source_timestamp': source_timestamp,
             'computed_at': datetime.now(),

@@ -483,3 +483,11 @@ def get_thresholds_version_info(thresholds: Thresholds) -> Dict[str, str]:
         "dual_timeframe_enabled": str(thresholds.dual_timeframe.enabled),
         "multi_tf_enabled": str(thresholds.multi_tf.enabled)
     }
+
+
+# ==========================================
+# P1修复：兼容别名
+# ==========================================
+
+# 旧类名兼容（向后兼容旧测试代码）
+RangeWeakSignalThreshold = RangeWeakThreshold

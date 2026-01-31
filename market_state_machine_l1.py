@@ -1389,6 +1389,64 @@ class L1AdvisoryEngine:
         logger.info(f"Thresholds updated: {len(new_thresholds)} items")
 
     # ========================================
+    # P1修复：兼容入口（供旧测试代码使用）
+    # ========================================
+    
+    def on_new_tick(self, symbol: str, data: Dict) -> Dict:
+        """
+        兼容入口 - 供旧测试代码使用
+        
+        内部调用 on_new_tick_dual，返回扁平化的结果结构。
+        
+        Args:
+            symbol: 交易对符号
+            data: 市场数据字典
+        
+        Returns:
+            兼容旧结构的结果字典：
+            {
+                'decision': str,
+                'confidence': str,
+                'reason_tags': List[str],
+                'executable': bool,
+                'execution_permission': str,
+                'short_term': {...},
+                'medium_term': {...}
+            }
+        """
+        # 调用新架构
+        dual_result = self.on_new_tick_dual(symbol, data)
+        
+        # 转换为兼容格式（默认使用推荐决策）
+        recommended = dual_result.alignment.recommended_action
+        
+        # 合并reason_tags
+        all_tags = []
+        if dual_result.short_term.reason_tags:
+            all_tags.extend([t.value for t in dual_result.short_term.reason_tags])
+        if dual_result.medium_term.reason_tags:
+            all_tags.extend([t.value for t in dual_result.medium_term.reason_tags])
+        
+        return {
+            'decision': recommended.value,
+            'confidence': dual_result.short_term.confidence.value,
+            'reason_tags': all_tags,
+            'executable': dual_result.short_term.executable,
+            'execution_permission': dual_result.short_term.execution_permission.value,
+            # 保留双周期详情
+            'short_term': {
+                'decision': dual_result.short_term.decision.value,
+                'confidence': dual_result.short_term.confidence.value,
+                'executable': dual_result.short_term.executable
+            },
+            'medium_term': {
+                'decision': dual_result.medium_term.decision.value,
+                'confidence': dual_result.medium_term.confidence.value,
+                'executable': dual_result.medium_term.executable
+            }
+        }
+    
+    # ========================================
     # PR-005: 三层触发机制（1h/15m/5m）
     # ========================================
     
