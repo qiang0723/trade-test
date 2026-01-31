@@ -815,6 +815,7 @@ class SignalEnhancer:
                 signal_quality = 'weak'
                 details['interpretation'] = 'trend_but_pullback_risk'
         
+        details['confidence_boost'] = confidence_boost
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
     
     def eval_coinglass_sentiment(
@@ -907,6 +908,7 @@ class SignalEnhancer:
                     details['ls_signal'] = 'contrarian_long_opportunity'
                     signal_quality = 'strong'
         
+        details['confidence_boost'] = confidence_boost
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
     
     def eval_coinglass_oi(
@@ -976,6 +978,7 @@ class SignalEnhancer:
                 confidence_boost -= 5
                 details['funding_signal'] = 'extreme_bearish_crowded'
         
+        details['confidence_boost'] = confidence_boost
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
     
     # ========================================
