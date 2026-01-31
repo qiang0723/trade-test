@@ -1419,134 +1419,188 @@
             return card;
         }
         
-        // 显示详情弹窗
+        // 显示详情弹窗（优化版：突出重要指标）
         window.showDetailModal = function(symbol, data) {
             const modal = document.getElementById('detailModal');
             const title = document.getElementById('modalTitle');
             const body = document.getElementById('modalBody');
             
-            title.textContent = `${symbol} - 详细信息`;
+            title.textContent = `${symbol} - 决策详情`;
             
-            const { short_term, medium_term, alignment, price, timestamp, global_risk_tags } = data;
+            const { short_term, medium_term, alignment, price, timestamp, global_risk_tags, stop_loss_target } = data;
+            
+            // 提取关键指标
+            const shortMetrics = short_term.key_metrics || {};
+            const mediumMetrics = medium_term.key_metrics || {};
+            
+            // 格式化函数
+            const formatPct = (val) => val !== null && val !== undefined ? `${val > 0 ? '+' : ''}${val}%` : '--';
+            const formatPrice = (val) => val ? `$${val.toLocaleString()}` : '--';
+            const getPctClass = (val) => val > 0 ? 'style="color: #4caf50"' : val < 0 ? 'style="color: #f44336"' : '';
+            
+            // 止损止盈HTML
+            let slTpHtml = '';
+            if (stop_loss_target && alignment.recommended_action !== 'no_trade') {
+                slTpHtml = `
+                    <div class="detail-section" style="background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);">
+                        <div class="detail-title">⚡ 风控建议</div>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">开仓价</div>
+                                <div class="detail-value" style="color: #333; font-weight: bold;">$${price?.toFixed(4) || '--'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">止损价</div>
+                                <div class="detail-value" style="color: #f44336;">$${stop_loss_target.stop_loss_price?.toFixed(4) || '--'} (-${stop_loss_target.stop_loss_pct?.toFixed(1) || '--'}%)</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">止盈价</div>
+                                <div class="detail-value" style="color: #4caf50;">$${stop_loss_target.take_profit_price?.toFixed(4) || '--'} (+${stop_loss_target.take_profit_pct?.toFixed(1) || '--'}%)</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">盈亏比</div>
+                                <div class="detail-value" style="color: #2196f3; font-weight: bold;">${stop_loss_target.risk_reward_ratio?.toFixed(1) || '--'}:1</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
             
             body.innerHTML = `
-                <div class="detail-section">
-                    <div class="detail-title">📊 基础信息</div>
-                    <div class="detail-grid">
-                        <div class="detail-item">
-                            <div class="detail-label">当前价格</div>
-                            <div class="detail-value">$${price ? price.toFixed(2) : '--'}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">更新时间</div>
-                            <div class="detail-value">${new Date(timestamp).toLocaleString('zh-CN')}</div>
-                        </div>
-                        ${global_risk_tags && global_risk_tags.length > 0 ? `
-                        <div class="detail-item">
-                            <div class="detail-label">全局风险</div>
-                            <div class="detail-value">${global_risk_tags.join(', ')}</div>
-                        </div>
-                        ` : ''}
-                    </div>
-                </div>
-                
-                <div class="detail-section">
-                    <div class="detail-title">🔍 短期决策（5m/15m）</div>
-                    <div class="detail-grid">
-                        <div class="detail-item">
-                            <div class="detail-label">决策</div>
-                            <div class="detail-value decision-text ${short_term.decision}">
-                                ${getDecisionLabel(short_term.decision)}
-                            </div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">置信度</div>
-                            <div class="detail-value">${short_term.confidence.toUpperCase()}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">市场环境</div>
-                            <div class="detail-value">${short_term.market_regime.toUpperCase()}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">交易质量</div>
-                            <div class="detail-value">${short_term.trade_quality.toUpperCase()}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">执行权限</div>
-                            <div class="detail-value">${short_term.execution_permission.toUpperCase()}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">可执行</div>
-                            <div class="detail-value">${short_term.executable ? '✓ 是' : '✗ 否'}</div>
-                        </div>
-                    </div>
-                    <div class="reason-tags">
-                        ${short_term.reason_tags.map(tag => `<span class="reason-tag">${tag}</span>`).join('')}
-                    </div>
-                </div>
-                
-                <div class="detail-section">
-                    <div class="detail-title">📈 中长期决策（1h/6h）</div>
-                    <div class="detail-grid">
-                        <div class="detail-item">
-                            <div class="detail-label">决策</div>
-                            <div class="detail-value decision-text ${medium_term.decision}">
-                                ${getDecisionLabel(medium_term.decision)}
-                            </div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">置信度</div>
-                            <div class="detail-value">${medium_term.confidence.toUpperCase()}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">市场环境</div>
-                            <div class="detail-value">${medium_term.market_regime.toUpperCase()}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">交易质量</div>
-                            <div class="detail-value">${medium_term.trade_quality.toUpperCase()}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">执行权限</div>
-                            <div class="detail-value">${medium_term.execution_permission.toUpperCase()}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">可执行</div>
-                            <div class="detail-value">${medium_term.executable ? '✓ 是' : '✗ 否'}</div>
-                        </div>
-                    </div>
-                    <div class="reason-tags">
-                        ${medium_term.reason_tags.map(tag => `<span class="reason-tag">${tag}</span>`).join('')}
-                    </div>
-                </div>
-                
-                <div class="detail-section">
+                <!-- 综合建议（最重要，放在最前面） -->
+                <div class="detail-section" style="background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%); border-left: 4px solid #667eea;">
                     <div class="detail-title">🎯 综合建议</div>
                     <div class="detail-grid">
                         <div class="detail-item">
-                            <div class="detail-label">对齐类型</div>
-                            <div class="detail-value">${alignment.alignment_type}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">是否对齐</div>
-                            <div class="detail-value">${alignment.is_aligned ? '✓ 是' : '✗ 否'}</div>
-                        </div>
-                        <div class="detail-item">
-                            <div class="detail-label">有冲突</div>
-                            <div class="detail-value">${alignment.has_conflict ? '⚠ 是' : '✓ 否'}</div>
-                        </div>
-                        <div class="detail-item">
                             <div class="detail-label">推荐操作</div>
-                            <div class="detail-value decision-text ${alignment.recommended_action}">
-                                ${getDecisionLabel(alignment.recommended_action)}
+                            <div class="detail-value decision-text ${alignment.recommended_action}" style="font-size: 18px;">
+                                ${getDecisionIcon(alignment.recommended_action)} ${getDecisionLabel(alignment.recommended_action)}
                             </div>
                         </div>
                         <div class="detail-item">
-                            <div class="detail-label">推荐置信度</div>
-                            <div class="detail-value">${alignment.recommended_confidence.toUpperCase()}</div>
+                            <div class="detail-label">置信度</div>
+                            <div class="detail-value"><span class="confidence-badge ${alignment.recommended_confidence}">${alignment.recommended_confidence.toUpperCase()}</span></div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">周期对齐</div>
+                            <div class="detail-value">${alignment.is_aligned ? '✅ 双周期一致' : alignment.has_conflict ? '⚠️ 周期冲突' : '➡️ 部分一致'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">当前价格</div>
+                            <div class="detail-value" style="font-weight: bold;">${formatPrice(price)}</div>
                         </div>
                     </div>
-                    <p style="margin-top: 10px; color: #666; font-size: 13px;">${alignment.recommendation_notes || '--'}</p>
+                    ${alignment.recommendation_notes ? `<p style="margin-top: 10px; color: #666; font-size: 12px; background: #f5f5f5; padding: 8px; border-radius: 4px;">💡 ${alignment.recommendation_notes}</p>` : ''}
+                </div>
+                
+                ${slTpHtml}
+                
+                <!-- 关键市场指标 -->
+                <div class="detail-section">
+                    <div class="detail-title">📊 关键市场指标</div>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="detail-label">1h价格变化</div>
+                            <div class="detail-value" ${getPctClass(mediumMetrics.price_change_1h)}>${formatPct(mediumMetrics.price_change_1h)}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">24h价格变化</div>
+                            <div class="detail-value" ${getPctClass(mediumMetrics.price_change_24h)}>${formatPct(mediumMetrics.price_change_24h)}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">资金费率</div>
+                            <div class="detail-value" ${getPctClass(mediumMetrics.funding_rate)}>${mediumMetrics.funding_rate !== null ? mediumMetrics.funding_rate + '%' : '--'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">OI变化(1h)</div>
+                            <div class="detail-value" ${getPctClass(mediumMetrics.oi_change_1h)}>${formatPct(mediumMetrics.oi_change_1h)}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">大户做多比</div>
+                            <div class="detail-value">${mediumMetrics.top_long_ratio ? mediumMetrics.top_long_ratio + '%' : '--'}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-label">1h成交量比</div>
+                            <div class="detail-value">${mediumMetrics.volume_ratio_1h ? mediumMetrics.volume_ratio_1h + 'x' : '--'}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 双周期决策对比 -->
+                <div class="detail-section">
+                    <div class="detail-title">⏱️ 双周期决策对比</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <!-- 短期 -->
+                        <div style="background: #f8f9fa; padding: 12px; border-radius: 8px; border-left: 3px solid #2196f3;">
+                            <div style="font-weight: bold; margin-bottom: 8px; color: #2196f3;">🔍 短期 (5m/15m)</div>
+                            <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                                <span>决策</span>
+                                <span class="decision-text ${short_term.decision}" style="font-weight: bold;">${getDecisionIcon(short_term.decision)} ${getDecisionLabel(short_term.decision)}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                                <span>置信度</span>
+                                <span class="confidence-badge ${short_term.confidence}">${short_term.confidence.toUpperCase()}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                                <span>环境</span>
+                                <span>${short_term.market_regime.toUpperCase()}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                                <span>可执行</span>
+                                <span>${short_term.executable ? '✅' : '❌'}</span>
+                            </div>
+                        </div>
+                        <!-- 中期 -->
+                        <div style="background: #f8f9fa; padding: 12px; border-radius: 8px; border-left: 3px solid #ff9800;">
+                            <div style="font-weight: bold; margin-bottom: 8px; color: #ff9800;">📈 中期 (1h/6h)</div>
+                            <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                                <span>决策</span>
+                                <span class="decision-text ${medium_term.decision}" style="font-weight: bold;">${getDecisionIcon(medium_term.decision)} ${getDecisionLabel(medium_term.decision)}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                                <span>置信度</span>
+                                <span class="confidence-badge ${medium_term.confidence}">${medium_term.confidence.toUpperCase()}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                                <span>环境</span>
+                                <span>${medium_term.market_regime.toUpperCase()}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin: 4px 0;">
+                                <span>可执行</span>
+                                <span>${medium_term.executable ? '✅' : '❌'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 决策原因标签 -->
+                <div class="detail-section">
+                    <div class="detail-title">🏷️ 决策原因</div>
+                    <div style="margin-bottom: 10px;">
+                        <div style="font-size: 11px; color: #666; margin-bottom: 5px;">短期标签：</div>
+                        <div class="reason-tags">
+                            ${short_term.reason_tags.length > 0 ? short_term.reason_tags.map(tag => `<span class="reason-tag">${tag}</span>`).join('') : '<span style="color: #999;">无</span>'}
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 11px; color: #666; margin-bottom: 5px;">中期标签：</div>
+                        <div class="reason-tags">
+                            ${medium_term.reason_tags.length > 0 ? medium_term.reason_tags.map(tag => `<span class="reason-tag">${tag}</span>`).join('') : '<span style="color: #999;">无</span>'}
+                        </div>
+                    </div>
+                    ${global_risk_tags && global_risk_tags.length > 0 ? `
+                    <div style="margin-top: 10px;">
+                        <div style="font-size: 11px; color: #c62828; margin-bottom: 5px;">⚠️ 全局风险：</div>
+                        <div class="reason-tags">
+                            ${global_risk_tags.map(tag => `<span class="reason-tag" style="background: #ffebee; color: #c62828;">${tag}</span>`).join('')}
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>
+                
+                <!-- 更新时间 -->
+                <div style="text-align: right; font-size: 11px; color: #999; margin-top: 10px;">
+                    更新时间: ${new Date(timestamp).toLocaleString('zh-CN')}
                 </div>
             `;
             

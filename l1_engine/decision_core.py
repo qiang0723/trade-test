@@ -136,7 +136,10 @@ class DecisionCore:
             decision, regime, quality, all_tags, thresholds, confidence_boost
         )
         
-        # Step 10: 组装DecisionDraft ✅
+        # Step 10: 提取关键指标 ✅
+        key_metrics = DecisionCore._extract_key_metrics(features, timeframe)
+        
+        # Step 11: 组装DecisionDraft ✅
         return TimeframeDecisionDraft(
             decision=decision,
             confidence=confidence,
@@ -144,7 +147,7 @@ class DecisionCore:
             trade_quality=quality,
             execution_permission=execution_permission,
             reason_tags=all_tags,
-            key_metrics={}  # TODO: 添加关键指标（price_change_1h等）
+            key_metrics=key_metrics
         )
     
     # ========================================
@@ -292,6 +295,59 @@ class DecisionCore:
             logger.debug(f"[{symbol}] Alignment CONFLICT: short={short_decision.value}, medium={medium_decision.value} -> ALLOW_REDUCED")
         
         return short_draft, medium_draft
+    
+    # ========================================
+    # Step 10: 提取关键指标
+    # ========================================
+    
+    @staticmethod
+    def _extract_key_metrics(features: FeatureSnapshot, timeframe: 'Timeframe') -> Dict:
+        """
+        提取关键市场指标用于前端显示
+        
+        Args:
+            features: 特征快照
+            timeframe: 周期标识
+        
+        Returns:
+            关键指标字典
+        """
+        metrics = {}
+        
+        try:
+            mf = features.features
+            
+            # 价格相关
+            if mf.price:
+                metrics['current_price'] = mf.price.current_price
+                metrics['price_change_1h'] = round(mf.price.price_change_1h * 100, 2) if mf.price.price_change_1h else None
+                metrics['price_change_24h'] = round(mf.price.price_change_24h * 100, 2) if mf.price.price_change_24h else None
+            
+            # 资金费率
+            if mf.derivatives:
+                metrics['funding_rate'] = round(mf.derivatives.funding_rate * 100, 4) if mf.derivatives.funding_rate else None
+                metrics['oi_change_1h'] = round(mf.derivatives.oi_change_1h * 100, 2) if mf.derivatives.oi_change_1h else None
+            
+            # 多空比
+            if mf.sentiment:
+                metrics['top_long_ratio'] = round(mf.sentiment.top_long_ratio * 100, 1) if mf.sentiment.top_long_ratio else None
+                metrics['retail_long_ratio'] = round(mf.sentiment.retail_long_ratio * 100, 1) if mf.sentiment.retail_long_ratio else None
+            
+            # Taker失衡
+            if mf.order_flow:
+                if timeframe == Timeframe.SHORT_TERM:
+                    metrics['taker_imbalance'] = round(mf.order_flow.taker_imbalance_5m * 100, 1) if mf.order_flow.taker_imbalance_5m else None
+                else:
+                    metrics['taker_imbalance'] = round(mf.order_flow.taker_imbalance_1h * 100, 1) if mf.order_flow.taker_imbalance_1h else None
+            
+            # 成交量
+            if mf.volume:
+                metrics['volume_ratio_1h'] = round(mf.volume.volume_ratio_1h, 2) if mf.volume.volume_ratio_1h else None
+                
+        except Exception as e:
+            logger.warning(f"Error extracting key metrics: {e}")
+        
+        return metrics
     
     # ========================================
     # Step 2: 市场环境识别
