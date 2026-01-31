@@ -53,6 +53,12 @@ class AdvisoryResult:
     
     # ===== 市场价格信息 =====
     price: Optional[float] = None  # 信号出现时的价格
+
+    # ===== 兼容字段（P0测试使用） =====
+    @property
+    def primary_tags(self) -> List[ReasonTag]:
+        """向后兼容：历史测试使用 primary_tags 命名。"""
+        return self.reason_tags
     
     def to_dict(self) -> dict:
         """
