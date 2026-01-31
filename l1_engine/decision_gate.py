@@ -350,9 +350,10 @@ class DecisionGate:
         
         # Rule 4: 置信度门槛检查（方案D双门槛）
         if thresholds:
-            exec_config = thresholds.config.get('executable_control', {})
-            min_normal_str = exec_config.get('min_confidence_normal', 'HIGH').upper()
-            min_reduced_str = exec_config.get('min_confidence_reduced', 'MEDIUM').upper()
+            # 使用强类型Thresholds对象的属性访问
+            exec_config = thresholds.executable_control
+            min_normal_str = exec_config.min_confidence_normal.upper() if exec_config else 'HIGH'
+            min_reduced_str = exec_config.min_confidence_reduced.upper() if exec_config else 'MEDIUM'
             
             # 置信度等级映射
             confidence_levels = {'LOW': 0, 'MEDIUM': 1, 'HIGH': 2, 'ULTRA': 3}

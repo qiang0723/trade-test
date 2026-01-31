@@ -97,6 +97,22 @@ class SignalEnhancer:
         'cg_oi_surge_threshold': 0.03,         # OI激增阈值 3%
         'cg_oi_drop_threshold': -0.02,         # OI下降阈值 -2%
         'cg_oi_boost': 5,                      # OI信号加分
+        
+        # P0-1: 趋势数据利用
+        'ls_trend_accelerating_threshold': 2.0,  # 多空比变化加速阈值 2%
+        'ls_trend_accelerating_boost': 5,        # 趋势加速加分
+        'ls_trend_reversal_penalty': -6,         # 趋势反转惩罚
+        'oi_trend_confirm_boost': 4,             # OI趋势确认加分
+        'oi_4h_surge_threshold': 0.05,           # 4h OI激增阈值
+        'oi_4h_drop_threshold': -0.03,           # 4h OI下降阈值
+        'oi_4h_boost': 4,                        # 4h OI加分
+        'funding_trend_reversal_boost': 8,       # 费率趋势反转加分
+        'funding_extreme_vs_max_threshold': 0.9, # 接近历史极值阈值
+        'funding_near_extreme_penalty': -6,      # 接近极值惩罚
+        
+        # P0-2: SHORT信号质量加强
+        'short_multi_confirm_bonus': 8,          # SHORT多条件确认加分
+        'short_weak_confirm_penalty': -5,        # SHORT弱确认惩罚
     }
     
     def __init__(self, thresholds: Dict = None):
@@ -878,7 +894,8 @@ class SignalEnhancer:
         if long_short_ratio:
             long_pct = long_short_ratio.get('long_percent', 50) / 100
             ls_sentiment = long_short_ratio.get('sentiment', 'neutral')
-            details['long_short'] = {'long_pct': long_pct, 'sentiment': ls_sentiment}
+            ls_trend = long_short_ratio.get('trend')  # P0-1: 获取趋势数据
+            details['long_short'] = {'long_pct': long_pct, 'sentiment': ls_sentiment, 'trend': ls_trend}
             
             if long_pct > long_crowded:
                 # 多头拥挤
@@ -907,6 +924,37 @@ class SignalEnhancer:
                     tags.append(ReasonTag.LIQUIDATION_CASCADE_RISK)
                     details['ls_signal'] = 'contrarian_long_opportunity'
                     signal_quality = 'strong'
+            
+            # P0-1: 多空比趋势分析（新增）
+            if ls_trend is not None:
+                ls_trend_threshold = self.thresholds.get('ls_trend_accelerating_threshold', 2.0)
+                ls_trend_boost = self.thresholds.get('ls_trend_accelerating_boost', 5)
+                ls_trend_penalty = self.thresholds.get('ls_trend_reversal_penalty', -6)
+                
+                # 多头快速增加（趋势加速）
+                if ls_trend > ls_trend_threshold:
+                    details['ls_trend_status'] = 'long_accelerating'
+                    if decision == Decision.LONG:
+                        # 趋势加速时做多 → 惩罚（拥挤加剧）
+                        confidence_boost += ls_trend_penalty
+                        details['ls_trend_signal'] = 'crowding_accelerating_penalty'
+                        logger.debug(f"LS trend accelerating (LONG): trend={ls_trend:.2f}%, penalty={ls_trend_penalty}")
+                    elif decision == Decision.SHORT:
+                        # 趋势加速时做空 → 逆向机会加分
+                        confidence_boost += ls_trend_boost
+                        details['ls_trend_signal'] = 'contrarian_opportunity_boost'
+                
+                # 多头快速减少（空头趋势）
+                elif ls_trend < -ls_trend_threshold:
+                    details['ls_trend_status'] = 'short_accelerating'
+                    if decision == Decision.SHORT:
+                        # 空头趋势加速时做空 → 惩罚（拥挤加剧）
+                        confidence_boost += ls_trend_penalty
+                        details['ls_trend_signal'] = 'crowding_accelerating_penalty'
+                    elif decision == Decision.LONG:
+                        # 空头趋势加速时做多 → 逆向机会加分
+                        confidence_boost += ls_trend_boost
+                        details['ls_trend_signal'] = 'contrarian_opportunity_boost'
         
         details['confidence_boost'] = confidence_boost
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
@@ -918,12 +966,16 @@ class SignalEnhancer:
         decision: Decision
     ) -> EnhancementResult:
         """
-        评估Coinglass OI和费率历史数据
+        评估Coinglass OI和费率历史数据（P0-1增强：趋势确认）
         
         逻辑：
         - OI激增 + 趋势方向 → 加分
         - OI下降 → 趋势可能终结
+        - OI趋势确认 → 额外加分（P0-1新增）
+        - 4h OI变化分析（P0-1新增）
+        - 费率趋势分析（P0-1新增）
         - 费率极高 + 顺势 → 惩罚（拥挤风险）
+        - 费率接近历史极值 → 反转警告（P0-1新增）
         
         Args:
             oi_history: OI历史数据
@@ -942,11 +994,18 @@ class SignalEnhancer:
         oi_drop = self.thresholds.get('cg_oi_drop_threshold', -0.02)
         oi_boost = self.thresholds.get('cg_oi_boost', 5)
         
-        # 1. OI变化分析
+        # P0-1: 新增阈值
+        oi_trend_boost = self.thresholds.get('oi_trend_confirm_boost', 4)
+        oi_4h_surge = self.thresholds.get('oi_4h_surge_threshold', 0.05)
+        oi_4h_drop = self.thresholds.get('oi_4h_drop_threshold', -0.03)
+        oi_4h_boost = self.thresholds.get('oi_4h_boost', 4)
+        
+        # 1. OI变化分析（增强版）
         if oi_history:
             oi_change = oi_history.get('oi_change_1h')
+            oi_change_4h = oi_history.get('oi_change_4h')  # P0-1: 获取4h变化
             oi_trend = oi_history.get('trend', 'stable')
-            details['oi'] = {'change_1h': oi_change, 'trend': oi_trend}
+            details['oi'] = {'change_1h': oi_change, 'change_4h': oi_change_4h, 'trend': oi_trend}
             
             if oi_change is not None:
                 if oi_change > oi_surge:
@@ -963,12 +1022,44 @@ class SignalEnhancer:
                     confidence_boost -= 3
                     details['oi_signal'] = 'oi_drop_trend_exhaustion'
                     signal_quality = 'weak'
+            
+            # P0-1: OI趋势确认
+            if oi_trend == 'increasing' and oi_change and oi_change > 0.02:
+                # 趋势加速 + OI激增 → 强信号
+                confidence_boost += oi_trend_boost
+                details['oi_trend_signal'] = 'trend_accelerating_confirm'
+                logger.debug(f"OI trend confirming: trend={oi_trend}, change_1h={oi_change:.2%}")
+            elif oi_trend == 'decreasing' and oi_change and oi_change < -0.015:
+                # 趋势减速 + OI下降 → 趋势终结警告
+                confidence_boost -= 4
+                details['oi_trend_signal'] = 'trend_exhaustion_warning'
+            
+            # P0-1: 4h OI变化分析（中期趋势确认）
+            if oi_change_4h is not None:
+                if oi_change_4h > oi_4h_surge:
+                    # 4h OI激增 → 中期趋势强
+                    confidence_boost += oi_4h_boost
+                    details['oi_4h_signal'] = 'medium_term_surge'
+                    logger.debug(f"4h OI surge: {oi_change_4h:.2%}")
+                elif oi_change_4h < oi_4h_drop:
+                    # 4h OI下降 → 中期趋势弱
+                    confidence_boost -= 3
+                    details['oi_4h_signal'] = 'medium_term_drop'
         
-        # 2. 费率历史分析
+        # 2. 费率历史分析（增强版：趋势和极值）
         if funding_history:
             current_rate = funding_history.get('current_rate', 0)
             fr_sentiment = funding_history.get('sentiment', 'neutral')
-            details['funding'] = {'rate': current_rate, 'sentiment': fr_sentiment}
+            fr_trend = funding_history.get('trend')  # P0-1: 获取费率趋势
+            max_rate = funding_history.get('max_rate')
+            min_rate = funding_history.get('min_rate')
+            details['funding'] = {
+                'rate': current_rate, 
+                'sentiment': fr_sentiment, 
+                'trend': fr_trend,
+                'max_rate': max_rate,
+                'min_rate': min_rate
+            }
             
             # 费率极端时的拥挤警告
             if fr_sentiment == 'extremely_bullish' and decision == Decision.LONG:
@@ -977,6 +1068,52 @@ class SignalEnhancer:
             elif fr_sentiment == 'extremely_bearish' and decision == Decision.SHORT:
                 confidence_boost -= 5
                 details['funding_signal'] = 'extreme_bearish_crowded'
+            
+            # P0-1: 费率趋势分析
+            fr_trend_boost = self.thresholds.get('funding_trend_reversal_boost', 8)
+            if fr_trend:
+                details['funding_trend_status'] = fr_trend
+                
+                # 费率加速 + 极端情绪 → 反转风险
+                if fr_trend == 'increasing' and fr_sentiment in ['extremely_bullish', 'bullish']:
+                    if decision == Decision.LONG:
+                        # 做多时费率加速上升 → 拥挤加剧
+                        confidence_boost -= 4
+                        details['funding_trend_signal'] = 'crowding_accelerating'
+                    elif decision == Decision.SHORT:
+                        # 做空时费率加速上升 → 反转机会
+                        confidence_boost += fr_trend_boost
+                        details['funding_trend_signal'] = 'reversal_opportunity'
+                        logger.info(f"Funding trend reversal signal (SHORT): rate={current_rate:.4f}, trend={fr_trend}")
+                
+                elif fr_trend == 'decreasing' and fr_sentiment in ['extremely_bearish', 'bearish']:
+                    if decision == Decision.SHORT:
+                        # 做空时费率加速下降 → 拥挤加剧
+                        confidence_boost -= 4
+                        details['funding_trend_signal'] = 'crowding_accelerating'
+                    elif decision == Decision.LONG:
+                        # 做多时费率加速下降 → 反转机会
+                        confidence_boost += fr_trend_boost
+                        details['funding_trend_signal'] = 'reversal_opportunity'
+                        logger.info(f"Funding trend reversal signal (LONG): rate={current_rate:.4f}, trend={fr_trend}")
+            
+            # P0-1: 费率接近历史极值分析
+            extreme_threshold = self.thresholds.get('funding_extreme_vs_max_threshold', 0.9)
+            extreme_penalty = self.thresholds.get('funding_near_extreme_penalty', -6)
+            
+            if max_rate and current_rate > 0 and current_rate >= max_rate * extreme_threshold:
+                # 接近历史最高费率 → 反转风险
+                details['funding_extreme_signal'] = 'near_historical_max'
+                if decision == Decision.LONG:
+                    confidence_boost += extreme_penalty
+                    logger.debug(f"Funding near max: current={current_rate:.4f}, max={max_rate:.4f}")
+            
+            elif min_rate and current_rate < 0 and current_rate <= min_rate * extreme_threshold:
+                # 接近历史最低费率 → 反转风险
+                details['funding_extreme_signal'] = 'near_historical_min'
+                if decision == Decision.SHORT:
+                    confidence_boost += extreme_penalty
+                    logger.debug(f"Funding near min: current={current_rate:.4f}, min={min_rate:.4f}")
         
         details['confidence_boost'] = confidence_boost
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
@@ -1253,6 +1390,100 @@ class SignalEnhancer:
             all_details.get('market_sentiment', {}).get('confidence_boost', 0) if isinstance(all_details.get('market_sentiment'), dict) else 0,
         ])
         all_details['coinglass_contribution'] = cg_boost
+        
+        # ========================================
+        # P0-2: SHORT信号质量加强（多条件确认）
+        # ========================================
+        if decision == Decision.SHORT:
+            short_confirms = []
+            short_warnings = []
+            
+            # 检查各维度确认条件
+            # 1. 费率确认：正费率（多头付费）支持做空
+            if funding_rate is not None and funding_rate > 0.0003:
+                short_confirms.append('funding_positive')
+            elif funding_rate is not None and funding_rate < -0.0005:
+                short_warnings.append('funding_negative')  # 负费率做空有风险
+            
+            # 2. OI确认：OI下降或稳定支持做空
+            if oi_change_1h is not None:
+                if oi_change_1h < -0.01:
+                    short_confirms.append('oi_declining')
+                elif oi_change_1h > 0.03:
+                    short_warnings.append('oi_surging')  # OI激增时做空风险大
+            
+            # 3. 价格趋势确认：价格下跌支持做空
+            if price_change_1h is not None and price_change_1h < -0.005:
+                short_confirms.append('price_declining')
+            elif price_change_1h is not None and price_change_1h > 0.02:
+                short_warnings.append('price_surging')
+            
+            # 4. 多空比确认：多头拥挤支持做空
+            if cg_long_short_ratio:
+                long_pct = cg_long_short_ratio.get('long_percent', 50)
+                if long_pct > 60:
+                    short_confirms.append('long_crowded')
+                elif long_pct < 40:
+                    short_warnings.append('short_crowded')
+            
+            # 5. 大户确认：大户偏空支持做空
+            if top_long_ratio is not None:
+                if top_long_ratio < 0.45:
+                    short_confirms.append('top_trader_short')
+                elif top_long_ratio > 0.60:
+                    short_warnings.append('top_trader_long')
+            
+            # 6. 费率趋势确认
+            if cg_funding_history:
+                fr_trend = cg_funding_history.get('trend')
+                if fr_trend == 'increasing':
+                    short_confirms.append('funding_trend_up')
+            
+            # 计算确认强度
+            confirm_count = len(short_confirms)
+            warning_count = len(short_warnings)
+            
+            all_details['short_confirmation'] = {
+                'confirms': short_confirms,
+                'warnings': short_warnings,
+                'confirm_count': confirm_count,
+                'warning_count': warning_count
+            }
+            
+            # 根据确认数量调整加分
+            multi_confirm_bonus = self.thresholds.get('short_multi_confirm_bonus', 8)
+            weak_confirm_penalty = self.thresholds.get('short_weak_confirm_penalty', -5)
+            
+            if confirm_count >= 4 and warning_count == 0:
+                # 强确认：4+维度确认且无警告
+                total_boost += multi_confirm_bonus
+                all_details['short_quality'] = 'strong_multi_confirm'
+                signal_quality = 'strong'
+                logger.info(f"SHORT strong confirmation: {confirm_count} confirms, boost=+{multi_confirm_bonus}")
+            elif confirm_count >= 3 and warning_count <= 1:
+                # 中等确认
+                total_boost += multi_confirm_bonus // 2
+                all_details['short_quality'] = 'moderate_confirm'
+            elif confirm_count <= 1 and warning_count >= 2:
+                # 弱确认：确认少且警告多
+                total_boost += weak_confirm_penalty
+                all_details['short_quality'] = 'weak_confirm'
+                signal_quality = 'weak'
+                logger.info(f"SHORT weak confirmation: {confirm_count} confirms, {warning_count} warnings, penalty={weak_confirm_penalty}")
+            elif warning_count > confirm_count:
+                # 警告多于确认
+                total_boost += weak_confirm_penalty // 2
+                all_details['short_quality'] = 'risky'
+        
+        # 更新最终信号质量
+        if total_boost >= 20:
+            signal_quality = 'strong'
+        elif total_boost >= 10:
+            signal_quality = 'moderate'
+        elif total_boost <= -10:
+            signal_quality = 'weak'
+        
+        all_details['final_total_boost'] = total_boost
         
         return EnhancementResult(all_tags, total_boost, signal_quality, all_details)
 
