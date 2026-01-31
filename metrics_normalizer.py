@@ -98,7 +98,8 @@ class MetricsNormalizer:
     RANGE_LIMITS = {
         'price_change_5m': 1.0,     # 5分钟 ±100%（硬限制）
         'price_change_15m': 2.0,    # 15分钟 ±200%（硬限制）
-        'price_change_1h': 5.0,     # 1小时 ±500%（硬限制）
+        # P0-BugFix-1: 1h需要允许到±1000%（固化测试覆盖到999%）
+        'price_change_1h': 10.0,    # 1小时 ±1000%（硬限制）
         'price_change_6h': 10.0,    # 6小时 ±1000%（硬限制）
         'oi_change_15m': 5.0,       # 15分钟 ±500%（硬限制）
         'oi_change_1h': 10.0,       # 1小时 ±1000%（硬限制）
