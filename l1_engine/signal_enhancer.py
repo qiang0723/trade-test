@@ -113,6 +113,19 @@ class SignalEnhancer:
         # P0-2: SHORT信号质量加强
         'short_multi_confirm_bonus': 8,          # SHORT多条件确认加分
         'short_weak_confirm_penalty': -5,        # SHORT弱确认惩罚
+        
+        # 短期-1: CVD（累计成交量差）
+        'cvd_strong_threshold': 1000,            # 强CVD阈值（根据币种调整）
+        'cvd_weak_threshold': 100,               # 弱CVD阈值
+        'cvd_confirm_boost': 8,                  # CVD趋势确认加分
+        'cvd_divergence_boost': 10,              # CVD背离加分
+        'cvd_conflict_penalty': -6,              # CVD冲突惩罚
+        
+        # 短期-3: 波动率自适应
+        'high_vol_signal_multiplier': 0.7,       # 高波动时信号权重降低
+        'low_vol_signal_multiplier': 1.3,        # 低波动时信号权重提高
+        'high_vol_threshold_multiplier': 1.5,    # 高波动时阈值放宽
+        'low_vol_threshold_multiplier': 0.8,     # 低波动时阈值收紧
     }
     
     def __init__(self, thresholds: Dict = None):
@@ -755,6 +768,169 @@ class SignalEnhancer:
         return EnhancementResult(tags, confidence_boost, signal_quality, details)
     
     # ========================================
+    # 短期-1: CVD（累计成交量差）评估
+    # ========================================
+    
+    def eval_cvd(
+        self,
+        cvd_5m: Optional[float],
+        cvd_15m: Optional[float],
+        cvd_1h: Optional[float],
+        cvd_trend: Optional[str],
+        price_change_1h: Optional[float],
+        decision: Decision
+    ) -> EnhancementResult:
+        """
+        评估CVD（Cumulative Volume Delta）信号
+        
+        CVD是真实买卖压力的直接度量：
+        - CVD > 0：净买入压力（看涨）
+        - CVD < 0：净卖出压力（看跌）
+        
+        核心逻辑：
+        1. CVD趋势确认：CVD方向与决策一致 → 加分
+        2. CVD背离：价格与CVD方向相反 → 反转信号
+        3. CVD冲突：CVD方向与决策相反 → 警告
+        
+        Args:
+            cvd_5m: 5分钟CVD
+            cvd_15m: 15分钟CVD
+            cvd_1h: 1小时CVD
+            cvd_trend: CVD趋势 ('bullish'/'bearish'/'neutral')
+            price_change_1h: 1小时价格变化
+            decision: 当前决策方向
+        
+        Returns:
+            EnhancementResult
+        """
+        tags = []
+        confidence_boost = 0
+        signal_quality = 'neutral'
+        details = {'cvd_5m': cvd_5m, 'cvd_15m': cvd_15m, 'cvd_1h': cvd_1h, 'cvd_trend': cvd_trend}
+        
+        if cvd_1h is None or decision == Decision.NO_TRADE:
+            return EnhancementResult(tags, confidence_boost, signal_quality, details)
+        
+        confirm_boost = self.thresholds.get('cvd_confirm_boost', 8)
+        divergence_boost = self.thresholds.get('cvd_divergence_boost', 10)
+        conflict_penalty = self.thresholds.get('cvd_conflict_penalty', -6)
+        
+        # 1. CVD趋势确认
+        if cvd_trend == 'bullish' and decision == Decision.LONG:
+            # CVD看涨 + 做多 = 趋势确认
+            confidence_boost += confirm_boost
+            signal_quality = 'strong'
+            details['cvd_signal'] = 'bullish_confirm'
+            logger.debug(f"CVD bullish confirm: cvd_1h={cvd_1h:.2f}, boost=+{confirm_boost}")
+        
+        elif cvd_trend == 'bearish' and decision == Decision.SHORT:
+            # CVD看跌 + 做空 = 趋势确认
+            confidence_boost += confirm_boost
+            signal_quality = 'strong'
+            details['cvd_signal'] = 'bearish_confirm'
+            logger.debug(f"CVD bearish confirm: cvd_1h={cvd_1h:.2f}, boost=+{confirm_boost}")
+        
+        # 2. CVD背离（价格与CVD方向相反）- 反转信号
+        if price_change_1h is not None:
+            # 价格上涨但CVD下降 = 看跌背离
+            if price_change_1h > 0.01 and cvd_1h < 0:
+                details['cvd_divergence'] = 'bearish_divergence'
+                if decision == Decision.SHORT:
+                    confidence_boost += divergence_boost
+                    signal_quality = 'strong'
+                    logger.info(f"CVD bearish divergence: price={price_change_1h:.2%}, cvd={cvd_1h:.2f}")
+            
+            # 价格下跌但CVD上升 = 看涨背离
+            elif price_change_1h < -0.01 and cvd_1h > 0:
+                details['cvd_divergence'] = 'bullish_divergence'
+                if decision == Decision.LONG:
+                    confidence_boost += divergence_boost
+                    signal_quality = 'strong'
+                    logger.info(f"CVD bullish divergence: price={price_change_1h:.2%}, cvd={cvd_1h:.2f}")
+        
+        # 3. CVD冲突
+        if cvd_trend == 'bullish' and decision == Decision.SHORT:
+            confidence_boost += conflict_penalty
+            signal_quality = 'weak'
+            details['cvd_signal'] = 'cvd_conflict_short'
+        
+        elif cvd_trend == 'bearish' and decision == Decision.LONG:
+            confidence_boost += conflict_penalty
+            signal_quality = 'weak'
+            details['cvd_signal'] = 'cvd_conflict_long'
+        
+        details['confidence_boost'] = confidence_boost
+        return EnhancementResult(tags, confidence_boost, signal_quality, details)
+    
+    # ========================================
+    # 短期-3: 波动率自适应调整
+    # ========================================
+    
+    def apply_volatility_adjustment(
+        self,
+        base_boost: int,
+        volatility_regime: Optional[str]
+    ) -> int:
+        """
+        根据波动率区间调整信号强度
+        
+        高波动时：信号更不可靠，降低权重
+        低波动时：信号更可靠，提高权重
+        
+        Args:
+            base_boost: 原始加分
+            volatility_regime: 波动率区间 ('high'/'normal'/'low')
+        
+        Returns:
+            调整后的加分
+        """
+        if volatility_regime is None:
+            return base_boost
+        
+        high_multiplier = self.thresholds.get('high_vol_signal_multiplier', 0.7)
+        low_multiplier = self.thresholds.get('low_vol_signal_multiplier', 1.3)
+        
+        if volatility_regime == 'high':
+            # 高波动：降低信号权重
+            return int(base_boost * high_multiplier)
+        elif volatility_regime == 'low':
+            # 低波动：提高信号权重
+            return int(base_boost * low_multiplier)
+        else:
+            return base_boost
+    
+    def get_dynamic_threshold(
+        self,
+        base_threshold: float,
+        volatility_regime: Optional[str]
+    ) -> float:
+        """
+        根据波动率动态调整阈值
+        
+        高波动时：阈值放宽（更难触发信号）
+        低波动时：阈值收紧（更容易触发信号）
+        
+        Args:
+            base_threshold: 基础阈值
+            volatility_regime: 波动率区间
+        
+        Returns:
+            调整后的阈值
+        """
+        if volatility_regime is None:
+            return base_threshold
+        
+        high_multiplier = self.thresholds.get('high_vol_threshold_multiplier', 1.5)
+        low_multiplier = self.thresholds.get('low_vol_threshold_multiplier', 0.8)
+        
+        if volatility_regime == 'high':
+            return base_threshold * high_multiplier
+        elif volatility_regime == 'low':
+            return base_threshold * low_multiplier
+        else:
+            return base_threshold
+    
+    # ========================================
     # Coinglass数据融合评估
     # ========================================
     
@@ -1245,10 +1421,17 @@ class SignalEnhancer:
         cg_oi_history: Optional[Dict] = None,
         cg_funding_history: Optional[Dict] = None,
         # 市场整体情绪（新增：充分利用API配额）
-        market_sentiment: Optional[Dict] = None
+        market_sentiment: Optional[Dict] = None,
+        # 短期-1: CVD数据
+        cvd_5m: Optional[float] = None,
+        cvd_15m: Optional[float] = None,
+        cvd_1h: Optional[float] = None,
+        cvd_trend: Optional[str] = None,
+        # 短期-3: 波动率数据
+        volatility_regime: Optional[str] = None
     ) -> EnhancementResult:
         """
-        综合评估所有增强信号（含Coinglass数据融合 + 市场整体情绪）
+        综合评估所有增强信号（含Coinglass数据融合 + 市场整体情绪 + CVD + 波动率自适应）
         
         Args:
             funding_rate: 资金费率
@@ -1261,6 +1444,9 @@ class SignalEnhancer:
             price_change_24h: 24小时价格变化（P0-1新增）
             volume_ratio_1h: 1小时成交量比率（P0-4新增）
             cg_liquidation_summary: Coinglass清算汇总（新增）
+            cvd_5m/15m/1h: CVD数据（短期-1新增）
+            cvd_trend: CVD趋势（短期-1新增）
+            volatility_regime: 波动率区间（短期-3新增）
             cg_fear_greed: Coinglass恐惧贪婪指数（新增）
             cg_long_short_ratio: Coinglass多空比（新增）
             cg_oi_history: Coinglass OI历史（新增）
@@ -1349,6 +1535,26 @@ class SignalEnhancer:
             all_tags.extend(cg_oi_result.tags)
             total_boost += cg_oi_result.confidence_boost
             all_details['cg_oi'] = cg_oi_result.details
+        
+        # ========================================
+        # 短期-1: CVD（累计成交量差）评估
+        # ========================================
+        if cvd_1h is not None:
+            cvd_result = self.eval_cvd(
+                cvd_5m, cvd_15m, cvd_1h, cvd_trend,
+                price_change_1h, decision
+            )
+            all_tags.extend(cvd_result.tags)
+            cvd_boost = cvd_result.confidence_boost
+            # 短期-3: 应用波动率调整
+            cvd_boost = self.apply_volatility_adjustment(cvd_boost, volatility_regime)
+            total_boost += cvd_boost
+            all_details['cvd'] = cvd_result.details
+            all_details['cvd']['adjusted_boost'] = cvd_boost
+        
+        # 短期-3: 记录波动率状态
+        if volatility_regime:
+            all_details['volatility_regime'] = volatility_regime
         
         # 综合信号质量
         if total_boost >= 20:

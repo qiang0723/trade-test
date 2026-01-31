@@ -346,6 +346,17 @@ class DecisionCore:
             # 成交量
             if mf.volume:
                 metrics['volume_ratio_1h'] = round(mf.volume.volume_ratio_1h, 2) if mf.volume.volume_ratio_1h else None
+            
+            # 短期-1: CVD指标
+            if mf.cvd:
+                metrics['cvd_5m'] = round(mf.cvd.cvd_5m, 2) if mf.cvd.cvd_5m else None
+                metrics['cvd_1h'] = round(mf.cvd.cvd_1h, 2) if mf.cvd.cvd_1h else None
+                metrics['cvd_trend'] = mf.cvd.cvd_trend
+            
+            # 短期-3: 波动率指标
+            if mf.volatility:
+                metrics['atr_percent'] = round(mf.volatility.atr_percent, 2) if mf.volatility.atr_percent else None
+                metrics['volatility_regime'] = mf.volatility.volatility_regime
                 
         except Exception as e:
             logger.warning(f"Error extracting key metrics: {e}")
@@ -1212,10 +1223,19 @@ class DecisionCore:
         price_change_24h = features.features.price.price_change_24h if features.features.price else None
         volume_ratio_1h = features.features.volume.volume_ratio_1h if features.features.volume else None
         
+        # 短期-1: 获取CVD数据
+        cvd_5m = features.features.cvd.cvd_5m if features.features.cvd else None
+        cvd_15m = features.features.cvd.cvd_15m if features.features.cvd else None
+        cvd_1h = features.features.cvd.cvd_1h if features.features.cvd else None
+        cvd_trend = features.features.cvd.cvd_trend if features.features.cvd else None
+        
+        # 短期-3: 获取波动率数据
+        volatility_regime = features.features.volatility.volatility_regime if features.features.volatility else None
+        
         # Coinglass数据获取（通过桥接模块）
         cg_data, market_sentiment = DecisionCore._fetch_coinglass_data(features, cg_cfg)
         
-        # 综合评估（含Coinglass数据融合）
+        # 综合评估（含Coinglass数据融合 + CVD + 波动率自适应）
         result = enhancer.evaluate_all(
             funding_rate=funding_rate,
             price_change_1h=price_change_1h,
@@ -1234,7 +1254,14 @@ class DecisionCore:
             cg_long_short_ratio=cg_data.get('long_short_ratio'),
             cg_oi_history=cg_data.get('oi_history'),
             cg_funding_history=cg_data.get('funding_history'),
-            market_sentiment=market_sentiment
+            market_sentiment=market_sentiment,
+            # 短期-1: CVD数据
+            cvd_5m=cvd_5m,
+            cvd_15m=cvd_15m,
+            cvd_1h=cvd_1h,
+            cvd_trend=cvd_trend,
+            # 短期-3: 波动率数据
+            volatility_regime=volatility_regime
         )
         
         if result.tags:

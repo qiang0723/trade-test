@@ -92,6 +92,23 @@ class TopTraderFeatures:
 
 
 @dataclass
+class CVDFeatures:
+    """CVD（累计成交量差）特征（短期-1优化）"""
+    cvd_5m: Optional[float] = None               # 5分钟CVD
+    cvd_15m: Optional[float] = None              # 15分钟CVD
+    cvd_1h: Optional[float] = None               # 1小时CVD
+    cvd_trend: Optional[str] = None              # CVD趋势 ('bullish'/'bearish'/'neutral')
+
+
+@dataclass
+class VolatilityFeatures:
+    """波动率特征（短期-3优化）"""
+    atr: Optional[float] = None                  # ATR值
+    atr_percent: Optional[float] = None          # ATR占价格百分比
+    volatility_regime: Optional[str] = None      # 波动率区间 ('high'/'normal'/'low')
+
+
+@dataclass
 class MarketFeatures:
     """市场特征集合（包含所有特征子集）"""
     price: PriceFeatures = field(default_factory=PriceFeatures)
@@ -100,6 +117,8 @@ class MarketFeatures:
     volume: VolumeFeatures = field(default_factory=VolumeFeatures)
     funding: FundingFeatures = field(default_factory=FundingFeatures)
     top_trader: TopTraderFeatures = field(default_factory=TopTraderFeatures)  # Phase 2: 大户多空比
+    cvd: CVDFeatures = field(default_factory=CVDFeatures)  # 短期-1: CVD指标
+    volatility: VolatilityFeatures = field(default_factory=VolatilityFeatures)  # 短期-3: 波动率
     
     def to_flat_dict(self) -> Dict[str, Optional[float]]:
         """

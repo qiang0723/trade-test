@@ -95,6 +95,9 @@ class BinanceDataFetcher:
             volume_data = self._calculate_volume_from_klines(klines)
             imbalance_data = self._calculate_imbalance_from_klines(klines)  # PR-002
             
+            # 短期-3: 计算ATR（波动率自适应）
+            atr_data = self._calculate_atr_from_klines(klines)
+            
             # 提取基础数据（PR-001重构）
             current_data = {
                 'price': float(ticker['lastPrice']),
@@ -112,6 +115,15 @@ class BinanceDataFetcher:
                 'taker_imbalance_5m': imbalance_data.get('taker_imbalance_5m'),
                 'taker_imbalance_15m': imbalance_data.get('taker_imbalance_15m'),
                 'taker_imbalance_1h': imbalance_data.get('taker_imbalance_1h'),
+                # 短期-1: CVD指标（累计成交量差）
+                'cvd_5m': imbalance_data.get('cvd_5m'),
+                'cvd_15m': imbalance_data.get('cvd_15m'),
+                'cvd_1h': imbalance_data.get('cvd_1h'),
+                'cvd_trend': imbalance_data.get('cvd_trend'),
+                # 短期-3: ATR和波动率
+                'atr': atr_data.get('atr'),
+                'atr_percent': atr_data.get('atr_percent'),
+                'volatility_regime': atr_data.get('volatility_regime'),
             }
             
             # PR-003: 检查数据完整性
@@ -261,10 +273,18 @@ class BinanceDataFetcher:
             taker_imbalance_15m = calc_imbalance(klines[-15:]) if len(klines) >= 15 else None
             taker_imbalance_1h = calc_imbalance(klines[-60:]) if len(klines) >= 60 else None
             
+            # 短期-1: CVD（累计成交量差）计算
+            cvd_data = self._calculate_cvd_from_klines(klines)
+            
             return {
                 'taker_imbalance_5m': taker_imbalance_5m,
                 'taker_imbalance_15m': taker_imbalance_15m,
-                'taker_imbalance_1h': taker_imbalance_1h
+                'taker_imbalance_1h': taker_imbalance_1h,
+                # 短期-1: CVD指标
+                'cvd_5m': cvd_data.get('cvd_5m'),
+                'cvd_15m': cvd_data.get('cvd_15m'),
+                'cvd_1h': cvd_data.get('cvd_1h'),
+                'cvd_trend': cvd_data.get('cvd_trend'),
             }
         
         except Exception as e:
@@ -274,6 +294,130 @@ class BinanceDataFetcher:
                 'taker_imbalance_15m': None,
                 'taker_imbalance_1h': None
             }
+    
+    def _calculate_cvd_from_klines(self, klines: list) -> dict:
+        """
+        短期-1: 从1分钟K线计算CVD（Cumulative Volume Delta）
+        
+        CVD = 累计(主动买入量 - 主动卖出量)
+        用于判断真实的买卖压力方向
+        
+        Args:
+            klines: 1分钟K线数据列表
+                索引5: volume（总成交量）
+                索引9: takerBuyBaseAssetVolume（主动买入量）
+        
+        Returns:
+            dict: {
+                'cvd_5m': 5分钟CVD,
+                'cvd_15m': 15分钟CVD,
+                'cvd_1h': 1小时CVD,
+                'cvd_trend': 'bullish'/'bearish'/'neutral'
+            }
+        """
+        if not klines or len(klines) < 5:
+            return {'cvd_5m': None, 'cvd_15m': None, 'cvd_1h': None, 'cvd_trend': None}
+        
+        try:
+            def calc_cvd(window_klines):
+                """计算窗口内的CVD"""
+                if not window_klines:
+                    return None
+                cvd = 0.0
+                for k in window_klines:
+                    taker_buy = float(k[9])  # takerBuyBaseAssetVolume
+                    total = float(k[5])      # volume
+                    taker_sell = total - taker_buy
+                    cvd += (taker_buy - taker_sell)  # 买-卖
+                return cvd
+            
+            cvd_5m = calc_cvd(klines[-5:]) if len(klines) >= 5 else None
+            cvd_15m = calc_cvd(klines[-15:]) if len(klines) >= 15 else None
+            cvd_1h = calc_cvd(klines[-60:]) if len(klines) >= 60 else None
+            
+            # 判断CVD趋势
+            cvd_trend = None
+            if cvd_1h is not None and cvd_5m is not None:
+                # 短期和长期CVD同向 = 趋势确认
+                if cvd_1h > 0 and cvd_5m > 0:
+                    cvd_trend = 'bullish'
+                elif cvd_1h < 0 and cvd_5m < 0:
+                    cvd_trend = 'bearish'
+                else:
+                    cvd_trend = 'neutral'
+            
+            return {
+                'cvd_5m': cvd_5m,
+                'cvd_15m': cvd_15m,
+                'cvd_1h': cvd_1h,
+                'cvd_trend': cvd_trend
+            }
+        
+        except Exception as e:
+            logger.error(f"Error calculating CVD from klines: {e}")
+            return {'cvd_5m': None, 'cvd_15m': None, 'cvd_1h': None, 'cvd_trend': None}
+    
+    def _calculate_atr_from_klines(self, klines: list, period: int = 14) -> dict:
+        """
+        短期-3: 从K线计算ATR（Average True Range）
+        
+        用于波动率自适应调整信号强度
+        
+        Args:
+            klines: K线数据列表
+                索引1: open, 索引2: high, 索引3: low, 索引4: close
+            period: ATR周期（默认14）
+        
+        Returns:
+            dict: {
+                'atr': ATR值,
+                'atr_percent': ATR占价格百分比,
+                'volatility_regime': 'high'/'normal'/'low'
+            }
+        """
+        if not klines or len(klines) < period + 1:
+            return {'atr': None, 'atr_percent': None, 'volatility_regime': None}
+        
+        try:
+            true_ranges = []
+            for i in range(1, len(klines)):
+                high = float(klines[i][2])
+                low = float(klines[i][3])
+                prev_close = float(klines[i-1][4])
+                
+                # True Range = max(H-L, |H-PC|, |L-PC|)
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+                true_ranges.append(tr)
+            
+            # 取最近period个TR的平均
+            if len(true_ranges) >= period:
+                atr = sum(true_ranges[-period:]) / period
+            else:
+                atr = sum(true_ranges) / len(true_ranges) if true_ranges else None
+            
+            # 计算ATR百分比
+            current_price = float(klines[-1][4])
+            atr_percent = (atr / current_price * 100) if atr and current_price > 0 else None
+            
+            # 判断波动率区间
+            volatility_regime = None
+            if atr_percent is not None:
+                if atr_percent > 3.0:      # ATR > 3% = 高波动
+                    volatility_regime = 'high'
+                elif atr_percent > 1.0:    # ATR 1-3% = 正常
+                    volatility_regime = 'normal'
+                else:                       # ATR < 1% = 低波动
+                    volatility_regime = 'low'
+            
+            return {
+                'atr': atr,
+                'atr_percent': atr_percent,
+                'volatility_regime': volatility_regime
+            }
+        
+        except Exception as e:
+            logger.error(f"Error calculating ATR from klines: {e}")
+            return {'atr': None, 'atr_percent': None, 'volatility_regime': None}
     
     def fetch_spot_data(self, symbol: str) -> Optional[dict]:
         """

@@ -413,12 +413,27 @@ class FeatureBuilder:
         )
         
         # Phase 2: Top Trader features (大户多空比)
-        from models.feature_snapshot import TopTraderFeatures
+        from models.feature_snapshot import TopTraderFeatures, CVDFeatures, VolatilityFeatures
         top_trader_features = TopTraderFeatures(
             top_long_ratio=normalized_data.get('top_long_ratio'),
             top_short_ratio=normalized_data.get('top_short_ratio'),
             retail_long_ratio=normalized_data.get('retail_long_ratio'),
             retail_short_ratio=normalized_data.get('retail_short_ratio')
+        )
+        
+        # 短期-1: CVD特征
+        cvd_features = CVDFeatures(
+            cvd_5m=normalized_data.get('cvd_5m'),
+            cvd_15m=normalized_data.get('cvd_15m'),
+            cvd_1h=normalized_data.get('cvd_1h'),
+            cvd_trend=normalized_data.get('cvd_trend')
+        )
+        
+        # 短期-3: 波动率特征
+        volatility_features = VolatilityFeatures(
+            atr=normalized_data.get('atr'),
+            atr_percent=normalized_data.get('atr_percent'),
+            volatility_regime=normalized_data.get('volatility_regime')
         )
         
         return MarketFeatures(
@@ -427,7 +442,9 @@ class FeatureBuilder:
             taker_imbalance=taker_features,
             volume=volume_features,
             funding=funding_features,
-            top_trader=top_trader_features
+            top_trader=top_trader_features,
+            cvd=cvd_features,
+            volatility=volatility_features
         )
     
     def _extract_coverage(

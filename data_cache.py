@@ -703,6 +703,15 @@ class MarketDataCache:
             'taker_imbalance_5m': current_data.get('taker_imbalance_5m'),
             'taker_imbalance_15m': current_data.get('taker_imbalance_15m'),
             'taker_imbalance_1h': current_data.get('taker_imbalance_1h'),
+            # 短期-1: CVD指标（累计成交量差）
+            'cvd_5m': current_data.get('cvd_5m'),
+            'cvd_15m': current_data.get('cvd_15m'),
+            'cvd_1h': current_data.get('cvd_1h'),
+            'cvd_trend': current_data.get('cvd_trend'),
+            # 短期-3: 波动率指标
+            'atr': current_data.get('atr'),
+            'atr_percent': current_data.get('atr_percent'),
+            'volatility_regime': current_data.get('volatility_regime'),
             # PR-M (方案B): 元数据标注 - 声明百分比字段的输出格式
             '_metadata': {
                 'percentage_format': 'percent_point',  # 百分比字段为 percent-point 格式（已乘100）
